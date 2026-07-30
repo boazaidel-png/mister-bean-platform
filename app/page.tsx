@@ -294,7 +294,7 @@ function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>
   const submit=(event:FormEvent)=>{event.preventDefault();void onEmail(email,password);};
   return <div className="login" dir="rtl"><div className="login-panel">
     <div className="login-brand"><span className="brand-mark large"><Coffee size={26}/></span><div><h1>Mister Bean</h1><p>מערכת ניהול ושירות לקוחות</p></div></div>
-    <div className="login-copy auth-copy"><span className="eyebrow">מערכת השירות של Mister Bean</span><h2>כניסה למערכת</h2><p>התחברו באמצעות כתובת הדוא״ל והסיסמה שלכם.</p></div>
+    <div className="login-copy auth-copy"><h2>כניסה למערכת</h2></div>
     <form className="auth-form" onSubmit={submit}>
       <label><span>כתובת דוא״ל</span><input type="email" value={email} onChange={event=>setEmail(event.target.value)} required autoComplete="email" placeholder="name@company.co.il"/></label>
       <label><span>סיסמה</span><input type="password" value={password} onChange={event=>setPassword(event.target.value)} required autoComplete="current-password" placeholder="••••••••"/></label>
@@ -304,8 +304,7 @@ function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>
       <div className="auth-divider"><span>או</span></div>
       <button className="google-login" type="button" disabled={busy} onClick={()=>void onGoogle()}><b>G</b> כניסה באמצעות Google</button>
     </form>
-    <div className="login-trust"><ShieldCheck size={16}/><span>כניסה מאובטחת והרשאות לפי תפקיד</span></div>
-  </div><div className="login-side"><div className="coffee-orbit"><span></span><i></i></div><div className="login-showcase"><span className="eyebrow-light">MISTER BEAN</span><h3>שירות, לקוחות<br/>ותפעול במקום אחד.</h3><div className="pulse-card"><div><span className="pulse-icon"><Activity size={18}/></span><div><small>מדד שירות</small><strong>91%</strong></div></div><div className="pulse-bars">{[72,86,64,94,82,91,78].map((v,i)=><i key={i} style={{height:`${v}%`}}></i>)}</div></div><div className="side-stats"><div><strong>47</strong><span>מכונות פעילות</span></div><div><strong>4</strong><span>קריאות פתוחות</span></div><div><strong>753</strong><span>ק״ג החודש</span></div></div></div></div></div>;
+  </div></div>;
 }
 
 function LoadingScreen(){return <div className="loading-screen" dir="rtl"><span className="brand-mark large"><Coffee size={26}/></span><h1>Mister Bean</h1><p>מחברים את סביבת העבודה המאובטחת…</p><i/></div>}
