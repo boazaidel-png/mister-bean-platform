@@ -187,13 +187,13 @@ export default function Home() {
             if(!active)return;
             unsubscribeStore=subscribeToPlatformStore(
               nextProfile,
-              next=>{if(active){setStore(next);setStoreReady(true);}},
-              error=>{if(active)setSyncError(error.message);}
+              next=>{if(active){setStore(next);setStoreReady(true);setSyncError("");}},
+              error=>{if(active)setSyncError(firebaseMessage(error));}
             );
             if(nextProfile.role==="admin"){
               unsubscribeUsers=subscribeToUserProfiles(
-                next=>{if(active)setUsers(next);},
-                error=>{if(active)setSyncError(error.message);}
+                next=>{if(active){setUsers(next);setSyncError("");}},
+                error=>{if(active)setSyncError(firebaseMessage(error));}
               );
             }
           }
