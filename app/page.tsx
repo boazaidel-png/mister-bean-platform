@@ -288,11 +288,30 @@ export default function Home() {
   );
 }
 
+function CoffeeBotanical({className=""}:{className?:string}) {
+  return <svg className={`coffee-botanical ${className}`} viewBox="0 0 360 260" aria-hidden="true" focusable="false">
+    <path className="coffee-stem" d="M22 238C93 196 117 142 155 92C190 46 246 24 337 18"/>
+    <path className="coffee-stem fine" d="M113 153C86 130 63 107 48 73M174 70C157 48 145 29 141 8M226 40C246 69 269 88 305 98"/>
+    <ellipse className="coffee-leaf" cx="77" cy="120" rx="35" ry="15" transform="rotate(34 77 120)"/>
+    <ellipse className="coffee-leaf light" cx="124" cy="93" rx="37" ry="16" transform="rotate(-37 124 93)"/>
+    <ellipse className="coffee-leaf" cx="163" cy="51" rx="34" ry="14" transform="rotate(52 163 51)"/>
+    <ellipse className="coffee-leaf light" cx="230" cy="45" rx="38" ry="16" transform="rotate(-22 230 45)"/>
+    <ellipse className="coffee-leaf" cx="283" cy="76" rx="34" ry="14" transform="rotate(35 283 76)"/>
+    <g className="coffee-cherries">
+      <circle cx="152" cy="102" r="13"/><circle cx="177" cy="91" r="12"/><circle cx="178" cy="116" r="11"/>
+      <circle cx="215" cy="64" r="10"/><circle cx="235" cy="73" r="12"/>
+    </g>
+    <g className="coffee-highlights">
+      <circle cx="148" cy="98" r="3"/><circle cx="173" cy="87" r="2.7"/><circle cx="231" cy="69" r="2.5"/>
+    </g>
+  </svg>;
+}
+
 function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>;onEmail:(email:string,password:string)=>Promise<void>;onReset:(email:string)=>Promise<void>;busy:boolean;error:string}) {
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const submit=(event:FormEvent)=>{event.preventDefault();void onEmail(email,password);};
-  return <div className="login" dir="rtl"><div className="login-panel">
+  return <div className="login" dir="rtl"><CoffeeBotanical className="login-coffee-branch"/><div className="login-panel">
     <div className="login-brand"><span className="brand-mark large"><Coffee size={26}/></span><div><h1>Mister Bean</h1><p>מערכת ניהול ושירות לקוחות</p></div></div>
     <div className="login-copy auth-copy"><h2>כניסה למערכת</h2></div>
     <form className="auth-form" onSubmit={submit}>
@@ -355,7 +374,7 @@ function AdminDashboard({store,go,openCustomer,greeting,firstName}:{store:Store;
   const open=store.tickets.filter(t=>!closed(t.status)), urgent=open.filter(t=>t.urgency==="דחופה");
   const pending=store.orders.filter(o=>o.status==="ממתין לאישור");
   const risks=customers.filter(c=>riskReasons(c,store).length>0);
-  return <><section className="ops-hero"><div className="ops-copy"><span className="hero-kicker"><Activity size={15}/> תמונת מצב</span><h2>{greeting}, {firstName}</h2><div className="hero-actions"><button className="hero-primary" onClick={()=>go("tickets")}><Headphones size={17}/> קריאות שירות</button><button onClick={()=>go("tasks")}><CalendarDays size={17}/> משימות</button></div></div><div className="service-score"><div className="score-ring"><div><strong>91</strong><span>ציון שירות</span></div></div><div className="score-copy"><span>↑ 4.2% מהחודש שעבר</span><small>עמידה ביעדי SLA</small></div></div></section>
+  return <><section className="ops-hero"><CoffeeBotanical className="hero-coffee-branch"/><div className="ops-copy"><span className="hero-kicker"><Activity size={15}/> תמונת מצב</span><h2>{greeting}, {firstName}</h2><div className="hero-actions"><button className="hero-primary" onClick={()=>go("tickets")}><Headphones size={17}/> קריאות שירות</button><button onClick={()=>go("tasks")}><CalendarDays size={17}/> משימות</button></div></div><div className="service-score"><div className="score-ring"><div><strong>91</strong><span>ציון שירות</span></div></div><div className="score-copy"><span>↑ 4.2% מהחודש שעבר</span><small>עמידה ביעדי SLA</small></div></div></section>
     <SectionTitle title="סקירה"/>
     <div className="kpi-grid">
       <Kpi label="לקוחות פעילים" value={customers.filter(c=>c.status==="פעיל").length} meta="מתוך 8 לקוחות"/>
@@ -382,7 +401,7 @@ function CustomerDashboard({customer,store,go,openTicket,greeting}:{customer:Cus
   const ms=store.machines.filter(m=>m.accountId===customer.id), ts=store.tickets.filter(t=>t.accountId===customer.id&&!closed(t.status));
   const order=store.orders.find(o=>o.accountId===customer.id)!;
   const next=[...ms].sort((a,b)=>a.nextService.localeCompare(b.nextService))[0];
-  return <><div className="customer-hello"><div><span className="eyebrow">{greeting}, {customer.contactName.split(" ")[0]}</span><h2>{customer.name}</h2></div><Badge>{ts.some(t=>t.urgency==="דחופה")?"יש קריאה דחופה פתוחה":"הכל תקין"}</Badge></div>
+  return <><div className="customer-hello"><CoffeeBotanical className="customer-coffee-branch"/><div><span className="eyebrow">{greeting}, {customer.contactName.split(" ")[0]}</span><h2>{customer.name}</h2></div><Badge>{ts.some(t=>t.urgency==="דחופה")?"יש קריאה דחופה פתוחה":"הכל תקין"}</Badge></div>
     {order.status==="ממתין לעדכון לקוח"&&<div className="banner"><div><strong>הזמנת הקפה לחודש הבא ממתינה לעדכון</strong><span>אפשר לעדכן את הכמות והתערובת עד 5 באוגוסט.</span></div><button onClick={()=>go("orders")}>לעדכון ההזמנה</button></div>}
     <div className="kpi-grid customer-kpis"><Kpi label="מכונות פעילות" value={ms.filter(m=>m.status==="פעילה").length} meta={`מתוך ${ms.length} מכונות`}/><Kpi label="קריאות פתוחות" value={ts.length} meta={ts.length?"אנחנו מטפלים בזה":"אין קריאות פעילות"} tone={ts.length?"blue":"default"}/><Kpi label="הזמנה לחודש הבא" value={`${order.requestedKg} ק״ג`} meta={order.blend}/><Kpi label="הטיפול הבא" value={next?formatDate(next.nextService):"—"} meta={next?.model||"אין טיפול מתוכנן"}/></div>
     <SectionTitle title="פעולות מהירות"/><div className="quick-actions"><button className="primary" onClick={()=>openTicket()}>＋ פתיחת קריאת שירות</button><button onClick={()=>go("orders")}>♨ עדכון הזמנת קפה</button><button onClick={()=>go("machines")}>▣ המכונות שלי</button><a href="https://wa.me/97235555555?text=שלום%2C%20אני%20צריך%20עזרה%20בנושא%20שירות%20לקוחות%20%2F%20קפה%20%2F%20מכונה." target="_blank">◌ WhatsApp לשירות</a></div>
