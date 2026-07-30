@@ -68,6 +68,37 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /mail/{notificationId} {
+      allow create: if signedIn()
+        && notificationId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'to',
+          'replyTo',
+          'message',
+          'request',
+          'createdAt'
+        ])
+        && request.resource.data.to == ['boaz@pacifictrade.co']
+        && request.resource.data.replyTo == request.auth.token.email
+        && request.resource.data.message.keys().hasOnly(['subject', 'text'])
+        && request.resource.data.message.subject
+          == 'בקשת גישה חדשה למערכת מיסטר בין'
+        && request.resource.data.message.text is string
+        && request.resource.data.message.text.size() <= 1200
+        && request.resource.data.request.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName'
+        ])
+        && request.resource.data.request.uid == request.auth.uid
+        && request.resource.data.request.email == request.auth.token.email
+        && request.resource.data.request.displayName is string
+        && request.resource.data.createdAt is string;
+      allow read: if signedIn()
+        && (notificationId == request.auth.uid || isAdmin());
+      allow update, delete: if false;
+    }
+
     match /accounts/{accountId} {
       allow read: if isStaff() || belongsToAccount(accountId);
       allow write: if isStaff();
