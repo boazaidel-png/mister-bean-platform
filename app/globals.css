@@ -90,3 +90,72 @@ main{margin-right:272px}.topbar{height:86px;padding:0 32px;background:rgba(255,2
 .logout{grid-column:1/-1;width:100%;height:39px;margin:8px 0 0;padding:0 11px;border:1px solid rgba(255,255,255,.1);border-radius:9px;background:rgba(255,255,255,.045);color:#c7d9d2;display:flex;align-items:center;justify-content:flex-start;gap:8px;font-size:10px}
 .logout:hover{background:rgba(255,255,255,.09);color:#fff}
 .ops-copy h2{margin-bottom:0}
+
+/* Livelier visual system */
+body{background:
+  radial-gradient(circle at 83% 2%,rgba(107,174,148,.16),transparent 25%),
+  radial-gradient(circle at 8% 92%,rgba(233,207,160,.11),transparent 22%),
+  linear-gradient(145deg,#f1f7f4 0%,#f8faf9 48%,#f2f7f4 100%)}
+.app-shell{min-height:100vh}
+.app-shell:before{background-image:
+  linear-gradient(rgba(20,63,52,.022) 1px,transparent 1px),
+  linear-gradient(90deg,rgba(20,63,52,.022) 1px,transparent 1px);
+  mask-image:linear-gradient(to bottom,rgba(0,0,0,.7),transparent 78%)}
+.topbar{background:rgba(250,253,251,.88);border-bottom-color:rgba(185,211,200,.6);box-shadow:0 8px 30px rgba(19,70,53,.045)}
+.top-actions{margin-right:auto}
+.global-search{background:rgba(255,255,255,.82);border-color:#d5e4dd;box-shadow:inset 0 1px 0 rgba(255,255,255,.75)}
+.global-search:focus-within{border-color:#86b5a3;box-shadow:0 0 0 4px rgba(69,137,111,.08)}
+.content{background:
+  radial-gradient(circle at 88% 8%,rgba(104,174,148,.08),transparent 20%),
+  radial-gradient(circle at 12% 68%,rgba(232,203,151,.06),transparent 18%)}
+.panel,.kpi,.filters,.table-wrap,.customer-header,.info-card,.contact-card,.task-card,.access-summary>div{
+  border-color:#dce8e2;
+  box-shadow:0 9px 28px rgba(22,72,55,.055)}
+.panel,.table-wrap,.customer-header,.info-card,.contact-card,.access-summary>div{
+  background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(249,252,250,.96))}
+.kpi{background:
+  radial-gradient(circle at 7% 12%,rgba(92,161,135,.08),transparent 30%),
+  linear-gradient(145deg,#fff,#f8fbf9)}
+.kpi:after{background:rgba(75,147,119,.045)}
+.filters{background:rgba(255,255,255,.82);backdrop-filter:blur(12px)}
+.table-wrap th{background:#f1f7f4}
+.mobile-card{border-color:#dce8e2;box-shadow:0 8px 22px rgba(22,72,55,.05)}
+.customer-hello{background:
+  radial-gradient(circle at 7% 20%,rgba(222,188,127,.1),transparent 28%),
+  linear-gradient(120deg,#fff,#edf6f2)}
+.quick-actions button,.quick-actions a{background:linear-gradient(145deg,#fff,#f4f9f6);border-color:#d9e7e1}
+
+.login{position:relative;isolation:isolate;background:
+  radial-gradient(circle at 18% 14%,rgba(84,160,130,.24),transparent 31%),
+  radial-gradient(circle at 76% 88%,rgba(228,195,137,.14),transparent 26%),
+  linear-gradient(145deg,#e8f4ee 0%,#f5faf7 48%,#dcece4 100%)}
+.login:before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background-image:
+  linear-gradient(rgba(19,72,54,.028) 1px,transparent 1px),
+  linear-gradient(90deg,rgba(19,72,54,.028) 1px,transparent 1px);
+  background-size:42px 42px;mask-image:linear-gradient(90deg,#000,transparent 65%)}
+.login-panel{position:relative;background:
+  radial-gradient(circle at 12% 22%,rgba(255,255,255,.9),transparent 27%),
+  linear-gradient(145deg,rgba(235,247,241,.88),rgba(247,251,248,.9));
+  border-left:1px solid rgba(117,166,147,.2)}
+.login-brand .brand-mark{box-shadow:0 10px 26px rgba(24,76,58,.16)}
+.auth-copy .eyebrow{color:#397662;background:rgba(72,143,116,.09);padding:6px 10px;border-radius:99px}
+.auth-form{padding:24px;background:rgba(255,255,255,.76);border:1px solid rgba(169,202,188,.62);border-radius:18px;box-shadow:0 22px 55px rgba(22,73,55,.1);backdrop-filter:blur(14px)}
+.auth-form input{background:rgba(255,255,255,.94);border-color:#d3e2db}
+.auth-primary{background:linear-gradient(135deg,#1b5947,#2e7960);box-shadow:0 10px 25px rgba(20,79,60,.22)}
+.auth-primary:hover{background:linear-gradient(135deg,#174c3d,#256b54);transform:translateY(-1px)}
+.auth-divider span{background:rgba(255,255,255,.88)}
+.google-login{background:rgba(255,255,255,.92)}
+.login-side{background:
+  radial-gradient(circle at 25% 18%,rgba(241,212,162,.23),transparent 24%),
+  radial-gradient(circle at 88% 82%,rgba(99,185,151,.22),transparent 27%),
+  linear-gradient(145deg,#174f3f 0%,#0f3c31 53%,#0a2c24 100%)}
+.pulse-card{background:linear-gradient(145deg,rgba(255,255,255,.12),rgba(255,255,255,.055));box-shadow:0 22px 48px rgba(2,22,16,.2)}
+.pulse-bars i{background:linear-gradient(#a8dec9,#4f987c);box-shadow:0 -6px 18px rgba(117,196,164,.12)}
+.side-stats div{background:linear-gradient(145deg,rgba(255,255,255,.065),rgba(255,255,255,.025))}
+
+@media(max-width:760px){
+  .login-panel{border-left:0;background:
+    radial-gradient(circle at 15% 8%,rgba(91,166,137,.21),transparent 30%),
+    linear-gradient(160deg,rgba(238,248,243,.96),rgba(250,252,251,.97))}
+  .auth-form{padding:19px;border-radius:16px}
+}
