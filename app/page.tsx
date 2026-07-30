@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import {
   Activity,
-  Bell,
   Building2,
   CalendarDays,
   ChartNoAxesCombined,
@@ -19,7 +18,6 @@ import {
   MessageCircle,
   MonitorCog,
   Plus,
-  Search,
   ShieldCheck,
   UserCog,
   X,
@@ -222,7 +220,7 @@ export default function Home() {
   const scopedTickets = isStaff?store.tickets:store.tickets.filter(t=>t.accountId===clientId);
   const scopedOrders = isStaff?store.orders:store.orders.filter(o=>o.accountId===clientId);
   const nav = isStaff?adminNav.filter(item=>item.id!=="access"||role==="admin"):customerNav;
-  const firstName = (profile.displayName||profile.email).trim().split(/\s+/)[0];
+  const firstName = (profile?.displayName||profile?.email||"משתמש").trim().split(/\s+/)[0];
 
   const navigate=(next:View)=>{setView(next);setMobileOpen(false);};
   const allowWrite=()=>{if(readOnly){setToast("מצב התצוגה הוא לקריאה בלבד");return false;}return true;};
@@ -258,12 +256,10 @@ export default function Home() {
         <header className="topbar">
           <button className="menu" onClick={()=>setMobileOpen(v=>!v)} aria-label="פתיחת תפריט"><Menu size={23}/></button>
           <div className="page-heading"><span>{greeting}, {firstName}</span><h1>{nav.find(n=>n.id===view)?.label || (view==="customer"?"כרטיס לקוח":"מערכת שירות")}</h1></div>
-          <label className="global-search"><Search size={17}/><input placeholder="חיפוש לקוח, קריאה או מכונה..."/><kbd>⌘ K</kbd></label>
           <div className="top-actions">
             {!isStaff&&role==="multi"&&<select value={selectedCustomer} onChange={e=>setSelectedCustomer(e.target.value)}><option value="c1">Matrix — כל הסניפים</option></select>}
             {profile.role==="admin"&&!preview&&<button className="preview-button" onClick={()=>setPreviewOpen(true)}><Eye size={17}/> תצוגת מערכת</button>}
             {isStaff&&<button className="top-create" onClick={()=>openTicket()}><Plus size={17}/> קריאה חדשה</button>}
-            <button className="icon-btn" aria-label="התראות"><Bell size={18}/><span>3</span></button>
           </div>
         </header>
         <div className="content">
