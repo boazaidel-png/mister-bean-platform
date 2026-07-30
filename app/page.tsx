@@ -21,7 +21,6 @@ import {
   Plus,
   Search,
   ShieldCheck,
-  Sparkles,
   UserCog,
   X,
 } from "lucide-react";
@@ -114,6 +113,13 @@ const adminNav = [
 
 const customerName = (id:string) => customers.find(c=>c.id===id)?.name || "—";
 const formatDate = (v:string) => new Intl.DateTimeFormat("he-IL").format(new Date(v));
+const greetingForHour = (hour:number) => {
+  if(hour<5)return "לילה טוב";
+  if(hour<12)return "בוקר טוב";
+  if(hour<17)return "צהריים טובים";
+  if(hour<21)return "ערב טוב";
+  return "לילה טוב";
+};
 const statusTone = (s:string) => s.includes("דחופ")||s.includes("מושבת")||s==="בסיכון"?"red":s.includes("ממתין")||s.includes("בטיפול")?"blue":s.includes("אישור")||s.includes("חריג")||s.includes("דורשת")?"orange":s.includes("פעיל")||s.includes("אושר")||s.includes("בוצע")||s.includes("סופק")?"green":"gray";
 const closed = (s:string) => ["נסגרה","בוטלה"].includes(s);
 const slaBreached = (ticket: Ticket) => {
@@ -152,6 +158,7 @@ export default function Home() {
   const [selectedTicket,setSelectedTicket] = useState<string>("");
   const [toast,setToast] = useState("");
   const [mobileOpen,setMobileOpen] = useState(false);
+  const [greeting] = useState(()=>greetingForHour(new Date().getHours()));
 
   useEffect(()=>{
     let active=true;
@@ -215,6 +222,7 @@ export default function Home() {
   const scopedTickets = isStaff?store.tickets:store.tickets.filter(t=>t.accountId===clientId);
   const scopedOrders = isStaff?store.orders:store.orders.filter(o=>o.accountId===clientId);
   const nav = isStaff?adminNav.filter(item=>item.id!=="access"||role==="admin"):customerNav;
+  const firstName = (profile.displayName||profile.email).trim().split(/\s+/)[0];
 
   const navigate=(next:View)=>{setView(next);setMobileOpen(false);};
   const allowWrite=()=>{if(readOnly){setToast("מצב התצוגה הוא לקריאה בלבד");return false;}return true;};
@@ -237,21 +245,19 @@ export default function Home() {
     <div className={`app-shell ${preview?"previewing":""}`} dir="rtl">
       {preview&&<div className="preview-banner"><Eye size={17}/><span>מצב תצוגה: <strong>{roleNames[preview.role]}</strong>{!isStaff&&<> · {customerName(selectedCustomer)}</>}</span><b>קריאה בלבד</b><button onClick={leavePreview}><X size={16}/> חזרה לניהול</button></div>}
       <aside className={`sidebar ${mobileOpen?"open":""}`}>
-        <div className="brand"><span className="brand-mark"><Coffee size={21}/></span><div><strong>Mister Bean</strong><small>Customer Operations</small></div></div>
-        <button className="workspace-switcher"><span className="workspace-icon"><Sparkles size={16}/></span><span><small>סביבת עבודה</small><strong>{isStaff?"שירות ותפעול":"פורטל הלקוחות"}</strong></span><span className="live-dot">חי</span></button>
-        <span className="sidebar-label">מרכז עבודה</span>
+        <div className="brand"><span className="brand-mark"><Coffee size={21}/></span><div><strong>Mister Bean</strong><small>ניהול ושירות לקוחות</small></div></div>
+        <span className="sidebar-label">{isStaff?"ניהול ותפעול":"אזור הלקוח"}</span>
         <nav>{nav.map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><Icon size={18}/>{n.label}{n.id==="tickets"&&<b className="nav-count">{scopedTickets.filter(t=>!closed(t.status)).length}</b>}</button>})}</nav>
-        <div className="sidebar-status"><span><ShieldCheck size={16}/></span><div><strong>המערכת מסונכרנת</strong><small>נתונים מאובטחים בענן</small></div></div>
         <div className="sidebar-foot">
           <div className="avatar">{roleNames[role].slice(0,2)}</div>
           <div><strong>{preview?roleNames[role]:profile.displayName}</strong><small>{preview?"מצב תצוגה":profile.email}</small></div>
-          <button className="logout" onClick={()=>void signOutUser()} aria-label="התנתקות"><LogOut size={18}/></button>
+          <button className="logout" onClick={()=>void signOutUser()} aria-label="התנתקות"><LogOut size={17}/><span>התנתקות</span></button>
         </div>
       </aside>
       <main>
         <header className="topbar">
           <button className="menu" onClick={()=>setMobileOpen(v=>!v)} aria-label="פתיחת תפריט"><Menu size={23}/></button>
-          <div className="page-heading"><span>מרכז הלקוחות <b>/</b> {isStaff?"תפעול":"החשבון שלי"}</span><h1>{nav.find(n=>n.id===view)?.label || (view==="customer"?"כרטיס לקוח":"מערכת שירות")}</h1></div>
+          <div className="page-heading"><span>{greeting}, {firstName}</span><h1>{nav.find(n=>n.id===view)?.label || (view==="customer"?"כרטיס לקוח":"מערכת שירות")}</h1></div>
           <label className="global-search"><Search size={17}/><input placeholder="חיפוש לקוח, קריאה או מכונה..."/><kbd>⌘ K</kbd></label>
           <div className="top-actions">
             {!isStaff&&role==="multi"&&<select value={selectedCustomer} onChange={e=>setSelectedCustomer(e.target.value)}><option value="c1">Matrix — כל הסניפים</option></select>}
@@ -261,7 +267,7 @@ export default function Home() {
           </div>
         </header>
         <div className="content">
-          {view==="dashboard"&&(isStaff?<AdminDashboard store={store} go={navigate} openCustomer={openCustomer}/>:<CustomerDashboard customer={customers.find(c=>c.id===clientId)!} store={store} go={navigate} openTicket={openTicket}/>)}
+          {view==="dashboard"&&(isStaff?<AdminDashboard store={store} go={navigate} openCustomer={openCustomer} greeting={greeting} firstName={firstName}/>:<CustomerDashboard customer={customers.find(c=>c.id===clientId)!} store={store} go={navigate} openTicket={openTicket} greeting={greeting}/>)}
           {view==="customers"&&<Customers store={store} openCustomer={openCustomer} openTicket={openTicketForCustomer} openTask={openTaskForCustomer}/>}
           {view==="customer"&&<CustomerCard customer={customers.find(c=>c.id===selectedCustomer)!} store={store} openTicket={openTicket} openTask={()=>{if(allowWrite())setModal("task");}}/>}
           {view==="tickets"&&<Tickets tickets={scopedTickets} machines={store.machines} isStaff={isStaff} onUpdate={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===id?{...t,status,updatedAt:new Date().toISOString()}:t)}));setToast("סטטוס הקריאה עודכן");}} onOpen={id=>{setSelectedTicket(id);setModal("detail");}} onClose={id=>{if(!allowWrite())return;setSelectedTicket(id);setModal("close");}} openTicket={openTicket}/>}
@@ -291,8 +297,8 @@ function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>
   const [password,setPassword]=useState("");
   const submit=(event:FormEvent)=>{event.preventDefault();void onEmail(email,password);};
   return <div className="login" dir="rtl"><div className="login-panel">
-    <div className="login-brand"><span className="brand-mark large"><Coffee size={26}/></span><div><h1>Mister Bean</h1><p>Customer Operations</p></div></div>
-    <div className="login-copy auth-copy"><span className="eyebrow">כל פעילות הלקוח. תמונה אחת.</span><h2>ברוכים הבאים<br/>למרכז השירות.</h2><p>הכניסה מאובטחת ומותאמת אוטומטית להרשאות שלכם.</p></div>
+    <div className="login-brand"><span className="brand-mark large"><Coffee size={26}/></span><div><h1>Mister Bean</h1><p>מערכת ניהול ושירות לקוחות</p></div></div>
+    <div className="login-copy auth-copy"><span className="eyebrow">מערכת השירות של Mister Bean</span><h2>כניסה למערכת</h2><p>התחברו באמצעות כתובת הדוא״ל והסיסמה שלכם.</p></div>
     <form className="auth-form" onSubmit={submit}>
       <label><span>כתובת דוא״ל</span><input type="email" value={email} onChange={event=>setEmail(event.target.value)} required autoComplete="email" placeholder="name@company.co.il"/></label>
       <label><span>סיסמה</span><input type="password" value={password} onChange={event=>setPassword(event.target.value)} required autoComplete="current-password" placeholder="••••••••"/></label>
@@ -302,8 +308,8 @@ function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>
       <div className="auth-divider"><span>או</span></div>
       <button className="google-login" type="button" disabled={busy} onClick={()=>void onGoogle()}><b>G</b> כניסה באמצעות Google</button>
     </form>
-    <div className="login-trust"><ShieldCheck size={16}/><span>גישה מאובטחת · הרשאות לפי תפקיד · תיעוד פעילות</span></div>
-  </div><div className="login-side"><div className="coffee-orbit"><span></span><i></i></div><div className="login-showcase"><span className="eyebrow-light">OPERATIONS PULSE</span><h3>הבוקר מתחיל<br/>עם שליטה מלאה.</h3><div className="pulse-card"><div><span className="pulse-icon"><Activity size={18}/></span><div><small>בריאות השירות</small><strong>91%</strong></div></div><div className="pulse-bars">{[72,86,64,94,82,91,78].map((v,i)=><i key={i} style={{height:`${v}%`}}></i>)}</div></div><div className="side-stats"><div><strong>47</strong><span>מכונות פעילות</span></div><div><strong>4</strong><span>קריאות פתוחות</span></div><div><strong>753</strong><span>ק״ג החודש</span></div></div></div></div></div>;
+    <div className="login-trust"><ShieldCheck size={16}/><span>כניסה מאובטחת והרשאות לפי תפקיד</span></div>
+  </div><div className="login-side"><div className="coffee-orbit"><span></span><i></i></div><div className="login-showcase"><span className="eyebrow-light">MISTER BEAN</span><h3>שירות, לקוחות<br/>ותפעול במקום אחד.</h3><div className="pulse-card"><div><span className="pulse-icon"><Activity size={18}/></span><div><small>מדד שירות</small><strong>91%</strong></div></div><div className="pulse-bars">{[72,86,64,94,82,91,78].map((v,i)=><i key={i} style={{height:`${v}%`}}></i>)}</div></div><div className="side-stats"><div><strong>47</strong><span>מכונות פעילות</span></div><div><strong>4</strong><span>קריאות פתוחות</span></div><div><strong>753</strong><span>ק״ג החודש</span></div></div></div></div></div>;
 }
 
 function LoadingScreen(){return <div className="loading-screen" dir="rtl"><span className="brand-mark large"><Coffee size={26}/></span><h1>Mister Bean</h1><p>מחברים את סביבת העבודה המאובטחת…</p><i/></div>}
@@ -324,7 +330,7 @@ function PreviewModal({currentAccount,onClose,onEnter}:{currentAccount:string;on
 }
 
 function AccessManagement({users,readOnly,onSave,onPreview}:{users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
-  return <><SectionTitle title="ניהול והרשאות" sub="משתמשים, תפקידים ושיוך לחשבונות לקוח"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.length}</strong> משתמשים רשומים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(user=>user.role==="admin").length}</strong> מנהלי מערכת</span></div></div><section className="panel access-panel"><div className="access-head"><div><h3>משתמשי המערכת</h3><p>ההרשאה נקבעת כאן ואינה נבחרת במסך הכניסה.</p></div>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>עדיין אין משתמשים</strong><span>משתמשים חדשים יופיעו כאן לאחר הכניסה הראשונה.</span></div>}</div></section></>
+  return <><SectionTitle title="ניהול והרשאות"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.length}</strong> משתמשים רשומים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(user=>user.role==="admin").length}</strong> מנהלי מערכת</span></div></div><section className="panel access-panel"><div className="access-head"><h3>משתמשי המערכת</h3>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>אין משתמשים רשומים</strong></div>}</div></section></>
 }
 
 function UserAccessRow({user,readOnly,onSave,onPreview}:{user:UserProfile;readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
@@ -350,12 +356,12 @@ function firebaseMessage(error:unknown){
 function SectionTitle({title,sub,action}:{title:string;sub?:string;action?:React.ReactNode}) {return <div className="section-title"><div><h2>{title}</h2>{sub&&<p>{sub}</p>}</div>{action}</div>}
 function Kpi({label,value,meta,tone="default",onClick}:{label:string;value:string|number;meta:string;tone?:string;onClick?:()=>void}) {return <button className={`kpi ${tone}`} onClick={onClick}><span>{label}</span><strong>{value}</strong><small>{meta}</small></button>}
 
-function AdminDashboard({store,go,openCustomer}:{store:Store;go:(v:View)=>void;openCustomer:(id:string)=>void}) {
+function AdminDashboard({store,go,openCustomer,greeting,firstName}:{store:Store;go:(v:View)=>void;openCustomer:(id:string)=>void;greeting:string;firstName:string}) {
   const open=store.tickets.filter(t=>!closed(t.status)), urgent=open.filter(t=>t.urgency==="דחופה");
   const pending=store.orders.filter(o=>o.status==="ממתין לאישור");
   const risks=customers.filter(c=>riskReasons(c,store).length>0);
-  return <><section className="ops-hero"><div className="ops-copy"><span className="hero-kicker"><Activity size={15}/> תמונת מצב חיה</span><h2>בוקר טוב, צוות השירות.</h2><p>כל מה שדורש החלטה או פעולה מרוכז כאן — לפני שהוא הופך לבעיה.</p><div className="hero-actions"><button className="hero-primary" onClick={()=>go("tickets")}><Headphones size={17}/> מעבר לתור השירות</button><button onClick={()=>go("tasks")}><CalendarDays size={17}/> תכנון היום</button></div></div><div className="service-score"><div className="score-ring"><div><strong>91</strong><span>ציון שירות</span></div></div><div className="score-copy"><span>↑ 4.2% מהחודש שעבר</span><small>עמידה ביעדי SLA ושביעות רצון</small></div></div></section>
-    <SectionTitle title="המספרים שמניעים את היום" sub="מדדים מרכזיים בזמן אמת"/>
+  return <><section className="ops-hero"><div className="ops-copy"><span className="hero-kicker"><Activity size={15}/> תמונת מצב</span><h2>{greeting}, {firstName}</h2><div className="hero-actions"><button className="hero-primary" onClick={()=>go("tickets")}><Headphones size={17}/> קריאות שירות</button><button onClick={()=>go("tasks")}><CalendarDays size={17}/> משימות</button></div></div><div className="service-score"><div className="score-ring"><div><strong>91</strong><span>ציון שירות</span></div></div><div className="score-copy"><span>↑ 4.2% מהחודש שעבר</span><small>עמידה ביעדי SLA</small></div></div></section>
+    <SectionTitle title="סקירה"/>
     <div className="kpi-grid">
       <Kpi label="לקוחות פעילים" value={customers.filter(c=>c.status==="פעיל").length} meta="מתוך 8 לקוחות"/>
       <Kpi label="קריאות פתוחות" value={open.length} meta={`${open.filter(t=>t.status==="ממתין לטכנאי").length} ממתינות לטכנאי`} tone="blue" onClick={()=>go("tickets")}/>
@@ -377,11 +383,11 @@ function AdminDashboard({store,go,openCustomer}:{store:Store;go:(v:View)=>void;o
     </div></>;
 }
 
-function CustomerDashboard({customer,store,go,openTicket}:{customer:Customer;store:Store;go:(v:View)=>void;openTicket:(m?:string)=>void}) {
+function CustomerDashboard({customer,store,go,openTicket,greeting}:{customer:Customer;store:Store;go:(v:View)=>void;openTicket:(m?:string)=>void;greeting:string}) {
   const ms=store.machines.filter(m=>m.accountId===customer.id), ts=store.tickets.filter(t=>t.accountId===customer.id&&!closed(t.status));
   const order=store.orders.find(o=>o.accountId===customer.id)!;
   const next=[...ms].sort((a,b)=>a.nextService.localeCompare(b.nextService))[0];
-  return <><div className="customer-hello"><div><span className="eyebrow">שלום {customer.contactName.split(" ")[0]},</span><h2>{customer.name}</h2><p>כל מה שצריך לדעת על השירות והקפה שלכם.</p></div><Badge>{ts.some(t=>t.urgency==="דחופה")?"יש קריאה דחופה פתוחה":"הכל נראה תקין"}</Badge></div>
+  return <><div className="customer-hello"><div><span className="eyebrow">{greeting}, {customer.contactName.split(" ")[0]}</span><h2>{customer.name}</h2></div><Badge>{ts.some(t=>t.urgency==="דחופה")?"יש קריאה דחופה פתוחה":"הכל תקין"}</Badge></div>
     {order.status==="ממתין לעדכון לקוח"&&<div className="banner"><div><strong>הזמנת הקפה לחודש הבא ממתינה לעדכון</strong><span>אפשר לעדכן את הכמות והתערובת עד 5 באוגוסט.</span></div><button onClick={()=>go("orders")}>לעדכון ההזמנה</button></div>}
     <div className="kpi-grid customer-kpis"><Kpi label="מכונות פעילות" value={ms.filter(m=>m.status==="פעילה").length} meta={`מתוך ${ms.length} מכונות`}/><Kpi label="קריאות פתוחות" value={ts.length} meta={ts.length?"אנחנו מטפלים בזה":"אין קריאות פעילות"} tone={ts.length?"blue":"default"}/><Kpi label="הזמנה לחודש הבא" value={`${order.requestedKg} ק״ג`} meta={order.blend}/><Kpi label="הטיפול הבא" value={next?formatDate(next.nextService):"—"} meta={next?.model||"אין טיפול מתוכנן"}/></div>
     <SectionTitle title="פעולות מהירות"/><div className="quick-actions"><button className="primary" onClick={()=>openTicket()}>＋ פתיחת קריאת שירות</button><button onClick={()=>go("orders")}>♨ עדכון הזמנת קפה</button><button onClick={()=>go("machines")}>▣ המכונות שלי</button><a href="https://wa.me/97235555555?text=שלום%2C%20אני%20צריך%20עזרה%20בנושא%20שירות%20לקוחות%20%2F%20קפה%20%2F%20מכונה." target="_blank">◌ WhatsApp לשירות</a></div>
@@ -445,16 +451,16 @@ function OrderEditor({order,onSave}:{order:Order;onSave:(id:string,d:Partial<Ord
 }
 
 function Tasks({tasks,onCreate,onStatus}:{tasks:Task[];onCreate:()=>void;onStatus:(id:string,s:string)=>void}) {
-  return <><SectionTitle title="משימות" sub="לוח העבודה של הצוות" action={<button className="primary" onClick={onCreate}>＋ משימה חדשה</button>}/><div className="kanban">{["פתוחה","בטיפול","בוצעה"].map(col=><section key={col}><header><h3>{col}</h3><span>{tasks.filter(t=>t.status===col).length}</span></header>{tasks.filter(t=>t.status===col).map(t=><div className="task-card" key={t.id}><div><Badge>{t.priority}</Badge><span>{t.type}</span></div><h4>{t.title}</h4><p>{customerName(t.accountId)}</p><footer><span>{t.assignedTo}</span><time>{formatDate(t.dueDate)}</time></footer><select value={t.status} onChange={e=>onStatus(t.id,e.target.value)}><option>פתוחה</option><option>בטיפול</option><option>בוצעה</option><option>בוטלה</option></select></div>)}</section>)}</div></>
+  return <><SectionTitle title="משימות" action={<button className="primary" onClick={onCreate}>＋ משימה חדשה</button>}/><div className="kanban">{["פתוחה","בטיפול","בוצעה"].map(col=><section key={col}><header><h3>{col}</h3><span>{tasks.filter(t=>t.status===col).length}</span></header>{tasks.filter(t=>t.status===col).map(t=><div className="task-card" key={t.id}><div><Badge>{t.priority}</Badge><span>{t.type}</span></div><h4>{t.title}</h4><p>{customerName(t.accountId)}</p><footer><span>{t.assignedTo}</span><time>{formatDate(t.dueDate)}</time></footer><select value={t.status} onChange={e=>onStatus(t.id,e.target.value)}><option>פתוחה</option><option>בטיפול</option><option>בוצעה</option><option>בוטלה</option></select></div>)}</section>)}</div></>
 }
 
 function Reports({store}:{store:Store}) {
   const statuses=["פעילה","דורשת טיפול","מושבתת"], max=Math.max(...statuses.map(s=>store.machines.filter(m=>m.status===s).length));
-  return <><SectionTitle title="דוחות" sub="תמונת מצב שירות ותפעול"/><div className="report-grid"><section className="panel"><h3>קריאות לפי סטטוס</h3><div className="donut" style={{"--p":"62%"} as React.CSSProperties}><div><strong>{store.tickets.filter(t=>!closed(t.status)).length}</strong><span>פתוחות</span></div></div><div className="legend"><span><i className="blue-dot"/>פתוחות</span><span><i className="gray-dot"/>סגורות</span></div></section><section className="panel"><h3>מכונות לפי סטטוס</h3><div className="bars">{statuses.map(s=>{const n=store.machines.filter(m=>m.status===s).length;return <div key={s}><span>{s}</span><div><i style={{width:`${n/max*100}%`}}/></div><b>{n}</b></div>})}</div></section><section className="panel"><h3>מדדי שירות</h3><div className="metric-list"><div><span>זמן תגובה ממוצע</span><strong>1:42</strong><small>שעות</small></div><div><span>עמידה ב־SLA</span><strong>91%</strong><small>החודש</small></div><div><span>סגירה בביקור ראשון</span><strong>84%</strong><small>מכלל הקריאות</small></div></div></section><section className="panel"><h3>הזמנות קפה — 6 חודשים</h3><div className="line-bars">{[612,640,628,675,701,753].map((n,i)=><div key={n}><i style={{height:`${n/8}px`}}/><span>{["מרץ","אפר׳","מאי","יוני","יולי","אוג׳"][i]}</span></div>)}</div></section></div></>
+  return <><SectionTitle title="דוחות"/><div className="report-grid"><section className="panel"><h3>קריאות לפי סטטוס</h3><div className="donut" style={{"--p":"62%"} as React.CSSProperties}><div><strong>{store.tickets.filter(t=>!closed(t.status)).length}</strong><span>פתוחות</span></div></div><div className="legend"><span><i className="blue-dot"/>פתוחות</span><span><i className="gray-dot"/>סגורות</span></div></section><section className="panel"><h3>מכונות לפי סטטוס</h3><div className="bars">{statuses.map(s=>{const n=store.machines.filter(m=>m.status===s).length;return <div key={s}><span>{s}</span><div><i style={{width:`${n/max*100}%`}}/></div><b>{n}</b></div>})}</div></section><section className="panel"><h3>מדדי שירות</h3><div className="metric-list"><div><span>זמן תגובה ממוצע</span><strong>1:42</strong><small>שעות</small></div><div><span>עמידה ב־SLA</span><strong>91%</strong><small>החודש</small></div><div><span>סגירה בביקור ראשון</span><strong>84%</strong><small>מכלל הקריאות</small></div></div></section><section className="panel"><h3>הזמנות קפה — 6 חודשים</h3><div className="line-bars">{[612,640,628,675,701,753].map((n,i)=><div key={n}><i style={{height:`${n/8}px`}}/><span>{["מרץ","אפר׳","מאי","יוני","יולי","אוג׳"][i]}</span></div>)}</div></section></div></>
 }
 
-function Contract({customer,machines}:{customer:Customer;machines:Machine[]}) {return <><SectionTitle title="ההסכם שלי" sub="פרטי השירות והציוד שלכם"/><section className="panel contract"><div className="contract-head"><span className="contract-icon">▤</span><div><span>הסכם שירות פעיל</span><h2>{customer.name}</h2><Badge>{customer.serviceLevel}</Badge></div></div><dl><div><dt>תקופת השירות</dt><dd>01.04.2025 — {formatDate(customer.contractEnd)}</dd></div><div><dt>כמות חודשית מוסכמת</dt><dd>{customer.monthlyKg} ק״ג</dd></div><div><dt>תערובת קבועה</dt><dd>Mister Bean Premium</dd></div><div><dt>מכונות משויכות</dt><dd>{machines.length} פריטי ציוד</dd></div><div><dt>רמת שירות</dt><dd>{customer.serviceLevel}</dd></div><div><dt>אשת קשר לשירות</dt><dd>רוני · 03-555-5555</dd></div></dl><div className="terms"><h3>עיקרי השירות</h3><p>שירות ותיקונים למכונות המשויכות, טיפולים תקופתיים ואספקת קפה חודשית בהתאם להזמנה המעודכנת.</p></div></section></>}
-function Contact(){return <><SectionTitle title="יצירת קשר" sub="צוות השירות שלנו כאן בשבילכם"/><div className="contact-grid"><a className="contact-card whatsapp" href="https://wa.me/97235555555?text=שלום%2C%20אני%20צריך%20עזרה%20בנושא%20שירות%20לקוחות%20%2F%20קפה%20%2F%20מכונה." target="_blank"><span>◌</span><h3>WhatsApp לשירות</h3><p>תגובה מהירה בשעות הפעילות</p><b>פתיחת שיחה ←</b></a><a className="contact-card" href="tel:035555555"><span>☎</span><h3>טלפון שירות</h3><p>א׳–ה׳, 08:00–17:00</p><b>03-555-5555</b></a><a className="contact-card" href="mailto:service@misterbean.co.il"><span>＠</span><h3>דוא״ל</h3><p>לפניות שאינן דחופות</p><b>service@misterbean.co.il</b></a></div><section className="panel hours"><h3>שעות פעילות</h3><div><span>ימים א׳–ה׳</span><strong>08:00–17:00</strong></div><div><span>יום ו׳ וערבי חג</span><strong>08:00–12:00</strong></div><p>במקרה של תקלה דחופה מחוץ לשעות הפעילות, פתחו קריאה דחופה במערכת.</p></section></>}
+function Contract({customer,machines}:{customer:Customer;machines:Machine[]}) {return <><SectionTitle title="ההסכם שלי"/><section className="panel contract"><div className="contract-head"><span className="contract-icon">▤</span><div><span>הסכם שירות פעיל</span><h2>{customer.name}</h2><Badge>{customer.serviceLevel}</Badge></div></div><dl><div><dt>תקופת השירות</dt><dd>01.04.2025 — {formatDate(customer.contractEnd)}</dd></div><div><dt>כמות חודשית מוסכמת</dt><dd>{customer.monthlyKg} ק״ג</dd></div><div><dt>תערובת קבועה</dt><dd>Mister Bean Premium</dd></div><div><dt>מכונות משויכות</dt><dd>{machines.length} פריטי ציוד</dd></div><div><dt>רמת שירות</dt><dd>{customer.serviceLevel}</dd></div><div><dt>אשת קשר לשירות</dt><dd>רוני · 03-555-5555</dd></div></dl><div className="terms"><h3>עיקרי השירות</h3><p>שירות ותיקונים למכונות המשויכות, טיפולים תקופתיים ואספקת קפה חודשית בהתאם להזמנה המעודכנת.</p></div></section></>}
+function Contact(){return <><SectionTitle title="יצירת קשר"/><div className="contact-grid"><a className="contact-card whatsapp" href="https://wa.me/97235555555?text=שלום%2C%20אני%20צריך%20עזרה%20בנושא%20שירות%20לקוחות%20%2F%20קפה%20%2F%20מכונה." target="_blank"><span>◌</span><h3>WhatsApp לשירות</h3><p>בשעות הפעילות</p><b>פתיחת שיחה ←</b></a><a className="contact-card" href="tel:035555555"><span>☎</span><h3>טלפון שירות</h3><p>א׳–ה׳, 08:00–17:00</p><b>03-555-5555</b></a><a className="contact-card" href="mailto:service@misterbean.co.il"><span>＠</span><h3>דוא״ל</h3><b>service@misterbean.co.il</b></a></div><section className="panel hours"><h3>שעות פעילות</h3><div><span>ימים א׳–ה׳</span><strong>08:00–17:00</strong></div><div><span>יום ו׳ וערבי חג</span><strong>08:00–12:00</strong></div><p>לתקלה דחופה מחוץ לשעות הפעילות יש לפתוח קריאה במערכת.</p></section></>}
 
 function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><div className="modal"><header><h2>{title}</h2><button onClick={onClose}>×</button></header>{children}</div></div>}
 function TicketModal({accountId,allowAccountChange,preselectedMachine,machines,onClose,onSave}:{accountId:string;allowAccountChange:boolean;preselectedMachine:string;machines:Machine[];onClose:()=>void;onSave:(t:Ticket)=>void}) {
