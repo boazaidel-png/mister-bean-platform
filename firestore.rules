@@ -68,6 +68,24 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Staff dashboards use collection-group queries across every customer
+    // account. These explicit rules keep that access limited to active staff.
+    match /{path=**}/machines/{documentId} {
+      allow read: if isStaff();
+    }
+
+    match /{path=**}/tickets/{documentId} {
+      allow read: if isStaff();
+    }
+
+    match /{path=**}/orders/{documentId} {
+      allow read: if isStaff();
+    }
+
+    match /{path=**}/tasks/{documentId} {
+      allow read: if isStaff();
+    }
+
     match /accounts/{accountId} {
       allow read: if isStaff() || belongsToAccount(accountId);
       allow write: if isStaff();
