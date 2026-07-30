@@ -1,6 +1,26 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import {
+  Activity,
+  Bell,
+  Building2,
+  CalendarDays,
+  ChartNoAxesCombined,
+  Coffee,
+  FileText,
+  Headphones,
+  LayoutDashboard,
+  ListTodo,
+  LogOut,
+  Menu,
+  MessageCircle,
+  MonitorCog,
+  Plus,
+  Search,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import { platformRepository } from "@/lib/platform-repository";
 import type {
   Customer,
@@ -62,16 +82,16 @@ const taskSeed: Task[] = [
 const initialStore: Store = {tickets:ticketSeed,orders:orderSeed,tasks:taskSeed,machines:machineSeed};
 
 const roleNames: Record<Role,string> = {customer:"לקוח רגיל",multi:"מנהל לקוח מרובה סניפים",service:"נציג שירות",admin:"מנהל מערכת"};
-const customerNav: {id:View;label:string;icon:string}[] = [
-  {id:"dashboard",label:"דף הבית",icon:"⌂"},{id:"machines",label:"המכונות שלי",icon:"▣"},
-  {id:"tickets",label:"קריאות שירות",icon:"◉"},{id:"orders",label:"הזמנת קפה",icon:"♨"},
-  {id:"contract",label:"ההסכם שלי",icon:"▤"},{id:"contact",label:"יצירת קשר",icon:"◌"},
+const customerNav = [
+  {id:"dashboard" as View,label:"דף הבית",icon:LayoutDashboard},{id:"machines" as View,label:"המכונות שלי",icon:MonitorCog},
+  {id:"tickets" as View,label:"קריאות שירות",icon:Headphones},{id:"orders" as View,label:"הזמנת קפה",icon:Coffee},
+  {id:"contract" as View,label:"ההסכם שלי",icon:FileText},{id:"contact" as View,label:"יצירת קשר",icon:MessageCircle},
 ];
-const adminNav: {id:View;label:string;icon:string}[] = [
-  {id:"dashboard",label:"דשבורד",icon:"⌂"},{id:"customers",label:"לקוחות",icon:"◎"},
-  {id:"tickets",label:"קריאות שירות",icon:"◉"},{id:"orders",label:"הזמנות קפה",icon:"♨"},
-  {id:"machines",label:"מכונות",icon:"▣"},{id:"tasks",label:"משימות",icon:"✓"},
-  {id:"reports",label:"דוחות",icon:"▥"},
+const adminNav = [
+  {id:"dashboard" as View,label:"מרכז שליטה",icon:LayoutDashboard},{id:"customers" as View,label:"לקוחות",icon:Building2},
+  {id:"tickets" as View,label:"שירות ותקלות",icon:Headphones},{id:"orders" as View,label:"הזמנות קפה",icon:Coffee},
+  {id:"machines" as View,label:"צי מכונות",icon:MonitorCog},{id:"tasks" as View,label:"משימות צוות",icon:ListTodo},
+  {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},
 ];
 
 const customerName = (id:string) => customers.find(c=>c.id===id)?.name || "—";
@@ -137,21 +157,26 @@ export default function Home() {
   return (
     <div className="app-shell" dir="rtl">
       <aside className={`sidebar ${mobileOpen?"open":""}`}>
-        <div className="brand"><span className="brand-mark">MB</span><div><strong>Mister Bean</strong><small>Service Hub</small></div></div>
-        <nav>{nav.map(n=><button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><span>{n.icon}</span>{n.label}</button>)}</nav>
+        <div className="brand"><span className="brand-mark"><Coffee size={21}/></span><div><strong>Mister Bean</strong><small>Customer Operations</small></div></div>
+        <button className="workspace-switcher"><span className="workspace-icon"><Sparkles size={16}/></span><span><small>סביבת עבודה</small><strong>{isStaff?"שירות ותפעול":"פורטל הלקוחות"}</strong></span><span className="live-dot">חי</span></button>
+        <span className="sidebar-label">מרכז עבודה</span>
+        <nav>{nav.map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><Icon size={18}/>{n.label}{n.id==="tickets"&&<b className="nav-count">{scopedTickets.filter(t=>!closed(t.status)).length}</b>}</button>})}</nav>
+        <div className="sidebar-status"><span><ShieldCheck size={16}/></span><div><strong>המערכת מסונכרנת</strong><small>עדכון אחרון לפני דקה</small></div></div>
         <div className="sidebar-foot">
           <div className="avatar">{roleNames[role].slice(0,2)}</div>
           <div><strong>{roleNames[role]}</strong><small>{isStaff?"צוות Mister Bean":customerName(clientId)}</small></div>
-          <button className="logout" onClick={()=>setRole(null)} aria-label="התנתקות">↪</button>
+          <button className="logout" onClick={()=>setRole(null)} aria-label="התנתקות"><LogOut size={18}/></button>
         </div>
       </aside>
       <main>
         <header className="topbar">
-          <button className="menu" onClick={()=>setMobileOpen(v=>!v)}>☰</button>
-          <div><h1>{nav.find(n=>n.id===view)?.label || (view==="customer"?"כרטיס לקוח":"מערכת שירות")}</h1><p>{new Intl.DateTimeFormat("he-IL",{weekday:"long",day:"numeric",month:"long"}).format(new Date("2026-07-30"))}</p></div>
+          <button className="menu" onClick={()=>setMobileOpen(v=>!v)} aria-label="פתיחת תפריט"><Menu size={23}/></button>
+          <div className="page-heading"><span>מרכז הלקוחות <b>/</b> {isStaff?"תפעול":"החשבון שלי"}</span><h1>{nav.find(n=>n.id===view)?.label || (view==="customer"?"כרטיס לקוח":"מערכת שירות")}</h1></div>
+          <label className="global-search"><Search size={17}/><input placeholder="חיפוש לקוח, קריאה או מכונה..."/><kbd>⌘ K</kbd></label>
           <div className="top-actions">
             {!isStaff&&role==="multi"&&<select value={selectedCustomer} onChange={e=>setSelectedCustomer(e.target.value)}><option value="c1">Matrix — כל הסניפים</option></select>}
-            <button className="icon-btn" aria-label="התראות">●<span>3</span></button>
+            {isStaff&&<button className="top-create" onClick={()=>openTicket()}><Plus size={17}/> קריאה חדשה</button>}
+            <button className="icon-btn" aria-label="התראות"><Bell size={18}/><span>3</span></button>
           </div>
         </header>
         <div className="content">
@@ -167,7 +192,7 @@ export default function Home() {
           {view==="contact"&&<Contact/>}
         </div>
       </main>
-      <div className="mobile-nav">{nav.slice(0,5).map(n=><button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><span>{n.icon}</span>{n.label}</button>)}</div>
+      <div className="mobile-nav">{nav.slice(0,5).map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><Icon size={19}/>{n.label}</button>})}</div>
       {modal==="ticket"&&<TicketModal accountId={isStaff?selectedCustomer:clientId} allowAccountChange={isStaff} preselectedMachine={selectedTicket} machines={store.machines} onClose={()=>setModal(null)} onSave={ticket=>{setStore(s=>({...s,tickets:[ticket,...s.tickets]}));setModal(null);setView("tickets");setToast(`הקריאה ${ticket.id} נפתחה בהצלחה`);}}/>}
       {modal==="task"&&<TaskModal accountId={selectedCustomer} onClose={()=>setModal(null)} onSave={task=>{setStore(s=>({...s,tasks:[task,...s.tasks]}));setModal(null);setToast("המשימה נוצרה בהצלחה");}}/>}
       {modal==="close"&&<CloseModal onClose={()=>setModal(null)} onSave={reason=>{setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===selectedTicket?{...t,status:"נסגרה",closedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),closeReason:reason}:t)}));setModal(null);setToast("הקריאה נסגרה");}}/>}
@@ -178,18 +203,18 @@ export default function Home() {
 }
 
 function Login({onLogin}:{onLogin:(r:Role)=>void}) {
-  const roles:[Role,string,string,string][]=[
-    ["customer","לקוח רגיל","צפייה במכונות, קריאות והזמנות","א"],
-    ["multi","מנהל לקוח מרובה סניפים","ניהול שירות והזמנות לכל הסניפים","ב"],
-    ["service","נציג שירות","טיפול בלקוחות, קריאות ומשימות","ג"],
-    ["admin","מנהל מערכת","תמונה תפעולית מלאה ודוחות","ד"],
+  const roles:[Role,string,string,typeof Building2][]=[
+    ["customer","פורטל לקוח","מכונות, שירות והזמנות במקום אחד",Building2],
+    ["multi","לקוח מרובה סניפים","ניהול מלא של כל האתרים והצוותים",MonitorCog],
+    ["service","צוות שירות","תור קריאות, לקוחות ומשימות יומיות",Headphones],
+    ["admin","ניהול ותפעול","מרכז שליטה, מדדים והרשאות",ShieldCheck],
   ];
   return <div className="login" dir="rtl"><div className="login-panel">
-    <div className="login-brand"><span className="brand-mark large">MB</span><div><h1>Mister Bean</h1><p>Service Hub</p></div></div>
-    <div className="login-copy"><span className="eyebrow">סביבת הדגמה</span><h2>ניהול השירות, במקום אחד.</h2><p>בחרו תפקיד כדי להיכנס לסביבת העבודה המתאימה.</p></div>
-    <div className="role-grid">{roles.map(([id,title,desc,letter])=><button key={id} onClick={()=>onLogin(id)}><span className="role-icon">{letter}</span><div><strong>{title}</strong><small>{desc}</small></div><b>←</b></button>)}</div>
-    <p className="demo-note">המערכת פועלת עם נתוני הדגמה בלבד. השינויים נשמרים במכשיר זה.</p>
-  </div><div className="login-side"><div className="bean">●</div><div className="side-card"><span>תפעול הבוקר</span><strong>3 משימות לטיפול היום</strong><small>קריאה דחופה אחת · 3 הזמנות ממתינות</small></div></div></div>;
+    <div className="login-brand"><span className="brand-mark large"><Coffee size={26}/></span><div><h1>Mister Bean</h1><p>Customer Operations</p></div></div>
+    <div className="login-copy"><span className="eyebrow">כל פעילות הלקוח. תמונה אחת.</span><h2>שירות מדויק מתחיל<br/>במידע מחובר.</h2><p>היכנסו לסביבת העבודה הרלוונטית והמשיכו בדיוק מהמקום שבו עצרתם.</p></div>
+    <div className="role-grid">{roles.map(([id,title,desc,RoleIcon])=><button key={id} onClick={()=>onLogin(id)}><span className="role-icon"><RoleIcon size={20}/></span><div><strong>{title}</strong><small>{desc}</small></div><b>←</b></button>)}</div>
+    <div className="login-trust"><ShieldCheck size={16}/><span>גישה מאובטחת · הרשאות לפי תפקיד · תיעוד פעילות</span></div>
+  </div><div className="login-side"><div className="coffee-orbit"><span></span><i></i></div><div className="login-showcase"><span className="eyebrow-light">OPERATIONS PULSE</span><h3>הבוקר מתחיל<br/>עם שליטה מלאה.</h3><div className="pulse-card"><div><span className="pulse-icon"><Activity size={18}/></span><div><small>בריאות השירות</small><strong>91%</strong></div></div><div className="pulse-bars">{[72,86,64,94,82,91,78].map((v,i)=><i key={i} style={{height:`${v}%`}}></i>)}</div></div><div className="side-stats"><div><strong>47</strong><span>מכונות פעילות</span></div><div><strong>4</strong><span>קריאות פתוחות</span></div><div><strong>753</strong><span>ק״ג החודש</span></div></div></div></div></div>;
 }
 
 function SectionTitle({title,sub,action}:{title:string;sub?:string;action?:React.ReactNode}) {return <div className="section-title"><div><h2>{title}</h2>{sub&&<p>{sub}</p>}</div>{action}</div>}
@@ -199,7 +224,8 @@ function AdminDashboard({store,go,openCustomer}:{store:Store;go:(v:View)=>void;o
   const open=store.tickets.filter(t=>!closed(t.status)), urgent=open.filter(t=>t.urgency==="דחופה");
   const pending=store.orders.filter(o=>o.status==="ממתין לאישור");
   const risks=customers.filter(c=>riskReasons(c,store).length>0);
-  return <><SectionTitle title="בוקר טוב, צוות השירות" sub="הנה תמונת המצב התפעולית להיום"/>
+  return <><section className="ops-hero"><div className="ops-copy"><span className="hero-kicker"><Activity size={15}/> תמונת מצב חיה</span><h2>בוקר טוב, צוות השירות.</h2><p>כל מה שדורש החלטה או פעולה מרוכז כאן — לפני שהוא הופך לבעיה.</p><div className="hero-actions"><button className="hero-primary" onClick={()=>go("tickets")}><Headphones size={17}/> מעבר לתור השירות</button><button onClick={()=>go("tasks")}><CalendarDays size={17}/> תכנון היום</button></div></div><div className="service-score"><div className="score-ring"><div><strong>91</strong><span>ציון שירות</span></div></div><div className="score-copy"><span>↑ 4.2% מהחודש שעבר</span><small>עמידה ביעדי SLA ושביעות רצון</small></div></div></section>
+    <SectionTitle title="המספרים שמניעים את היום" sub="מדדים מרכזיים בזמן אמת"/>
     <div className="kpi-grid">
       <Kpi label="לקוחות פעילים" value={customers.filter(c=>c.status==="פעיל").length} meta="מתוך 8 לקוחות"/>
       <Kpi label="קריאות פתוחות" value={open.length} meta={`${open.filter(t=>t.status==="ממתין לטכנאי").length} ממתינות לטכנאי`} tone="blue" onClick={()=>go("tickets")}/>

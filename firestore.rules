@@ -1,0 +1,37 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isStaff() {
+      return signedIn() && userProfile().role in ['service', 'admin'];
+    }
+
+    function belongsToAccount(accountId) {
+      return signedIn() && accountId in userProfile().accountIds;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isStaff());
+      allow write: if isStaff();
+    }
+
+    match /accounts/{accountId} {
+      allow read: if isStaff() || belongsToAccount(accountId);
+      allow write: if isStaff();
+
+      match /{collection}/{documentId} {
+        allow read: if isStaff() || belongsToAccount(accountId);
+        allow create: if isStaff() || belongsToAccount(accountId);
+        allow update, delete: if isStaff();
+      }
+    }
+  }
+}

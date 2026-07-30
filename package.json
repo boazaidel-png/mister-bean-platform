@@ -9,6 +9,8 @@
     "lint": "eslint . --ignore-pattern .next --ignore-pattern dist --ignore-pattern .vinext"
   },
   "dependencies": {
+    "firebase": "^12.16.0",
+    "lucide-react": "^1.28.0",
     "next": "16.2.6",
     "react": "19.2.6",
     "react-dom": "19.2.6"
