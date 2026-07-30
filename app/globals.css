@@ -248,3 +248,52 @@ body{background:
   .login-copy.auth-copy h2{font-size:26px}
   .login .auth-form{padding:0}
 }
+
+/* Coffee botanical identity */
+.coffee-botanical{position:absolute;pointer-events:none;overflow:visible}
+.coffee-stem{fill:none;stroke:#b9dccb;stroke-width:3;stroke-linecap:round}
+.coffee-stem.fine{stroke-width:2;opacity:.78}
+.coffee-leaf{fill:#b9ddca;transform-box:fill-box;transform-origin:center}
+.coffee-leaf.light{fill:#d6ebdf}
+.coffee-cherries{fill:#a83d38}
+.coffee-highlights{fill:#efb1a7;opacity:.8}
+.login-panel{z-index:2}
+.login-coffee-branch{
+  width:min(520px,44vw);
+  left:-34px;
+  bottom:-35px;
+  z-index:1;
+  opacity:.78;
+  filter:drop-shadow(0 18px 30px rgba(3,46,33,.18));
+  transform:rotate(-4deg)}
+.login-coffee-branch .coffee-stem{stroke:rgba(195,231,214,.68)}
+.login-coffee-branch .coffee-leaf{fill:rgba(178,221,200,.62)}
+.login-coffee-branch .coffee-leaf.light{fill:rgba(216,239,227,.58)}
+.login-coffee-branch .coffee-cherries{fill:#b94740}
+.login-coffee-branch .coffee-highlights{fill:#f3b9af}
+.hero-coffee-branch{
+  width:315px;
+  left:-38px;
+  bottom:-71px;
+  z-index:0;
+  opacity:.25;
+  transform:rotate(-8deg)}
+.hero-coffee-branch .coffee-cherries{fill:#dc6b61;opacity:.95}
+.customer-hello{position:relative;overflow:hidden}
+.customer-hello>div,.customer-hello>.badge{position:relative;z-index:1}
+.customer-coffee-branch{
+  width:225px;
+  left:-24px;
+  bottom:-80px;
+  opacity:.16;
+  transform:rotate(-8deg)}
+.customer-coffee-branch .coffee-stem{stroke:#4f8b73}
+.customer-coffee-branch .coffee-leaf{fill:#6da38d}
+.customer-coffee-branch .coffee-leaf.light{fill:#9ec5b4}
+.customer-coffee-branch .coffee-cherries{fill:#a83d38;opacity:.9}
+
+@media(max-width:760px){
+  .login-coffee-branch{width:330px;left:-115px;bottom:-25px;opacity:.48}
+  .hero-coffee-branch{width:245px;left:-78px;bottom:-55px;opacity:.18}
+  .customer-coffee-branch{width:180px;left:-70px;bottom:-68px;opacity:.12}
+}
