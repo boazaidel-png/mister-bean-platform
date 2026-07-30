@@ -36,7 +36,10 @@ import type {
   UserProfile,
 } from "./platform-types";
 
-const BOOTSTRAP_ADMIN_EMAIL = "boazaidel@gmail.com";
+const BOOTSTRAP_ADMIN_EMAILS = new Set([
+  "boazaidel@gmail.com",
+  "boaz@pacifictrade.co",
+]);
 const entityKeys = ["tickets", "orders", "tasks", "machines"] as const;
 type EntityKey = (typeof entityKeys)[number];
 type Entity = Ticket | Order | Task | Machine;
@@ -84,13 +87,28 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
   const { db } = getFirebaseServices();
   const profileRef = doc(db, "users", user.uid);
   const existing = await getDoc(profileRef);
+  const email = normalizeEmail(user.email);
+  const isBootstrapAdmin = BOOTSTRAP_ADMIN_EMAILS.has(email);
 
   if (existing.exists()) {
-    return existing.data() as UserProfile;
+    const profile = existing.data() as UserProfile;
+    if (
+      isBootstrapAdmin &&
+      (profile.role !== "admin" || profile.status !== "active")
+    ) {
+      const upgradedProfile: UserProfile = {
+        ...profile,
+        email,
+        role: "admin",
+        status: "active",
+        accountIds: [],
+      };
+      await setDoc(profileRef, upgradedProfile);
+      return upgradedProfile;
+    }
+    return profile;
   }
 
-  const email = normalizeEmail(user.email);
-  const isBootstrapAdmin = email === BOOTSTRAP_ADMIN_EMAIL;
   const profile: UserProfile = {
     uid: user.uid,
     email,

@@ -44,7 +44,10 @@ service cloud.firestore {
         ])
         && (
           (
-            request.auth.token.email == 'boazaidel@gmail.com'
+            request.auth.token.email in [
+              'boazaidel@gmail.com',
+              'boaz@pacifictrade.co'
+            ]
             && request.resource.data.role == 'admin'
             && request.resource.data.status == 'active'
             && request.resource.data.accountIds.size() == 0
@@ -61,7 +64,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isStaff());
       allow create: if validSelfRegistration(userId);
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin() || validSelfRegistration(userId);
+      allow delete: if isAdmin();
     }
 
     match /accounts/{accountId} {
