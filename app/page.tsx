@@ -8,10 +8,12 @@ import {
   CalendarDays,
   ChartNoAxesCombined,
   Coffee,
+  Eye,
   FileText,
   Headphones,
   LayoutDashboard,
   ListTodo,
+  LockKeyhole,
   LogOut,
   Menu,
   MessageCircle,
@@ -20,16 +22,32 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  UserCog,
+  X,
 } from "lucide-react";
-import { platformRepository } from "@/lib/platform-repository";
+import {
+  getOrCreateUserProfile,
+  observeAuth,
+  resetPassword,
+  savePlatformStore,
+  seedWorkspaceIfEmpty,
+  signInWithEmail,
+  signInWithGoogle,
+  signOutUser,
+  subscribeToPlatformStore,
+  subscribeToUserProfiles,
+  updateUserAccess,
+} from "@/lib/firebase-platform";
 import type {
   Customer,
   Machine,
   Order,
   PlatformStore as Store,
+  PreviewContext,
   Role,
   Task,
   Ticket,
+  UserProfile,
   View,
 } from "@/lib/platform-types";
 
@@ -91,7 +109,7 @@ const adminNav = [
   {id:"dashboard" as View,label:"מרכז שליטה",icon:LayoutDashboard},{id:"customers" as View,label:"לקוחות",icon:Building2},
   {id:"tickets" as View,label:"שירות ותקלות",icon:Headphones},{id:"orders" as View,label:"הזמנות קפה",icon:Coffee},
   {id:"machines" as View,label:"צי מכונות",icon:MonitorCog},{id:"tasks" as View,label:"משימות צוות",icon:ListTodo},
-  {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},
+  {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},{id:"access" as View,label:"ניהול והרשאות",icon:UserCog},
 ];
 
 const customerName = (id:string) => customers.find(c=>c.id===id)?.name || "—";
@@ -118,10 +136,17 @@ const riskReasons = (customer: Customer, store: Store) => {
 function Badge({children}:{children:string}) { return <span className={`badge ${statusTone(children)}`}>{children}</span>; }
 
 export default function Home() {
-  const [role,setRole] = useState<Role|null>(null);
+  const [profile,setProfile] = useState<UserProfile|null>(null);
+  const [preview,setPreview] = useState<PreviewContext|null>(null);
+  const [previewOpen,setPreviewOpen] = useState(false);
   const [view,setView] = useState<View>("dashboard");
   const [store,setStore] = useState<Store>(initialStore);
   const [storeReady,setStoreReady] = useState(false);
+  const [authReady,setAuthReady] = useState(false);
+  const [authBusy,setAuthBusy] = useState(false);
+  const [authError,setAuthError] = useState("");
+  const [syncError,setSyncError] = useState("");
+  const [users,setUsers] = useState<UserProfile[]>([]);
   const [selectedCustomer,setSelectedCustomer] = useState("c1");
   const [modal,setModal] = useState<null|"ticket"|"task"|"close"|"detail">(null);
   const [selectedTicket,setSelectedTicket] = useState<string>("");
@@ -129,43 +154,98 @@ export default function Home() {
   const [mobileOpen,setMobileOpen] = useState(false);
 
   useEffect(()=>{
-    const timer=window.setTimeout(()=>{
-      setStore(platformRepository.load(initialStore));
-      setStoreReady(true);
-    },0);
-    return()=>window.clearTimeout(timer);
+    let active=true;
+    let unsubscribeStore:()=>void=()=>{};
+    let unsubscribeUsers:()=>void=()=>{};
+    const unsubscribeAuth=observeAuth(user=>{
+      unsubscribeStore();
+      unsubscribeUsers();
+      setStoreReady(false);
+      setSyncError("");
+      setAuthReady(false);
+      if(!user){
+        if(active){
+          setProfile(null);
+          setPreview(null);
+          setAuthReady(true);
+        }
+        return;
+      }
+      void (async()=>{
+        try{
+          const nextProfile=await getOrCreateUserProfile(user);
+          if(!active)return;
+          setProfile(nextProfile);
+          setSelectedCustomer(nextProfile.accountIds[0]||"c1");
+          if(nextProfile.status==="active"){
+            await seedWorkspaceIfEmpty(nextProfile,customers,initialStore);
+            if(!active)return;
+            unsubscribeStore=subscribeToPlatformStore(
+              nextProfile,
+              next=>{if(active){setStore(next);setStoreReady(true);}},
+              error=>{if(active)setSyncError(error.message);}
+            );
+            if(nextProfile.role==="admin"){
+              unsubscribeUsers=subscribeToUserProfiles(
+                next=>{if(active)setUsers(next);},
+                error=>{if(active)setSyncError(error.message);}
+              );
+            }
+          }
+        }catch(error){
+          if(active)setAuthError(firebaseMessage(error));
+        }finally{
+          if(active)setAuthReady(true);
+        }
+      })();
+    });
+    return()=>{active=false;unsubscribeStore();unsubscribeUsers();unsubscribeAuth();};
   },[]);
-  useEffect(()=>{ if(storeReady) platformRepository.save(store); },[store,storeReady]);
+  useEffect(()=>{
+    if(!storeReady||!profile||profile.status!=="active"||preview)return;
+    void savePlatformStore(store).catch(error=>setSyncError(firebaseMessage(error)));
+  },[store,storeReady,profile,preview]);
   useEffect(()=>{ if(toast){ const t=setTimeout(()=>setToast(""),2800); return()=>clearTimeout(t); } },[toast]);
 
+  const role = preview?.role || profile?.role || null;
   const isStaff = role==="service"||role==="admin";
+  const readOnly = Boolean(preview);
   const clientId = selectedCustomer;
   const scopedMachines = isStaff?store.machines:store.machines.filter(m=>m.accountId===clientId);
   const scopedTickets = isStaff?store.tickets:store.tickets.filter(t=>t.accountId===clientId);
   const scopedOrders = isStaff?store.orders:store.orders.filter(o=>o.accountId===clientId);
-  const nav = isStaff?adminNav:customerNav;
+  const nav = isStaff?adminNav.filter(item=>item.id!=="access"||role==="admin"):customerNav;
 
   const navigate=(next:View)=>{setView(next);setMobileOpen(false);};
-  const openTicket=(machineId="")=>{setSelectedTicket(machineId);setModal("ticket");};
-  const openTicketForCustomer=(accountId:string)=>{setSelectedCustomer(accountId);setSelectedTicket("");setModal("ticket");};
-  const openTaskForCustomer=(accountId:string)=>{setSelectedCustomer(accountId);setModal("task");};
+  const allowWrite=()=>{if(readOnly){setToast("מצב התצוגה הוא לקריאה בלבד");return false;}return true;};
+  const openTicket=(machineId="")=>{if(!allowWrite())return;setSelectedTicket(machineId);setModal("ticket");};
+  const openTicketForCustomer=(accountId:string)=>{if(!allowWrite())return;setSelectedCustomer(accountId);setSelectedTicket("");setModal("ticket");};
+  const openTaskForCustomer=(accountId:string)=>{if(!allowWrite())return;setSelectedCustomer(accountId);setModal("task");};
   const openCustomer=(id:string)=>{setSelectedCustomer(id);setView("customer");};
-  const login=(r:Role)=>{setRole(r);setSelectedCustomer(r==="multi"?"c1":"c1");setView("dashboard");};
+  const enterPreview=(next:PreviewContext)=>{setPreview(next);setSelectedCustomer(next.accountId||"c1");setView("dashboard");setPreviewOpen(false);setModal(null);};
+  const leavePreview=()=>{setPreview(null);setView("dashboard");setModal(null);};
+  const loginGoogle=async()=>{setAuthBusy(true);setAuthError("");try{await signInWithGoogle();}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
+  const loginEmail=async(email:string,password:string)=>{setAuthBusy(true);setAuthError("");try{await signInWithEmail(email,password);}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
+  const sendReset=async(email:string)=>{setAuthBusy(true);setAuthError("");try{await resetPassword(email);setToast("קישור לאיפוס סיסמה נשלח");}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
 
-  if(!role) return <Login onLogin={login}/>;
+  if(!authReady) return <LoadingScreen/>;
+  if(!profile) return <Login onGoogle={loginGoogle} onEmail={loginEmail} onReset={sendReset} busy={authBusy} error={authError}/>;
+  if(profile.status==="pending") return <PendingAccess profile={profile} onLogout={()=>void signOutUser()}/>;
+  if(!role) return <LoadingScreen/>;
 
   return (
-    <div className="app-shell" dir="rtl">
+    <div className={`app-shell ${preview?"previewing":""}`} dir="rtl">
+      {preview&&<div className="preview-banner"><Eye size={17}/><span>מצב תצוגה: <strong>{roleNames[preview.role]}</strong>{!isStaff&&<> · {customerName(selectedCustomer)}</>}</span><b>קריאה בלבד</b><button onClick={leavePreview}><X size={16}/> חזרה לניהול</button></div>}
       <aside className={`sidebar ${mobileOpen?"open":""}`}>
         <div className="brand"><span className="brand-mark"><Coffee size={21}/></span><div><strong>Mister Bean</strong><small>Customer Operations</small></div></div>
         <button className="workspace-switcher"><span className="workspace-icon"><Sparkles size={16}/></span><span><small>סביבת עבודה</small><strong>{isStaff?"שירות ותפעול":"פורטל הלקוחות"}</strong></span><span className="live-dot">חי</span></button>
         <span className="sidebar-label">מרכז עבודה</span>
         <nav>{nav.map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><Icon size={18}/>{n.label}{n.id==="tickets"&&<b className="nav-count">{scopedTickets.filter(t=>!closed(t.status)).length}</b>}</button>})}</nav>
-        <div className="sidebar-status"><span><ShieldCheck size={16}/></span><div><strong>המערכת מסונכרנת</strong><small>עדכון אחרון לפני דקה</small></div></div>
+        <div className="sidebar-status"><span><ShieldCheck size={16}/></span><div><strong>המערכת מסונכרנת</strong><small>נתונים מאובטחים בענן</small></div></div>
         <div className="sidebar-foot">
           <div className="avatar">{roleNames[role].slice(0,2)}</div>
-          <div><strong>{roleNames[role]}</strong><small>{isStaff?"צוות Mister Bean":customerName(clientId)}</small></div>
-          <button className="logout" onClick={()=>setRole(null)} aria-label="התנתקות"><LogOut size={18}/></button>
+          <div><strong>{preview?roleNames[role]:profile.displayName}</strong><small>{preview?"מצב תצוגה":profile.email}</small></div>
+          <button className="logout" onClick={()=>void signOutUser()} aria-label="התנתקות"><LogOut size={18}/></button>
         </div>
       </aside>
       <main>
@@ -175,6 +255,7 @@ export default function Home() {
           <label className="global-search"><Search size={17}/><input placeholder="חיפוש לקוח, קריאה או מכונה..."/><kbd>⌘ K</kbd></label>
           <div className="top-actions">
             {!isStaff&&role==="multi"&&<select value={selectedCustomer} onChange={e=>setSelectedCustomer(e.target.value)}><option value="c1">Matrix — כל הסניפים</option></select>}
+            {profile.role==="admin"&&!preview&&<button className="preview-button" onClick={()=>setPreviewOpen(true)}><Eye size={17}/> תצוגת מערכת</button>}
             {isStaff&&<button className="top-create" onClick={()=>openTicket()}><Plus size={17}/> קריאה חדשה</button>}
             <button className="icon-btn" aria-label="התראות"><Bell size={18}/><span>3</span></button>
           </div>
@@ -182,12 +263,13 @@ export default function Home() {
         <div className="content">
           {view==="dashboard"&&(isStaff?<AdminDashboard store={store} go={navigate} openCustomer={openCustomer}/>:<CustomerDashboard customer={customers.find(c=>c.id===clientId)!} store={store} go={navigate} openTicket={openTicket}/>)}
           {view==="customers"&&<Customers store={store} openCustomer={openCustomer} openTicket={openTicketForCustomer} openTask={openTaskForCustomer}/>}
-          {view==="customer"&&<CustomerCard customer={customers.find(c=>c.id===selectedCustomer)!} store={store} openTicket={openTicket} openTask={()=>setModal("task")}/>}
-          {view==="tickets"&&<Tickets tickets={scopedTickets} machines={store.machines} isStaff={isStaff} onUpdate={(id,status)=>{setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===id?{...t,status,updatedAt:new Date().toISOString()}:t)}));setToast("סטטוס הקריאה עודכן");}} onOpen={id=>{setSelectedTicket(id);setModal("detail");}} onClose={id=>{setSelectedTicket(id);setModal("close");}} openTicket={openTicket}/>}
-          {view==="machines"&&<Machines machines={scopedMachines} isStaff={isStaff} openTicket={openTicket} onStatus={(id,status)=>setStore(s=>({...s,machines:s.machines.map(m=>m.id===id?{...m,status}:m)}))}/>}
-          {view==="orders"&&<Orders orders={scopedOrders} isStaff={isStaff} onChange={(id,data)=>{setStore(s=>({...s,orders:s.orders.map(o=>o.id===id?{...o,...data}:o)}));setToast(isStaff?"ההזמנה עודכנה":"השינוי נשמר וממתין לאישור הצוות");}}/>}
-          {view==="tasks"&&<Tasks tasks={store.tasks} onCreate={()=>setModal("task")} onStatus={(id,status)=>setStore(s=>({...s,tasks:s.tasks.map(t=>t.id===id?{...t,status}:t)}))}/>}
+          {view==="customer"&&<CustomerCard customer={customers.find(c=>c.id===selectedCustomer)!} store={store} openTicket={openTicket} openTask={()=>{if(allowWrite())setModal("task");}}/>}
+          {view==="tickets"&&<Tickets tickets={scopedTickets} machines={store.machines} isStaff={isStaff} onUpdate={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===id?{...t,status,updatedAt:new Date().toISOString()}:t)}));setToast("סטטוס הקריאה עודכן");}} onOpen={id=>{setSelectedTicket(id);setModal("detail");}} onClose={id=>{if(!allowWrite())return;setSelectedTicket(id);setModal("close");}} openTicket={openTicket}/>}
+          {view==="machines"&&<Machines machines={scopedMachines} isStaff={isStaff} openTicket={openTicket} onStatus={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,machines:s.machines.map(m=>m.id===id?{...m,status}:m)}));}}/>}
+          {view==="orders"&&<Orders orders={scopedOrders} isStaff={isStaff} onChange={(id,data)=>{if(!allowWrite())return;setStore(s=>({...s,orders:s.orders.map(o=>o.id===id?{...o,...data}:o)}));setToast(isStaff?"ההזמנה עודכנה":"השינוי נשמר וממתין לאישור הצוות");}}/>}
+          {view==="tasks"&&<Tasks tasks={store.tasks} onCreate={()=>{if(allowWrite())setModal("task");}} onStatus={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,tasks:s.tasks.map(t=>t.id===id?{...t,status}:t)}));}}/>}
           {view==="reports"&&<Reports store={store}/>}
+          {view==="access"&&profile.role==="admin"&&<AccessManagement users={users} readOnly={readOnly} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())return;try{await updateUserAccess(user.uid,role,accountIds,status);setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));}}} onPreview={next=>enterPreview(next)}/>}
           {view==="contract"&&<Contract customer={customers.find(c=>c.id===clientId)!} machines={scopedMachines}/>}
           {view==="contact"&&<Contact/>}
         </div>
@@ -197,24 +279,72 @@ export default function Home() {
       {modal==="task"&&<TaskModal accountId={selectedCustomer} onClose={()=>setModal(null)} onSave={task=>{setStore(s=>({...s,tasks:[task,...s.tasks]}));setModal(null);setToast("המשימה נוצרה בהצלחה");}}/>}
       {modal==="close"&&<CloseModal onClose={()=>setModal(null)} onSave={reason=>{setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===selectedTicket?{...t,status:"נסגרה",closedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),closeReason:reason}:t)}));setModal(null);setToast("הקריאה נסגרה");}}/>}
       {modal==="detail"&&<TicketDetailModal ticket={store.tickets.find(t=>t.id===selectedTicket)!} machine={store.machines.find(m=>m.id===store.tickets.find(t=>t.id===selectedTicket)?.machineId)} onClose={()=>setModal(null)}/>}
+      {previewOpen&&<PreviewModal currentAccount={selectedCustomer} onClose={()=>setPreviewOpen(false)} onEnter={enterPreview}/>}
+      {syncError&&<div className="sync-error"><LockKeyhole size={16}/><span>הסנכרון ממתין להגדרת Firebase: {syncError}</span></div>}
       {toast&&<div className="toast">✓ {toast}</div>}
     </div>
   );
 }
 
-function Login({onLogin}:{onLogin:(r:Role)=>void}) {
-  const roles:[Role,string,string,typeof Building2][]=[
-    ["customer","פורטל לקוח","מכונות, שירות והזמנות במקום אחד",Building2],
-    ["multi","לקוח מרובה סניפים","ניהול מלא של כל האתרים והצוותים",MonitorCog],
-    ["service","צוות שירות","תור קריאות, לקוחות ומשימות יומיות",Headphones],
-    ["admin","ניהול ותפעול","מרכז שליטה, מדדים והרשאות",ShieldCheck],
-  ];
+function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>;onEmail:(email:string,password:string)=>Promise<void>;onReset:(email:string)=>Promise<void>;busy:boolean;error:string}) {
+  const [email,setEmail]=useState("");
+  const [password,setPassword]=useState("");
+  const submit=(event:FormEvent)=>{event.preventDefault();void onEmail(email,password);};
   return <div className="login" dir="rtl"><div className="login-panel">
     <div className="login-brand"><span className="brand-mark large"><Coffee size={26}/></span><div><h1>Mister Bean</h1><p>Customer Operations</p></div></div>
-    <div className="login-copy"><span className="eyebrow">כל פעילות הלקוח. תמונה אחת.</span><h2>שירות מדויק מתחיל<br/>במידע מחובר.</h2><p>היכנסו לסביבת העבודה הרלוונטית והמשיכו בדיוק מהמקום שבו עצרתם.</p></div>
-    <div className="role-grid">{roles.map(([id,title,desc,RoleIcon])=><button key={id} onClick={()=>onLogin(id)}><span className="role-icon"><RoleIcon size={20}/></span><div><strong>{title}</strong><small>{desc}</small></div><b>←</b></button>)}</div>
+    <div className="login-copy auth-copy"><span className="eyebrow">כל פעילות הלקוח. תמונה אחת.</span><h2>ברוכים הבאים<br/>למרכז השירות.</h2><p>הכניסה מאובטחת ומותאמת אוטומטית להרשאות שלכם.</p></div>
+    <form className="auth-form" onSubmit={submit}>
+      <label><span>כתובת דוא״ל</span><input type="email" value={email} onChange={event=>setEmail(event.target.value)} required autoComplete="email" placeholder="name@company.co.il"/></label>
+      <label><span>סיסמה</span><input type="password" value={password} onChange={event=>setPassword(event.target.value)} required autoComplete="current-password" placeholder="••••••••"/></label>
+      {error&&<div className="auth-error">{error}</div>}
+      <button className="auth-primary" type="submit" disabled={busy}>{busy?"מתחבר...":"כניסה למערכת"}</button>
+      <button className="reset-link" type="button" disabled={busy||!email} onClick={()=>void onReset(email)}>שכחתי סיסמה</button>
+      <div className="auth-divider"><span>או</span></div>
+      <button className="google-login" type="button" disabled={busy} onClick={()=>void onGoogle()}><b>G</b> כניסה באמצעות Google</button>
+    </form>
     <div className="login-trust"><ShieldCheck size={16}/><span>גישה מאובטחת · הרשאות לפי תפקיד · תיעוד פעילות</span></div>
   </div><div className="login-side"><div className="coffee-orbit"><span></span><i></i></div><div className="login-showcase"><span className="eyebrow-light">OPERATIONS PULSE</span><h3>הבוקר מתחיל<br/>עם שליטה מלאה.</h3><div className="pulse-card"><div><span className="pulse-icon"><Activity size={18}/></span><div><small>בריאות השירות</small><strong>91%</strong></div></div><div className="pulse-bars">{[72,86,64,94,82,91,78].map((v,i)=><i key={i} style={{height:`${v}%`}}></i>)}</div></div><div className="side-stats"><div><strong>47</strong><span>מכונות פעילות</span></div><div><strong>4</strong><span>קריאות פתוחות</span></div><div><strong>753</strong><span>ק״ג החודש</span></div></div></div></div></div>;
+}
+
+function LoadingScreen(){return <div className="loading-screen" dir="rtl"><span className="brand-mark large"><Coffee size={26}/></span><h1>Mister Bean</h1><p>מחברים את סביבת העבודה המאובטחת…</p><i/></div>}
+
+function PendingAccess({profile,onLogout}:{profile:UserProfile;onLogout:()=>void}){return <div className="pending-screen" dir="rtl"><div className="pending-card"><span><LockKeyhole size={26}/></span><small>החשבון נוצר בהצלחה</small><h1>הגישה ממתינה לאישור</h1><p>החשבון של <strong>{profile.email}</strong> מחובר. מנהל המערכת צריך לשייך אותו ללקוח ולהגדיר הרשאה לפני הצגת מידע.</p><button onClick={onLogout}><LogOut size={17}/> יציאה</button></div></div>}
+
+function PreviewModal({currentAccount,onClose,onEnter}:{currentAccount:string;onClose:()=>void;onEnter:(preview:PreviewContext)=>void}){
+  const [previewRole,setPreviewRole]=useState<Role>("customer");
+  const [accountId,setAccountId]=useState(currentAccount||"c1");
+  const needsAccount=previewRole==="customer"||previewRole==="multi";
+  const options:[Role,string,string,typeof Building2][]=[
+    ["customer","לקוח רגיל","פורטל של לקוח וסניף אחד",Building2],
+    ["multi","לקוח מרובה סניפים","פורטל לקוח עם מספר אתרים",MonitorCog],
+    ["service","צוות שירות","מסכי התפעול והקריאות",Headphones],
+    ["admin","מנהל מערכת","כל מסכי הניהול והדוחות",UserCog],
+  ];
+  return <Modal title="תצוגת מערכת והרשאות" onClose={onClose}><div className="preview-modal"><div className="preview-note"><Eye size={18}/><div><strong>צפייה בטוחה</strong><span>המערכת תוצג בדיוק לפי התפקיד שתבחר, ללא אפשרות לשנות נתונים.</span></div></div><div className="preview-role-grid">{options.map(([id,title,description,Icon])=><button key={id} className={previewRole===id?"active":""} onClick={()=>setPreviewRole(id)}><Icon size={19}/><strong>{title}</strong><small>{description}</small></button>)}</div>{needsAccount&&<label className="preview-account"><span>איזה לקוח להציג?</span><select value={accountId} onChange={event=>setAccountId(event.target.value)}>{customers.map(customer=><option value={customer.id} key={customer.id}>{customer.name}</option>)}</select></label>}<footer><button onClick={onClose}>ביטול</button><button className="primary" onClick={()=>onEnter({role:previewRole,accountId})}><Eye size={16}/> כניסה למצב תצוגה</button></footer></div></Modal>
+}
+
+function AccessManagement({users,readOnly,onSave,onPreview}:{users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
+  return <><SectionTitle title="ניהול והרשאות" sub="משתמשים, תפקידים ושיוך לחשבונות לקוח"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.length}</strong> משתמשים רשומים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(user=>user.role==="admin").length}</strong> מנהלי מערכת</span></div></div><section className="panel access-panel"><div className="access-head"><div><h3>משתמשי המערכת</h3><p>ההרשאה נקבעת כאן ואינה נבחרת במסך הכניסה.</p></div>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>עדיין אין משתמשים</strong><span>משתמשים חדשים יופיעו כאן לאחר הכניסה הראשונה.</span></div>}</div></section></>
+}
+
+function UserAccessRow({user,readOnly,onSave,onPreview}:{user:UserProfile;readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
+  const [editing,setEditing]=useState(false);
+  const [role,setRole]=useState<Role>(user.role);
+  const [accountIds,setAccountIds]=useState<string[]>(user.accountIds);
+  const [status,setStatus]=useState<UserProfile["status"]>(user.status);
+  const [saving,setSaving]=useState(false);
+  const toggleAccount=(accountId:string)=>setAccountIds(current=>current.includes(accountId)?current.filter(id=>id!==accountId):[...current,accountId]);
+  const save=async()=>{setSaving(true);try{await onSave(user,role,accountIds,status);setEditing(false);}finally{setSaving(false);}};
+  return <article className="access-user"><div className="access-user-main"><span className="customer-avatar">{(user.displayName||user.email).slice(0,2)}</span><div><strong>{user.displayName||"משתמש"}</strong><small>{user.email}</small></div><Badge>{user.status==="active"?"פעיל":"ממתין לאישור"}</Badge><span className="role-label">{roleNames[user.role]}</span><div className="access-actions"><button onClick={()=>onPreview({role:user.role,accountId:user.accountIds[0]||"c1"})}><Eye size={15}/> תצוגה</button><button disabled={readOnly} onClick={()=>setEditing(value=>!value)}><UserCog size={15}/> הרשאות</button></div></div>{editing&&<div className="access-editor"><label><span>תפקיד</span><select value={role} onChange={event=>setRole(event.target.value as Role)}><option value="customer">לקוח רגיל</option><option value="multi">לקוח מרובה סניפים</option><option value="service">נציג שירות</option><option value="admin">מנהל מערכת</option></select></label><label><span>מצב החשבון</span><select value={status} onChange={event=>setStatus(event.target.value as UserProfile["status"])}><option value="pending">ממתין לאישור</option><option value="active">פעיל</option></select></label>{(role==="customer"||role==="multi")&&<fieldset><legend>חשבונות לקוח</legend><div>{customers.map(customer=><label key={customer.id}><input type="checkbox" checked={accountIds.includes(customer.id)} onChange={()=>toggleAccount(customer.id)}/><span>{customer.name}</span></label>)}</div></fieldset>}<footer><button onClick={()=>setEditing(false)}>ביטול</button><button className="primary" disabled={saving} onClick={()=>void save()}>{saving?"שומר…":"שמירת הרשאות"}</button></footer></div>}</article>
+}
+
+function firebaseMessage(error:unknown){
+  const message=error instanceof Error?error.message:String(error);
+  if(message.includes("auth/invalid-credential"))return "פרטי הכניסה אינם נכונים.";
+  if(message.includes("auth/popup-closed-by-user"))return "חלון הכניסה נסגר לפני השלמת התהליך.";
+  if(message.includes("auth/operation-not-allowed"))return "שיטת הכניסה עדיין לא הופעלה ב־Firebase.";
+  if(message.includes("permission-denied")||message.includes("Missing or insufficient permissions"))return "כללי הגישה למסד הנתונים עדיין לא פורסמו.";
+  return message.replace("Firebase: ","");
 }
 
 function SectionTitle({title,sub,action}:{title:string;sub?:string;action?:React.ReactNode}) {return <div className="section-title"><div><h2>{title}</h2>{sub&&<p>{sub}</p>}</div>{action}</div>}

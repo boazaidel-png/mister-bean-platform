@@ -11,26 +11,82 @@ service cloud.firestore {
     }
 
     function isStaff() {
-      return signedIn() && userProfile().role in ['service', 'admin'];
+      return signedIn()
+        && userProfile().status == 'active'
+        && userProfile().role in ['service', 'admin'];
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && userProfile().status == 'active'
+        && userProfile().role == 'admin';
     }
 
     function belongsToAccount(accountId) {
-      return signedIn() && accountId in userProfile().accountIds;
+      return signedIn()
+        && userProfile().status == 'active'
+        && accountId in userProfile().accountIds;
+    }
+
+    function validSelfRegistration(userId) {
+      return signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'role',
+          'accountIds',
+          'status',
+          'createdAt'
+        ])
+        && (
+          (
+            request.auth.token.email == 'boazaidel@gmail.com'
+            && request.resource.data.role == 'admin'
+            && request.resource.data.status == 'active'
+            && request.resource.data.accountIds.size() == 0
+          )
+          ||
+          (
+            request.resource.data.role == 'customer'
+            && request.resource.data.status == 'pending'
+            && request.resource.data.accountIds.size() == 0
+          )
+        );
     }
 
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isStaff());
-      allow write: if isStaff();
+      allow create: if validSelfRegistration(userId);
+      allow update, delete: if isAdmin();
     }
 
     match /accounts/{accountId} {
       allow read: if isStaff() || belongsToAccount(accountId);
       allow write: if isStaff();
 
-      match /{collection}/{documentId} {
+      match /machines/{documentId} {
+        allow read: if isStaff() || belongsToAccount(accountId);
+        allow write: if isStaff();
+      }
+
+      match /tickets/{documentId} {
         allow read: if isStaff() || belongsToAccount(accountId);
         allow create: if isStaff() || belongsToAccount(accountId);
         allow update, delete: if isStaff();
+      }
+
+      match /orders/{documentId} {
+        allow read: if isStaff() || belongsToAccount(accountId);
+        allow create, update: if isStaff() || belongsToAccount(accountId);
+        allow delete: if isStaff();
+      }
+
+      match /tasks/{documentId} {
+        allow read, write: if isStaff();
       }
     }
   }
