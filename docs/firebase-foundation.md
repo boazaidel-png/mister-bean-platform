@@ -39,6 +39,11 @@ pending state with no customer access. Administrators approve the account,
 assign its role and attach one or more `accountIds` from the in-product access
 management screen.
 
+Every new pending account also creates one protected document in the `mail`
+collection. The Firebase Trigger Email extension consumes that document and
+sends the approval request only to `boaz@pacifictrade.co`. The document ID is
+the user's UID, so a user cannot create duplicate approval notifications.
+
 The bootstrap administrator is restricted to the owner's verified accounts:
 `boazaidel@gmail.com` and `boaz@pacifictrade.co`. These accounts may create or
 upgrade their initial admin profile; all other first-time users receive a

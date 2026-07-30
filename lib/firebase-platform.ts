@@ -40,6 +40,8 @@ const BOOTSTRAP_ADMIN_EMAILS = new Set([
   "boazaidel@gmail.com",
   "boaz@pacifictrade.co",
 ]);
+const ACCESS_APPROVAL_EMAIL = "boaz@pacifictrade.co";
+const ACCESS_APPROVAL_SUBJECT = "בקשת גישה חדשה למערכת מיסטר בין";
 const entityKeys = ["tickets", "orders", "tasks", "machines"] as const;
 type EntityKey = (typeof entityKeys)[number];
 type Entity = Ticket | Order | Task | Machine;
@@ -52,6 +54,38 @@ function emptyStore(): PlatformStore {
 
 function normalizeEmail(email?: string | null) {
   return (email || "").trim().toLowerCase();
+}
+
+async function queueAccessApprovalEmail(profile: UserProfile) {
+  if (profile.status !== "pending") return;
+
+  const { db } = getFirebaseServices();
+  const notificationRef = doc(db, "mail", profile.uid);
+  const existingNotification = await getDoc(notificationRef);
+  if (existingNotification.exists()) return;
+
+  await setDoc(notificationRef, {
+    to: [ACCESS_APPROVAL_EMAIL],
+    replyTo: profile.email,
+    message: {
+      subject: ACCESS_APPROVAL_SUBJECT,
+      text: [
+        "בקשת גישה חדשה התקבלה במערכת מיסטר בין.",
+        "",
+        `שם: ${profile.displayName}`,
+        `אימייל: ${profile.email}`,
+        "",
+        "הבקשה ממתינה לשיוך לקוח ולהגדרת הרשאה במסך ניהול והרשאות.",
+        "https://boazaidel-png.github.io/mister-bean-platform/",
+      ].join("\n"),
+    },
+    request: {
+      uid: profile.uid,
+      email: profile.email,
+      displayName: profile.displayName,
+    },
+    createdAt: new Date().toISOString(),
+  });
 }
 
 export function observeAuth(callback: (user: User | null) => void) {
@@ -106,6 +140,7 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
       await setDoc(profileRef, upgradedProfile);
       return upgradedProfile;
     }
+    await queueAccessApprovalEmail(profile);
     return profile;
   }
 
@@ -120,6 +155,7 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
   };
 
   await setDoc(profileRef, profile);
+  await queueAccessApprovalEmail(profile);
   return profile;
 }
 
