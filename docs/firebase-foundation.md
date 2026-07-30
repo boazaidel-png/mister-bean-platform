@@ -1,8 +1,9 @@
 # Firebase foundation
 
-The platform is prepared for a dedicated Firebase project. Until its public
-configuration is supplied, the current public preview continues to use local
-browser storage.
+The platform is connected to the dedicated `misterbean-platform` Firebase
+project. Firebase Authentication identifies the user, the `users/{uid}` profile
+determines authorization, and Cloud Firestore is the source of truth for
+service data.
 
 ## Shared identity
 
@@ -33,6 +34,11 @@ can be migrated gradually without breaking their current workflows.
 - Storage
 - App Check
 
-The next implementation step is to create the project, copy its web
-configuration into the deployment environment, deploy the rules, and replace
-the browser repository with an asynchronous Firestore repository.
+Google and email/password sign-in are enabled. New accounts are created in a
+pending state with no customer access. Administrators approve the account,
+assign its role and attach one or more `accountIds` from the in-product access
+management screen.
+
+The bootstrap administrator is restricted to `boazaidel@gmail.com`. This
+account may create its initial admin profile; all other first-time users receive
+a pending customer profile.

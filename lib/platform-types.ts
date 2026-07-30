@@ -1,5 +1,20 @@
 export type Role = "customer" | "multi" | "service" | "admin";
 
+export type UserProfile = {
+  uid: string;
+  email: string;
+  displayName: string;
+  role: Role;
+  accountIds: string[];
+  status: "active" | "pending";
+  createdAt: string;
+};
+
+export type PreviewContext = {
+  role: Role;
+  accountId: string;
+};
+
 export type View =
   | "dashboard"
   | "customers"
@@ -9,6 +24,7 @@ export type View =
   | "orders"
   | "tasks"
   | "reports"
+  | "access"
   | "contract"
   | "contact";
 
