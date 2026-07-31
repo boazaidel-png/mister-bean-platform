@@ -12,6 +12,7 @@ import {
   signOut,
 } from "firebase/auth";
 import {
+  arrayUnion,
   collection,
   collectionGroup,
   doc,
@@ -31,6 +32,9 @@ import type {
   Machine,
   Order,
   PlatformStore,
+  Lead,
+  Quote,
+  SalesWorkspace,
   Task,
   Ticket,
   UserProfile,
@@ -246,6 +250,42 @@ export function subscribeToUserProfiles(
   );
 }
 
+export function subscribeToCustomers(
+  profile: UserProfile,
+  onCustomers: (customers: Customer[]) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  const { db } = getFirebaseServices();
+  if (profile.role === "admin" || profile.role === "service") {
+    return onSnapshot(
+      query(collection(db, "accounts")),
+      (snapshot) => {
+        onCustomers(
+          snapshot.docs
+            .map((account) => account.data() as Customer)
+            .sort((a, b) => a.name.localeCompare(b.name, "he")),
+        );
+      },
+      (error) => onError(error),
+    );
+  }
+
+  const accountMaps = new Map<string, Customer>();
+  const unsubscribers = profile.accountIds.map((accountId) =>
+    onSnapshot(
+      doc(db, "accounts", accountId),
+      (snapshot) => {
+        if (snapshot.exists()) {
+          accountMaps.set(accountId, snapshot.data() as Customer);
+          onCustomers([...accountMaps.values()]);
+        }
+      },
+      (error) => onError(error),
+    ),
+  );
+  return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+}
+
 export async function updateUserAccess(
   uid: string,
   role: UserProfile["role"],
@@ -285,4 +325,183 @@ export async function savePlatformStore(next: PlatformStore) {
   }
   await batch.commit();
   lastSyncedStore = next;
+}
+
+export function subscribeToSalesWorkspace(
+  profile: UserProfile,
+  onWorkspace: (workspace: SalesWorkspace) => void,
+  onError: (error: Error) => void,
+): Unsubscribe {
+  if (
+    profile.status !== "active" ||
+    (profile.role !== "admin" && profile.role !== "service")
+  ) {
+    onWorkspace({ leads: [], quotes: [] });
+    return () => undefined;
+  }
+
+  const { db } = getFirebaseServices();
+  let leads: Lead[] = [];
+  let quotes: Quote[] = [];
+  let leadsReady = false;
+  let quotesReady = false;
+  const emit = () => {
+    if (leadsReady && quotesReady) onWorkspace({ leads, quotes });
+  };
+
+  const unsubscribeLeads = onSnapshot(
+    query(collection(db, "leads")),
+    (snapshot) => {
+      leads = snapshot.docs
+        .map((item) => item.data() as Lead)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      leadsReady = true;
+      emit();
+    },
+    (error) => onError(error),
+  );
+  const unsubscribeQuotes = onSnapshot(
+    query(collection(db, "quotes")),
+    (snapshot) => {
+      quotes = snapshot.docs
+        .map((item) => item.data() as Quote)
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      quotesReady = true;
+      emit();
+    },
+    (error) => onError(error),
+  );
+
+  return () => {
+    unsubscribeLeads();
+    unsubscribeQuotes();
+  };
+}
+
+export async function saveLead(lead: Lead) {
+  const { db } = getFirebaseServices();
+  await setDoc(doc(db, "leads", lead.id), lead, { merge: true });
+}
+
+export async function saveQuote(quote: Quote) {
+  const { db } = getFirebaseServices();
+  const batch = writeBatch(db);
+  batch.set(doc(db, "quotes", quote.id), quote, { merge: true });
+  if (quote.leadId) {
+    batch.set(
+      doc(db, "leads", quote.leadId),
+      {
+        status:
+          quote.status === "נשלחה" || quote.status === "אושרה"
+            ? "נשלחה הצעת מחיר"
+            : "בהמתנה להצעת מחיר",
+        quoteIds: arrayUnion(quote.id),
+        updatedAt: quote.updatedAt,
+      },
+      { merge: true },
+    );
+  }
+  await batch.commit();
+}
+
+function accountIdForQuote(quote: Quote) {
+  const readable = quote.clientName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0590-\u05ff]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 36);
+  return `${readable || "customer"}-${quote.id.slice(-6).toLowerCase()}`;
+}
+
+export async function convertApprovedQuoteToCustomer(
+  quote: Quote,
+  lead?: Lead,
+) {
+  if (quote.status !== "אושרה") {
+    throw new Error("אפשר להקים לקוח רק מהצעה שאושרה.");
+  }
+
+  const { db } = getFirebaseServices();
+  const accountId = quote.accountId || accountIdForQuote(quote);
+  const now = new Date().toISOString();
+  const mainBlend = quote.blends.find((blend) => blend.quantityKg > 0);
+  const batch = writeBatch(db);
+
+  batch.set(
+    doc(db, "accounts", accountId),
+    {
+      id: accountId,
+      name: quote.clientName,
+      status: "בהקמה",
+      rank: quote.clientRank || "רגיל",
+      contactName: lead?.contactName || "",
+      phone: lead?.phone || "",
+      email: lead?.email || "",
+      city: lead?.location || "",
+      address: lead?.meetingLocation || "",
+      owner: lead?.owner || quote.owner,
+      monthlyKg: quote.knownKg || mainBlend?.quantityKg || 0,
+      contractEnd: "",
+      serviceLevel: "רגיל",
+      branches: [lead?.location || "סניף ראשי"],
+      sourceLeadId: quote.leadId || "",
+      sourceQuoteId: quote.id,
+      createdAt: now,
+    },
+    { merge: true },
+  );
+  batch.set(
+    doc(db, "quotes", quote.id),
+    { accountId, approvedAt: quote.approvedAt || now, updatedAt: now },
+    { merge: true },
+  );
+  if (lead) {
+    batch.set(
+      doc(db, "leads", lead.id),
+      {
+        status: "נסגר",
+        convertedAccountId: accountId,
+        updatedAt: now,
+      },
+      { merge: true },
+    );
+  }
+  quote.equipment
+    .filter((item) => item.quantity > 0)
+    .forEach((item, itemIndex) => {
+      for (let index = 0; index < item.quantity; index += 1) {
+        const machineId = `machine-${quote.id}-${itemIndex + 1}-${index + 1}`;
+        batch.set(doc(db, "accounts", accountId, "machines", machineId), {
+          id: machineId,
+          accountId,
+          site: lead?.location || "סניף ראשי",
+          model: item.model,
+          serial: "טרם הוגדר",
+          status: "בהקמה",
+          commercial: item.commercialModel,
+          location: "",
+          lastService: "",
+          nextService: "",
+        });
+      }
+    });
+
+  await batch.commit();
+  return accountId;
+}
+
+export async function importSalesWorkspace(workspace: SalesWorkspace) {
+  const { db } = getFirebaseServices();
+  const entries = [
+    ...workspace.leads.map((lead) => ["leads", lead.id, lead] as const),
+    ...workspace.quotes.map((quote) => ["quotes", quote.id, quote] as const),
+  ];
+  for (let index = 0; index < entries.length; index += 400) {
+    const batch = writeBatch(db);
+    for (const [collectionName, id, entity] of entries.slice(index, index + 400)) {
+      batch.set(doc(db, collectionName, id), entity, { merge: true });
+    }
+    await batch.commit();
+  }
 }

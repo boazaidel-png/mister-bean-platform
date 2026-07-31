@@ -68,6 +68,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // The commercial workspace is internal. Leads and quotes share the same
+    // authenticated staff identity as the service platform.
+    match /leads/{leadId} {
+      allow read, create, update, delete: if isStaff();
+    }
+
+    match /quotes/{quoteId} {
+      allow read, create, update, delete: if isStaff();
+    }
+
     // Staff dashboards use collection-group queries across every customer
     // account. These explicit rules keep that access limited to active staff.
     match /{path=**}/machines/{documentId} {

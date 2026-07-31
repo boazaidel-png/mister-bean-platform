@@ -41,3 +41,4 @@ firebase-debug.log*
 /.wrangler/
 /outputs/
 /work/
+*.tsbuildinfo

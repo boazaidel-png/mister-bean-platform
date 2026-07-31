@@ -10,6 +10,7 @@ import {
   Coffee,
   Eye,
   FileText,
+  FileSignature,
   Headphones,
   LayoutDashboard,
   ListTodo,
@@ -21,35 +22,49 @@ import {
   Plus,
   ShieldCheck,
   UserCog,
+  UsersRound,
   X,
 } from "lucide-react";
 import {
+  LeadsWorkspace,
+  QuotesWorkspace,
+} from "@/components/sales-workspace";
+import {
+  convertApprovedQuoteToCustomer,
   getOrCreateUserProfile,
+  importSalesWorkspace,
   observeAuth,
   resetPassword,
   savePlatformStore,
+  saveLead,
+  saveQuote,
   seedWorkspaceIfEmpty,
   signInWithEmail,
   signInWithGoogle,
   signOutUser,
   subscribeToPlatformStore,
+  subscribeToSalesWorkspace,
+  subscribeToCustomers,
   subscribeToUserProfiles,
   updateUserAccess,
 } from "@/lib/firebase-platform";
 import type {
   Customer,
+  Lead,
   Machine,
   Order,
   PlatformStore as Store,
   PreviewContext,
+  Quote,
   Role,
+  SalesWorkspace,
   Task,
   Ticket,
   UserProfile,
   View,
 } from "@/lib/platform-types";
 
-const customers: Customer[] = [
+const seedCustomers: Customer[] = [
   { id:"c1",name:"Matrix",status:"פעיל",rank:"אסטרטגי",contactName:"נועה לוי",phone:"050-555-1101",email:"noa@matrix-demo.co.il",city:"הרצליה",address:"אבא אבן 10",owner:"מיכל כהן",monthlyKg:145,contractEnd:"2027-03-31",serviceLevel:"פרימיום",branches:["מטה הרצליה","תל אביב","חיפה"] },
   { id:"c2",name:"Check Point",status:"פעיל",rank:"אסטרטגי",contactName:"רועי בן דוד",phone:"052-555-2202",email:"roi@checkpoint-demo.co.il",city:"תל אביב",address:"הסוללים 5",owner:"מיכל כהן",monthlyKg:210,contractEnd:"2026-09-15",serviceLevel:"פרימיום",branches:["מטה תל אביב","פתח תקווה","באר שבע","חיפה"] },
   { id:"c3",name:"Monday",status:"פעיל",rank:"חשוב",contactName:"יעל רז",phone:"054-555-3303",email:"yael@monday-demo.co.il",city:"תל אביב",address:"יצחק שדה 6",owner:"אורן לוי",monthlyKg:120,contractEnd:"2027-01-10",serviceLevel:"מורחב",branches:["מגדל תוהא","רוטשילד"] },
@@ -61,7 +76,7 @@ const customers: Customer[] = [
 ];
 
 const models = ["Jura X10","Jura E8","Dr. Coffee F11","Dr. Coffee F15","Emilio Mini","Jetinno JL15","מקציף חלב","מקרר חלב","פילטר מים"];
-const machineSeed: Machine[] = customers.flatMap((c, ci) => {
+const machineSeed: Machine[] = seedCustomers.flatMap((c, ci) => {
   const count = ci === 1 ? 12 : [5,12,6,3,4,5,2,3][ci];
   return Array.from({ length: count }, (_, i) => ({
     id:`m${ci+1}-${i+1}`, accountId:c.id, site:c.branches[i % c.branches.length],
@@ -82,7 +97,7 @@ const ticketSeed: Ticket[] = [
   {id:"SR-1044",accountId:"c6",site:"מפעל",machineId:"m6-3",type:"דרוש ניקוי",urgency:"רגילה",status:"נסגרה",description:"ניקוי תקופתי",contact:"מירב שלום",phone:"054-555-6606",assignedTo:"אבי טכנאי",openedAt:"2026-07-22T10:00",updatedAt:"2026-07-23T16:00",closedAt:"2026-07-23T16:00",closeReason:"בוצע ניקוי מלא"},
 ];
 
-const orderSeed: Order[] = customers.map((c,i)=>({
+const orderSeed: Order[] = seedCustomers.map((c,i)=>({
   id:`o-${c.id}`,accountId:c.id,month:"אוגוסט 2026",defaultKg:c.monthlyKg,
   requestedKg:i===4?28:c.monthlyKg+(i%3===0?10:0),approvedKg:0,
   status:i%3===0?"ממתין לאישור":i%3===1?"ממתין לעדכון לקוח":"עודכן על ידי לקוח",
@@ -104,13 +119,14 @@ const customerNav = [
   {id:"contract" as View,label:"ההסכם שלי",icon:FileText},{id:"contact" as View,label:"יצירת קשר",icon:MessageCircle},
 ];
 const adminNav = [
-  {id:"dashboard" as View,label:"מרכז שליטה",icon:LayoutDashboard},{id:"customers" as View,label:"לקוחות",icon:Building2},
+  {id:"dashboard" as View,label:"מרכז שליטה",icon:LayoutDashboard},{id:"leads" as View,label:"לידים",icon:UsersRound},
+  {id:"quotes" as View,label:"הצעות מחיר",icon:FileSignature},{id:"customers" as View,label:"לקוחות",icon:Building2},
   {id:"tickets" as View,label:"שירות ותקלות",icon:Headphones},{id:"orders" as View,label:"הזמנות קפה",icon:Coffee},
   {id:"machines" as View,label:"צי מכונות",icon:MonitorCog},{id:"tasks" as View,label:"משימות צוות",icon:ListTodo},
   {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},{id:"access" as View,label:"ניהול והרשאות",icon:UserCog},
 ];
 
-const customerName = (id:string) => customers.find(c=>c.id===id)?.name || "—";
+const customerName = (id:string) => seedCustomers.find(c=>c.id===id)?.name || "—";
 const formatDate = (v:string) => new Intl.DateTimeFormat("he-IL").format(new Date(v));
 const greetingForHour = (hour:number) => {
   if(hour<5)return "לילה טוב";
@@ -149,6 +165,8 @@ export default function Home() {
   const [previewOpen,setPreviewOpen] = useState(false);
   const [view,setView] = useState<View>("dashboard");
   const [store,setStore] = useState<Store>(initialStore);
+  const [salesWorkspace,setSalesWorkspace] = useState<SalesWorkspace>({leads:[],quotes:[]});
+  const [customers,setCustomers] = useState<Customer[]>(seedCustomers);
   const [storeReady,setStoreReady] = useState(false);
   const [authReady,setAuthReady] = useState(false);
   const [authBusy,setAuthBusy] = useState(false);
@@ -165,9 +183,13 @@ export default function Home() {
   useEffect(()=>{
     let active=true;
     let unsubscribeStore:()=>void=()=>{};
+    let unsubscribeSales:()=>void=()=>{};
+    let unsubscribeCustomers:()=>void=()=>{};
     let unsubscribeUsers:()=>void=()=>{};
     const unsubscribeAuth=observeAuth(user=>{
       unsubscribeStore();
+      unsubscribeSales();
+      unsubscribeCustomers();
       unsubscribeUsers();
       setStoreReady(false);
       setSyncError("");
@@ -187,11 +209,23 @@ export default function Home() {
           setProfile(nextProfile);
           setSelectedCustomer(nextProfile.accountIds[0]||"c1");
           if(nextProfile.status==="active"){
-            await seedWorkspaceIfEmpty(nextProfile,customers,initialStore);
+            await seedWorkspaceIfEmpty(nextProfile,seedCustomers,initialStore);
             if(!active)return;
             unsubscribeStore=subscribeToPlatformStore(
               nextProfile,
               next=>{if(active){setStore(next);setStoreReady(true);setSyncError("");}},
+              error=>{if(active)setSyncError(firebaseMessage(error));}
+            );
+            if(nextProfile.role==="admin"||nextProfile.role==="service"){
+              unsubscribeSales=subscribeToSalesWorkspace(
+                nextProfile,
+                next=>{if(active){setSalesWorkspace(next);setSyncError("");}},
+                error=>{if(active)setSyncError(firebaseMessage(error));}
+              );
+            }
+            unsubscribeCustomers=subscribeToCustomers(
+              nextProfile,
+              next=>{if(active&&next.length){setCustomers(next);setSyncError("");}},
               error=>{if(active)setSyncError(firebaseMessage(error));}
             );
             if(nextProfile.role==="admin"){
@@ -208,7 +242,7 @@ export default function Home() {
         }
       })();
     });
-    return()=>{active=false;unsubscribeStore();unsubscribeUsers();unsubscribeAuth();};
+    return()=>{active=false;unsubscribeStore();unsubscribeSales();unsubscribeCustomers();unsubscribeUsers();unsubscribeAuth();};
   },[]);
   useEffect(()=>{
     if(!storeReady||!profile||profile.status!=="active"||preview)return;
@@ -279,25 +313,27 @@ export default function Home() {
           </div>
         </header>
         <div className="content">
-          {view==="dashboard"&&(isStaff?<AdminDashboard store={store} go={navigate} openCustomer={openCustomer} greeting={greeting} firstName={firstName}/>:<CustomerDashboard customer={customers.find(c=>c.id===clientId)!} store={store} go={navigate} openTicket={openTicket} greeting={greeting}/>)}
-          {view==="customers"&&<Customers store={store} openCustomer={openCustomer} openTicket={openTicketForCustomer} openTask={openTaskForCustomer}/>}
-          {view==="customer"&&<CustomerCard customer={customers.find(c=>c.id===selectedCustomer)!} store={store} openTicket={openTicket} openTask={()=>{if(allowWrite())setModal("task");}}/>}
+          {view==="dashboard"&&(isStaff?<AdminDashboard store={store} sales={salesWorkspace} customers={customers} go={navigate} openCustomer={openCustomer} greeting={greeting} firstName={firstName}/>:<CustomerDashboard customer={customers.find(c=>c.id===clientId)||seedCustomers[0]} store={store} go={navigate} openTicket={openTicket} greeting={greeting}/>)}
+          {view==="leads"&&isStaff&&<LeadsWorkspace workspace={salesWorkspace} readOnly={readOnly} onSaveLead={async(lead:Lead)=>{if(!allowWrite())return;await saveLead(lead);setToast("הליד נשמר");}} onSaveQuote={async(quote:Quote)=>{if(!allowWrite())return;await saveQuote(quote);setToast("הצעת המחיר נשמרה");}} onImport={async(next:SalesWorkspace)=>{if(!allowWrite())return;await importSalesWorkspace(next);setToast(`יובאו ${next.leads.length} לידים ו־${next.quotes.length} הצעות`);}} onOpenQuotes={()=>navigate("quotes")}/>}
+          {view==="quotes"&&isStaff&&<QuotesWorkspace workspace={salesWorkspace} readOnly={readOnly} onSaveQuote={async(quote:Quote)=>{if(!allowWrite())return;await saveQuote(quote);setToast("הצעת המחיר נשמרה");}} onConvert={async(quote:Quote,lead?:Lead)=>{if(!allowWrite())throw new Error("מצב תצוגה הוא לקריאה בלבד");const accountId=await convertApprovedQuoteToCustomer(quote,lead);setToast("חשבון הלקוח הוקם");return accountId;}} onOpenLeads={()=>navigate("leads")}/>}
+          {view==="customers"&&<Customers customers={customers} store={store} openCustomer={openCustomer} openTicket={openTicketForCustomer} openTask={openTaskForCustomer}/>}
+          {view==="customer"&&<CustomerCard customer={customers.find(c=>c.id===selectedCustomer)||seedCustomers[0]} store={store} openTicket={openTicket} openTask={()=>{if(allowWrite())setModal("task");}}/>}
           {view==="tickets"&&<Tickets tickets={scopedTickets} machines={store.machines} isStaff={isStaff} onUpdate={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===id?{...t,status,updatedAt:new Date().toISOString()}:t)}));setToast("סטטוס הקריאה עודכן");}} onOpen={id=>{setSelectedTicket(id);setModal("detail");}} onClose={id=>{if(!allowWrite())return;setSelectedTicket(id);setModal("close");}} openTicket={openTicket}/>}
           {view==="machines"&&<Machines machines={scopedMachines} isStaff={isStaff} openTicket={openTicket} onStatus={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,machines:s.machines.map(m=>m.id===id?{...m,status}:m)}));}}/>}
           {view==="orders"&&<Orders orders={scopedOrders} isStaff={isStaff} onChange={(id,data)=>{if(!allowWrite())return;setStore(s=>({...s,orders:s.orders.map(o=>o.id===id?{...o,...data}:o)}));setToast(isStaff?"ההזמנה עודכנה":"השינוי נשמר וממתין לאישור הצוות");}}/>}
           {view==="tasks"&&<Tasks tasks={store.tasks} onCreate={()=>{if(allowWrite())setModal("task");}} onStatus={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,tasks:s.tasks.map(t=>t.id===id?{...t,status}:t)}));}}/>}
           {view==="reports"&&<Reports store={store}/>}
-          {view==="access"&&profile.role==="admin"&&<AccessManagement users={users} readOnly={readOnly} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())return;try{await updateUserAccess(user.uid,role,accountIds,status);setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));}}} onPreview={next=>enterPreview(next)}/>}
-          {view==="contract"&&<Contract customer={customers.find(c=>c.id===clientId)!} machines={scopedMachines}/>}
+          {view==="access"&&profile.role==="admin"&&<AccessManagement customers={customers} users={users} readOnly={readOnly} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())return;try{await updateUserAccess(user.uid,role,accountIds,status);setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));}}} onPreview={next=>enterPreview(next)}/>}
+          {view==="contract"&&<Contract customer={customers.find(c=>c.id===clientId)||seedCustomers[0]} machines={scopedMachines}/>}
           {view==="contact"&&<Contact/>}
         </div>
       </main>
       <div className="mobile-nav">{nav.slice(0,5).map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><Icon size={19}/>{n.label}</button>})}</div>
-      {modal==="ticket"&&<TicketModal accountId={isStaff?selectedCustomer:clientId} allowAccountChange={isStaff} preselectedMachine={selectedTicket} machines={store.machines} onClose={()=>setModal(null)} onSave={ticket=>{setStore(s=>({...s,tickets:[ticket,...s.tickets]}));setModal(null);setView("tickets");setToast(`הקריאה ${ticket.id} נפתחה בהצלחה`);}}/>}
-      {modal==="task"&&<TaskModal accountId={selectedCustomer} onClose={()=>setModal(null)} onSave={task=>{setStore(s=>({...s,tasks:[task,...s.tasks]}));setModal(null);setToast("המשימה נוצרה בהצלחה");}}/>}
+      {modal==="ticket"&&<TicketModal customers={customers} accountId={isStaff?selectedCustomer:clientId} allowAccountChange={isStaff} preselectedMachine={selectedTicket} machines={store.machines} onClose={()=>setModal(null)} onSave={ticket=>{setStore(s=>({...s,tickets:[ticket,...s.tickets]}));setModal(null);setView("tickets");setToast(`הקריאה ${ticket.id} נפתחה בהצלחה`);}}/>}
+      {modal==="task"&&<TaskModal customers={customers} accountId={selectedCustomer} onClose={()=>setModal(null)} onSave={task=>{setStore(s=>({...s,tasks:[task,...s.tasks]}));setModal(null);setToast("המשימה נוצרה בהצלחה");}}/>}
       {modal==="close"&&<CloseModal onClose={()=>setModal(null)} onSave={reason=>{setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===selectedTicket?{...t,status:"נסגרה",closedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),closeReason:reason}:t)}));setModal(null);setToast("הקריאה נסגרה");}}/>}
       {modal==="detail"&&<TicketDetailModal ticket={store.tickets.find(t=>t.id===selectedTicket)!} machine={store.machines.find(m=>m.id===store.tickets.find(t=>t.id===selectedTicket)?.machineId)} onClose={()=>setModal(null)}/>}
-      {previewOpen&&<PreviewModal currentAccount={selectedCustomer} onClose={()=>setPreviewOpen(false)} onEnter={enterPreview}/>}
+      {previewOpen&&<PreviewModal customers={customers} currentAccount={selectedCustomer} onClose={()=>setPreviewOpen(false)} onEnter={enterPreview}/>}
       {syncError&&<div className="sync-error"><LockKeyhole size={16}/><span>הסנכרון ממתין להגדרת Firebase: {syncError}</span></div>}
       {toast&&<div className="toast">✓ {toast}</div>}
     </div>
@@ -346,7 +382,7 @@ function LoadingScreen(){return <div className="loading-screen" dir="rtl"><Brand
 
 function PendingAccess({profile,onLogout}:{profile:UserProfile;onLogout:()=>void}){return <div className="pending-screen" dir="rtl"><div className="pending-card"><span><LockKeyhole size={26}/></span><small>החשבון נוצר בהצלחה</small><h1>הגישה ממתינה לאישור</h1><p>החשבון של <strong>{profile.email}</strong> מחובר. מנהל המערכת צריך לשייך אותו ללקוח ולהגדיר הרשאה לפני הצגת מידע.</p><button onClick={onLogout}><LogOut size={17}/> יציאה</button></div></div>}
 
-function PreviewModal({currentAccount,onClose,onEnter}:{currentAccount:string;onClose:()=>void;onEnter:(preview:PreviewContext)=>void}){
+function PreviewModal({customers,currentAccount,onClose,onEnter}:{customers:Customer[];currentAccount:string;onClose:()=>void;onEnter:(preview:PreviewContext)=>void}){
   const [previewRole,setPreviewRole]=useState<Role>("customer");
   const [accountId,setAccountId]=useState(currentAccount||"c1");
   const needsAccount=previewRole==="customer"||previewRole==="multi";
@@ -359,11 +395,11 @@ function PreviewModal({currentAccount,onClose,onEnter}:{currentAccount:string;on
   return <Modal title="תצוגת מערכת והרשאות" onClose={onClose}><div className="preview-modal"><div className="preview-note"><Eye size={18}/><div><strong>צפייה בטוחה</strong><span>המערכת תוצג בדיוק לפי התפקיד שתבחר, ללא אפשרות לשנות נתונים.</span></div></div><div className="preview-role-grid">{options.map(([id,title,description,Icon])=><button key={id} className={previewRole===id?"active":""} onClick={()=>setPreviewRole(id)}><Icon size={19}/><strong>{title}</strong><small>{description}</small></button>)}</div>{needsAccount&&<label className="preview-account"><span>איזה לקוח להציג?</span><select value={accountId} onChange={event=>setAccountId(event.target.value)}>{customers.map(customer=><option value={customer.id} key={customer.id}>{customer.name}</option>)}</select></label>}<footer><button onClick={onClose}>ביטול</button><button className="primary" onClick={()=>onEnter({role:previewRole,accountId})}><Eye size={16}/> כניסה למצב תצוגה</button></footer></div></Modal>
 }
 
-function AccessManagement({users,readOnly,onSave,onPreview}:{users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
-  return <><SectionTitle title="ניהול והרשאות"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.length}</strong> משתמשים רשומים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(user=>user.role==="admin").length}</strong> מנהלי מערכת</span></div></div><section className="panel access-panel"><div className="access-head"><h3>משתמשי המערכת</h3>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>אין משתמשים רשומים</strong></div>}</div></section></>
+function AccessManagement({customers,users,readOnly,onSave,onPreview}:{customers:Customer[];users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
+  return <><SectionTitle title="ניהול והרשאות"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.length}</strong> משתמשים רשומים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(user=>user.role==="admin").length}</strong> מנהלי מערכת</span></div></div><section className="panel access-panel"><div className="access-head"><h3>משתמשי המערכת</h3>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow customers={customers} key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>אין משתמשים רשומים</strong></div>}</div></section></>
 }
 
-function UserAccessRow({user,readOnly,onSave,onPreview}:{user:UserProfile;readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
+function UserAccessRow({customers,user,readOnly,onSave,onPreview}:{customers:Customer[];user:UserProfile;readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
   const [editing,setEditing]=useState(false);
   const [role,setRole]=useState<Role>(user.role);
   const [accountIds,setAccountIds]=useState<string[]>(user.accountIds);
@@ -386,14 +422,16 @@ function firebaseMessage(error:unknown){
 function SectionTitle({title,sub,action}:{title:string;sub?:string;action?:React.ReactNode}) {return <div className="section-title"><div><h2>{title}</h2>{sub&&<p>{sub}</p>}</div>{action}</div>}
 function Kpi({label,value,meta,tone="default",onClick}:{label:string;value:string|number;meta:string;tone?:string;onClick?:()=>void}) {return <button className={`kpi ${tone}`} onClick={onClick}><span>{label}</span><strong>{value}</strong><small>{meta}</small></button>}
 
-function AdminDashboard({store,go,openCustomer,greeting,firstName}:{store:Store;go:(v:View)=>void;openCustomer:(id:string)=>void;greeting:string;firstName:string}) {
+function AdminDashboard({store,sales,customers,go,openCustomer,greeting,firstName}:{store:Store;sales:SalesWorkspace;customers:Customer[];go:(v:View)=>void;openCustomer:(id:string)=>void;greeting:string;firstName:string}) {
   const open=store.tickets.filter(t=>!closed(t.status)), urgent=open.filter(t=>t.urgency==="דחופה");
   const pending=store.orders.filter(o=>o.status==="ממתין לאישור");
   const risks=customers.filter(c=>riskReasons(c,store).length>0);
   return <><section className="ops-hero"><CoffeeBotanical className="hero-coffee-branch"/><div className="ops-copy"><span className="hero-kicker"><Activity size={15}/> תמונת מצב</span><h2>{greeting}, {firstName}</h2><div className="hero-actions"><button className="hero-primary" onClick={()=>go("tickets")}><Headphones size={17}/> קריאות שירות</button><button onClick={()=>go("tasks")}><CalendarDays size={17}/> משימות</button></div></div><div className="service-score"><div className="score-ring"><div><strong>91</strong><span>ציון שירות</span></div></div><div className="score-copy"><span>↑ 4.2% מהחודש שעבר</span><small>עמידה ביעדי SLA</small></div></div></section>
     <SectionTitle title="סקירה"/>
     <div className="kpi-grid">
-      <Kpi label="לקוחות פעילים" value={customers.filter(c=>c.status==="פעיל").length} meta="מתוך 8 לקוחות"/>
+      <Kpi label="לידים פעילים" value={sales.leads.filter(lead=>!["נסגר","לא רלוונטי"].includes(lead.status)).length} meta="בתהליך מכירה" tone="purple" onClick={()=>go("leads")}/>
+      <Kpi label="הצעות פתוחות" value={sales.quotes.filter(quote=>!["אושרה","נדחתה"].includes(quote.status)).length} meta="טיוטות והצעות שנשלחו" tone="orange" onClick={()=>go("quotes")}/>
+      <Kpi label="לקוחות פעילים" value={customers.filter(c=>c.status==="פעיל").length} meta={`מתוך ${customers.length} לקוחות`}/>
       <Kpi label="קריאות פתוחות" value={open.length} meta={`${open.filter(t=>t.status==="ממתין לטכנאי").length} ממתינות לטכנאי`} tone="blue" onClick={()=>go("tickets")}/>
       <Kpi label="קריאות דחופות" value={urgent.length} meta="דורשות טיפול עכשיו" tone="red" onClick={()=>go("tickets")}/>
       <Kpi label="הזמנות לאישור" value={pending.length} meta="לחודש אוגוסט" tone="orange" onClick={()=>go("orders")}/>
@@ -425,7 +463,7 @@ function CustomerDashboard({customer,store,go,openTicket,greeting}:{customer:Cus
   </>;
 }
 
-function Customers({store,openCustomer,openTicket,openTask}:{store:Store;openCustomer:(id:string)=>void;openTicket:(id:string)=>void;openTask:(id:string)=>void}) {
+function Customers({customers,store,openCustomer,openTicket,openTask}:{customers:Customer[];store:Store;openCustomer:(id:string)=>void;openTicket:(id:string)=>void;openTask:(id:string)=>void}) {
   const [q,setQ]=useState(""); const [filter,setFilter]=useState("הכל");
   const rows=customers.filter(c=>(c.name+c.contactName+c.city).toLowerCase().includes(q.toLowerCase())&&(filter==="הכל"||c.status===filter));
   return <><SectionTitle title="לקוחות" sub={`${customers.length} חשבונות לקוח במערכת`}/>
@@ -493,13 +531,13 @@ function Contract({customer,machines}:{customer:Customer;machines:Machine[]}) {r
 function Contact(){return <><SectionTitle title="יצירת קשר"/><div className="contact-grid"><a className="contact-card whatsapp" href="https://wa.me/97235555555?text=שלום%2C%20אני%20צריך%20עזרה%20בנושא%20שירות%20לקוחות%20%2F%20קפה%20%2F%20מכונה." target="_blank"><span>◌</span><h3>WhatsApp לשירות</h3><p>בשעות הפעילות</p><b>פתיחת שיחה ←</b></a><a className="contact-card" href="tel:035555555"><span>☎</span><h3>טלפון שירות</h3><p>א׳–ה׳, 08:00–17:00</p><b>03-555-5555</b></a><a className="contact-card" href="mailto:service@misterbean.co.il"><span>＠</span><h3>דוא״ל</h3><b>service@misterbean.co.il</b></a></div><section className="panel hours"><h3>שעות פעילות</h3><div><span>ימים א׳–ה׳</span><strong>08:00–17:00</strong></div><div><span>יום ו׳ וערבי חג</span><strong>08:00–12:00</strong></div><p>לתקלה דחופה מחוץ לשעות הפעילות יש לפתוח קריאה במערכת.</p></section></>}
 
 function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><div className="modal"><header><h2>{title}</h2><button onClick={onClose}>×</button></header>{children}</div></div>}
-function TicketModal({accountId,allowAccountChange,preselectedMachine,machines,onClose,onSave}:{accountId:string;allowAccountChange:boolean;preselectedMachine:string;machines:Machine[];onClose:()=>void;onSave:(t:Ticket)=>void}) {
+function TicketModal({customers,accountId,allowAccountChange,preselectedMachine,machines,onClose,onSave}:{customers:Customer[];accountId:string;allowAccountChange:boolean;preselectedMachine:string;machines:Machine[];onClose:()=>void;onSave:(t:Ticket)=>void}) {
   const [activeAccount,setActiveAccount]=useState(accountId);
   const customer=customers.find(c=>c.id===activeAccount)||customers[0]; const available=machines.filter(m=>m.accountId===customer.id);
   const submit=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget), machineId=String(f.get("machine")), eventId=Math.round(e.timeStamp);onSave({id:`SR-${eventId}`,accountId:customer.id,site:String(f.get("site")),machineId,type:String(f.get("type")),urgency:String(f.get("urgency")),status:"התקבלה",description:String(f.get("description")),contact:String(f.get("contact")),phone:String(f.get("phone")),assignedTo:"טרם הוקצה",openedAt:new Date().toISOString(),updatedAt:new Date().toISOString()})};
   return <Modal title="פתיחת קריאת שירות" onClose={onClose}><form onSubmit={submit} className="modal-form">{allowAccountChange?<label className="account-picker"><span>לקוח</span><select value={activeAccount} onChange={e=>setActiveAccount(e.target.value)}>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>:<div className="customer-context"><span className="customer-avatar">{customer.name.slice(0,2)}</span><div><small>עבור</small><strong>{customer.name}</strong></div></div>}<div className="form-grid"><label><span>סניף</span><select name="site" required key={`site-${activeAccount}`}>{customer.branches.map(b=><option key={b}>{b}</option>)}</select></label><label><span>מכונה</span><select name="machine" defaultValue={preselectedMachine} key={`machine-${activeAccount}`}><option value="">בעיה כללית</option>{available.map(m=><option key={m.id} value={m.id}>{m.model} · {m.serial}</option>)}</select></label><label><span>סוג תקלה</span><select name="type">{["נזילה","המכונה לא נדלקת","קפה יוצא חלש","אין חימום","בעיית טחינה","בעיית חלב / מקציף","דרוש ניקוי","תקלה חוזרת","בקשת הדרכה"].map(x=><option key={x}>{x}</option>)}</select></label><label><span>דחיפות</span><select name="urgency"><option>רגילה</option><option>גבוהה</option><option>דחופה</option></select></label><label className="full"><span>תיאור הבעיה</span><textarea name="description" required placeholder="מה קרה ומתי התחילה הבעיה?"/></label><label><span>איש קשר</span><input name="contact" key={`contact-${activeAccount}`} defaultValue={customer.contactName}/></label><label><span>טלפון לחזרה</span><input name="phone" key={`phone-${activeAccount}`} defaultValue={customer.phone}/></label></div><footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" type="submit">פתיחת הקריאה</button></footer></form></Modal>
 }
-function TaskModal({accountId,onClose,onSave}:{accountId:string;onClose:()=>void;onSave:(t:Task)=>void}) {const submit=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);onSave({id:`t-${Math.round(e.timeStamp)}`,accountId:String(f.get("account")),title:String(f.get("title")),type:String(f.get("type")),dueDate:String(f.get("date")),priority:String(f.get("priority")),status:"פתוחה",assignedTo:String(f.get("assignee"))})};return <Modal title="יצירת משימה" onClose={onClose}><form onSubmit={submit} className="modal-form"><div className="form-grid"><label className="full"><span>כותרת המשימה</span><input name="title" required placeholder="מה צריך לבצע?"/></label><label><span>לקוח</span><select name="account" defaultValue={accountId}>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label><span>סוג</span><select name="type"><option>שירות</option><option>הזמנה</option><option>מכונה</option><option>חוזה</option><option>שימור</option><option>כללי</option></select></label><label><span>תאריך יעד</span><input type="date" name="date" defaultValue="2026-08-02" required/></label><label><span>עדיפות</span><select name="priority"><option>נמוכה</option><option>בינונית</option><option>גבוהה</option></select></label><label className="full"><span>אחראי</span><select name="assignee"><option>רוני שירות</option><option>אבי טכנאי</option><option>מיכל כהן</option><option>דנה שגב</option></select></label></div><footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" type="submit">יצירת משימה</button></footer></form></Modal>}
+function TaskModal({customers,accountId,onClose,onSave}:{customers:Customer[];accountId:string;onClose:()=>void;onSave:(t:Task)=>void}) {const submit=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget);onSave({id:`t-${Math.round(e.timeStamp)}`,accountId:String(f.get("account")),title:String(f.get("title")),type:String(f.get("type")),dueDate:String(f.get("date")),priority:String(f.get("priority")),status:"פתוחה",assignedTo:String(f.get("assignee"))})};return <Modal title="יצירת משימה" onClose={onClose}><form onSubmit={submit} className="modal-form"><div className="form-grid"><label className="full"><span>כותרת המשימה</span><input name="title" required placeholder="מה צריך לבצע?"/></label><label><span>לקוח</span><select name="account" defaultValue={accountId}>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label><span>סוג</span><select name="type"><option>שירות</option><option>הזמנה</option><option>מכונה</option><option>חוזה</option><option>שימור</option><option>כללי</option></select></label><label><span>תאריך יעד</span><input type="date" name="date" defaultValue="2026-08-02" required/></label><label><span>עדיפות</span><select name="priority"><option>נמוכה</option><option>בינונית</option><option>גבוהה</option></select></label><label className="full"><span>אחראי</span><select name="assignee"><option>רוני שירות</option><option>אבי טכנאי</option><option>מיכל כהן</option><option>דנה שגב</option></select></label></div><footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" type="submit">יצירת משימה</button></footer></form></Modal>}
 function CloseModal({onClose,onSave}:{onClose:()=>void;onSave:(s:string)=>void}) {const [reason,setReason]=useState("");return <Modal title="סגירת קריאה" onClose={onClose}><div className="modal-form"><p>כדי לסגור את הקריאה חובה לתעד את סיבת הסגירה.</p><label><span>סיבת סגירה</span><select value={reason} onChange={e=>setReason(e.target.value)}><option value="">בחירת סיבה</option><option>התקלה טופלה</option><option>הוחלף חלק</option><option>בוצעה הדרכה</option><option>לא נמצאה תקלה</option><option>בוטל על ידי הלקוח</option></select></label><footer><button onClick={onClose}>ביטול</button><button className="danger-btn" disabled={!reason} onClick={()=>onSave(reason)}>סגירת הקריאה</button></footer></div></Modal>}
 
 function TicketDetailModal({ticket,machine,onClose}:{ticket:Ticket;machine?:Machine;onClose:()=>void}) {
