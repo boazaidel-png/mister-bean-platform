@@ -2,6 +2,7 @@
 
 import { createContext, FormEvent, useContext, useEffect, useState } from "react";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import {
   Activity,
   Building2,
@@ -25,10 +26,6 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import {
-  LeadsWorkspace,
-  QuotesWorkspace,
-} from "@/components/sales-workspace";
 import {
   convertApprovedQuoteToCustomer,
   deleteQuote,
@@ -63,6 +60,21 @@ import type {
   UserProfile,
   View,
 } from "@/lib/platform-types";
+
+const SalesWorkspaceLoading = () => (
+  <div className="workspace-loading" role="status" aria-live="polite">
+    <i />
+    <span>טוען את סביבת המכירות…</span>
+  </div>
+);
+const LeadsWorkspace = dynamic(
+  () => import("@/components/sales-workspace").then((module) => module.LeadsWorkspace),
+  { ssr: false, loading: SalesWorkspaceLoading },
+);
+const QuotesWorkspace = dynamic(
+  () => import("@/components/sales-workspace").then((module) => module.QuotesWorkspace),
+  { ssr: false, loading: SalesWorkspaceLoading },
+);
 
 const seedCustomers: Customer[] = [
   { id:"c1",name:"Matrix",status:"פעיל",rank:"אסטרטגי",contactName:"נועה לוי",phone:"050-555-1101",email:"noa@matrix-demo.co.il",city:"הרצליה",address:"אבא אבן 10",owner:"מיכל כהן",monthlyKg:145,contractEnd:"2027-03-31",serviceLevel:"פרימיום",branches:["מטה הרצליה","תל אביב","חיפה"] },
@@ -186,6 +198,11 @@ export default function Home() {
 
   useEffect(()=>{
     let active=true;
+    const authTimeout=window.setTimeout(()=>{
+      if(!active)return;
+      setAuthError("החיבור מתעכב. אפשר לנסות שוב או לבדוק את חיבור האינטרנט.");
+      setAuthReady(true);
+    },12000);
     let unsubscribeStore:()=>void=()=>{};
     let unsubscribeSales:()=>void=()=>{};
     let unsubscribeCustomers:()=>void=()=>{};
@@ -200,6 +217,7 @@ export default function Home() {
       setAuthReady(false);
       if(!user){
         if(active){
+          window.clearTimeout(authTimeout);
           setProfile(null);
           setPreview(null);
           setAuthReady(true);
@@ -240,11 +258,12 @@ export default function Home() {
         }catch(error){
           if(active)setAuthError(firebaseMessage(error));
         }finally{
+          window.clearTimeout(authTimeout);
           if(active)setAuthReady(true);
         }
       })();
     });
-    return()=>{active=false;unsubscribeStore();unsubscribeSales();unsubscribeCustomers();unsubscribeUsers();unsubscribeAuth();};
+    return()=>{active=false;window.clearTimeout(authTimeout);unsubscribeStore();unsubscribeSales();unsubscribeCustomers();unsubscribeUsers();unsubscribeAuth();};
   },[]);
   useEffect(()=>{
     if(!storeReady||!profile||profile.status!=="active"||preview)return;

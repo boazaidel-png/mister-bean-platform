@@ -9,6 +9,7 @@ import {
   setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from "firebase/auth";
 import {
@@ -135,7 +136,27 @@ export async function signInWithGoogle() {
   await setPersistence(auth, browserLocalPersistence);
   const provider = new GoogleAuthProvider();
   provider.setCustomParameters({ prompt: "select_account" });
-  return signInWithPopup(auth, provider);
+  const prefersRedirect =
+    typeof window !== "undefined" &&
+    (window.matchMedia("(max-width: 820px)").matches ||
+      window.matchMedia("(pointer: coarse)").matches);
+  if (prefersRedirect) {
+    await signInWithRedirect(auth, provider);
+    return;
+  }
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes("auth/popup-blocked") ||
+      message.includes("auth/cancelled-popup-request")
+    ) {
+      await signInWithRedirect(auth, provider);
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function signInWithEmail(email: string, password: string) {
