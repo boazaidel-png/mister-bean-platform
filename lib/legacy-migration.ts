@@ -77,6 +77,7 @@ function legacyLeadTasks(value: unknown, source: UnknownRecord): LeadTask[] {
 function legacyLead(id: string, source: UnknownRecord): Lead {
   const statusText = text(source.status);
   const priorityText = text(source.priority);
+  const deletedAt = text(source.deletedAt);
   const updatedAt = timestamp(
     source.updatedAt || source.lastUpdatedAt || source.lastUpdated,
   );
@@ -114,7 +115,7 @@ function legacyLead(id: string, source: UnknownRecord): Lead {
     meetingGuest: text(source.meetingGuest),
     sheet: text(source.sheet) || "ראשוני",
     deleted: bool(source.deleted),
-    deletedAt: text(source.deletedAt) || undefined,
+    ...(deletedAt ? { deletedAt } : {}),
     statusChangedAt: timestamp(source.statusChangedAt || updatedAt),
     statusHistory: rows(source.statusHistory).map((entry) => ({
       from: text(entry.from || entry.oldStatus),
