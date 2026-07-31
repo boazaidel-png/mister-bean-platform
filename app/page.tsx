@@ -211,6 +211,17 @@ export default function Home() {
     void savePlatformStore(store).catch(error=>setSyncError(firebaseMessage(error)));
   },[store,storeReady,profile,preview]);
   useEffect(()=>{ if(toast){ const t=setTimeout(()=>setToast(""),2800); return()=>clearTimeout(t); } },[toast]);
+  useEffect(()=>{
+    if(!mobileOpen)return;
+    const previousOverflow=document.body.style.overflow;
+    const closeOnEscape=(event:KeyboardEvent)=>{if(event.key==="Escape")setMobileOpen(false);};
+    document.body.style.overflow="hidden";
+    window.addEventListener("keydown",closeOnEscape);
+    return()=>{
+      document.body.style.overflow=previousOverflow;
+      window.removeEventListener("keydown",closeOnEscape);
+    };
+  },[mobileOpen]);
 
   const role = preview?.role || profile?.role || null;
   const isStaff = role==="service"||role==="admin";
@@ -252,9 +263,10 @@ export default function Home() {
           <button className="logout" onClick={()=>void signOutUser()} aria-label="התנתקות"><LogOut size={17}/><span>התנתקות</span></button>
         </div>
       </aside>
+      {mobileOpen&&<button className="mobile-scrim" onClick={()=>setMobileOpen(false)} aria-label="סגירת התפריט"/>}
       <main>
         <header className="topbar">
-          <button className="menu" onClick={()=>setMobileOpen(v=>!v)} aria-label="פתיחת תפריט"><Menu size={23}/></button>
+          <button className="menu" onClick={()=>setMobileOpen(v=>!v)} aria-label={mobileOpen?"סגירת תפריט":"פתיחת תפריט"} aria-expanded={mobileOpen}><Menu size={23}/></button>
           <div className="page-heading"><span>{greeting}, {firstName}</span><h1>{nav.find(n=>n.id===view)?.label || (view==="customer"?"כרטיס לקוח":"מערכת שירות")}</h1></div>
           <div className="top-actions">
             {!isStaff&&role==="multi"&&<select value={selectedCustomer} onChange={e=>setSelectedCustomer(e.target.value)}><option value="c1">Matrix — כל הסניפים</option></select>}
@@ -455,7 +467,7 @@ function Machines({machines,isStaff,openTicket,onStatus}:{machines:Machine[];isS
 function Orders({orders,isStaff,onChange}:{orders:Order[];isStaff:boolean;onChange:(id:string,data:Partial<Order>)=>void}) {
   const total=orders.reduce((s,o)=>s+(o.approvedKg||o.requestedKg),0);
   if(!isStaff){const o=orders[0];return <><SectionTitle title="הזמנת קפה" sub="ניהול הכמות והתערובת לחודש הבא"/><section className="order-hero"><div><span>ההזמנה הבאה</span><h2>{o.month}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{o.requestedKg}</strong><span>ק״ג</span></div></section><OrderEditor order={o} onSave={onChange}/><section className="panel"><h3>12 חודשים קדימה</h3><div className="month-row">{["אוג׳","ספט׳","אוק׳","נוב׳","דצמ׳","ינו׳","פבר׳","מרץ","אפר׳","מאי","יוני","יולי"].map((m,i)=><div className={i===0?"current":""} key={m}><span>{m}</span><strong>{i===0?o.requestedKg:o.defaultKg} ק״ג</strong><small>{i===0?"ניתן לעריכה":"נעול"}</small></div>)}</div></section></>}
-  return <><SectionTitle title="הזמנות קפה" sub="הזמנות לחודש אוגוסט 2026" action={<button onClick={()=>{const csv="לקוח,כמות,תערובת,סטטוס\n"+orders.map(o=>`${customerName(o.accountId)},${o.requestedKg},${o.blend},${o.status}`).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv"}));a.download="coffee-orders.csv";a.click();}}>ייצוא CSV</button>}/><div className="kpi-grid"><Kpi label="סך ק״ג לחודש" value={total} meta="לפי הכמות המעודכנת"/><Kpi label="ממתינות לאישור" value={orders.filter(o=>o.status==="ממתין לאישור").length} meta="כולל הזמנות חריגות" tone="orange"/><Kpi label="לא עודכנו" value={orders.filter(o=>o.status==="ממתין לעדכון לקוח").length} meta="נדרשת תזכורת" tone="red"/></div><div className="table-wrap"><table><thead><tr><th>לקוח</th><th>ברירת מחדל</th><th>מבוקש</th><th>שינוי</th><th>מאושר</th><th>תערובת</th><th>סטטוס</th><th></th></tr></thead><tbody>{orders.map(o=>{const diff=Math.round((o.requestedKg-o.defaultKg)/o.defaultKg*100);return <tr key={o.id}><td><strong>{customerName(o.accountId)}</strong></td><td>{o.defaultKg} ק״ג</td><td>{o.requestedKg} ק״ג</td><td><Badge>{Math.abs(diff)>30?"חריג":`${diff>0?"+":""}${diff}%`}</Badge></td><td><input className="kg-input small" type="number" value={o.approvedKg||o.requestedKg} onChange={e=>onChange(o.id,{approvedKg:+e.target.value})}/></td><td>{o.blend}</td><td><Badge>{o.status}</Badge></td><td><button className="row-action" onClick={()=>onChange(o.id,{status:"אושר",approvedKg:o.approvedKg||o.requestedKg})}>אישור</button></td></tr>})}</tbody></table></div></>;
+  return <><SectionTitle title="הזמנות קפה" sub="הזמנות לחודש אוגוסט 2026" action={<button onClick={()=>{const csv="לקוח,כמות,תערובת,סטטוס\n"+orders.map(o=>`${customerName(o.accountId)},${o.requestedKg},${o.blend},${o.status}`).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv"}));a.download="coffee-orders.csv";a.click();}}>ייצוא CSV</button>}/><div className="kpi-grid"><Kpi label="סך ק״ג לחודש" value={total} meta="לפי הכמות המעודכנת"/><Kpi label="ממתינות לאישור" value={orders.filter(o=>o.status==="ממתין לאישור").length} meta="כולל הזמנות חריגות" tone="orange"/><Kpi label="לא עודכנו" value={orders.filter(o=>o.status==="ממתין לעדכון לקוח").length} meta="נדרשת תזכורת" tone="red"/></div><div className="table-wrap"><table><thead><tr><th>לקוח</th><th>ברירת מחדל</th><th>מבוקש</th><th>שינוי</th><th>מאושר</th><th>תערובת</th><th>סטטוס</th><th></th></tr></thead><tbody>{orders.map(o=>{const diff=Math.round((o.requestedKg-o.defaultKg)/o.defaultKg*100);return <tr key={o.id}><td><strong>{customerName(o.accountId)}</strong></td><td>{o.defaultKg} ק״ג</td><td>{o.requestedKg} ק״ג</td><td><Badge>{Math.abs(diff)>30?"חריג":`${diff>0?"+":""}${diff}%`}</Badge></td><td><input className="kg-input small" type="number" value={o.approvedKg||o.requestedKg} onChange={e=>onChange(o.id,{approvedKg:+e.target.value})}/></td><td>{o.blend}</td><td><Badge>{o.status}</Badge></td><td><button className="row-action" onClick={()=>onChange(o.id,{status:"אושר",approvedKg:o.approvedKg||o.requestedKg})}>אישור</button></td></tr>})}</tbody></table></div><div className="mobile-cards order-mobile-cards">{orders.map(o=>{const diff=Math.round((o.requestedKg-o.defaultKg)/o.defaultKg*100);return <article className="mobile-card order-mobile-card" key={o.id}><div className="mobile-card-head"><div><strong>{customerName(o.accountId)}</strong><small>{o.blend}</small></div><Badge>{o.status}</Badge></div><div className="mobile-order-metrics"><span><small>ברירת מחדל</small><strong>{o.defaultKg} ק״ג</strong></span><span><small>מבוקש</small><strong>{o.requestedKg} ק״ג</strong></span><span><small>שינוי</small><Badge>{Math.abs(diff)>30?"חריג":`${diff>0?"+":""}${diff}%`}</Badge></span></div><label className="mobile-order-approval"><span>כמות מאושרת</span><div className="input-suffix"><input type="number" value={o.approvedKg||o.requestedKg} onChange={e=>onChange(o.id,{approvedKg:+e.target.value})}/><b>ק״ג</b></div></label><button className="primary" onClick={()=>onChange(o.id,{status:"אושר",approvedKg:o.approvedKg||o.requestedKg})}>אישור הזמנה</button></article>})}</div></>;
 }
 
 function OrderEditor({order,onSave}:{order:Order;onSave:(id:string,d:Partial<Order>)=>void}) {
