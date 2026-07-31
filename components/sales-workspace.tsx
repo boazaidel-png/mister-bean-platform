@@ -1,11 +1,13 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Building2,
+  CalendarDays,
   CheckCircle2,
   CircleDollarSign,
+  Download,
   FileInput,
   FileText,
   Filter,
@@ -13,9 +15,22 @@ import {
   Plus,
   Search,
   Sparkles,
+  Trash2,
+  Upload,
   UsersRound,
   X,
 } from "lucide-react";
+import {
+  addonCatalog,
+  calculateQuote,
+  equipmentCatalog,
+  importers,
+  recommendedEquipment,
+} from "@/lib/quote-engine";
+import {
+  fetchLegacyWorkspace,
+  type LegacyMigrationSnapshot,
+} from "@/lib/legacy-firebase";
 import { parseLegacyWorkspace } from "@/lib/legacy-migration";
 import type {
   Lead,
@@ -47,14 +62,13 @@ const quoteStatuses: QuoteStatus[] = [
   "אושרה",
   "נדחתה",
 ];
-const machineModels = [
-  "Dr. Coffee F11",
-  "Dr. Coffee F15",
-  "Dr. Coffee Coffee Break",
-  "Jura X10",
-  "Jura E8",
-  "Jetinno JL15",
-  "Emilio Mini",
+const blendCatalog = [
+  { name: "EMERALD", cost: 50 },
+  { name: "DX", cost: 60 },
+  { name: "HB+", cost: 70 },
+  { name: "TUSCANINI", cost: 70 },
+  { name: "PEGANINI", cost: 70 },
+  { name: "STRADIVARI", cost: 90 },
 ];
 const now = () => new Date().toISOString();
 const id = (prefix: string) =>
@@ -64,6 +78,13 @@ const money = (value: number) =>
     style: "currency",
     currency: "ILS",
     maximumFractionDigits: 0,
+  }).format(value || 0);
+const cupMoney = (value: number) =>
+  new Intl.NumberFormat("he-IL", {
+    style: "currency",
+    currency: "ILS",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value || 0);
 const displayDate = (value: string) =>
   value
@@ -91,9 +112,18 @@ const emptyLead = (): Lead => ({
   monthlyConsumption: 0,
   pricePerKg: 0,
   notes: "",
+  currentStatus: "",
+  nextAction: "",
   meetingDate: "",
-  meetingTime: "",
+  meetingTime: "09:00",
   meetingLocation: "",
+  meetingGuest: "",
+  sheet: "ראשוני",
+  deleted: false,
+  statusChangedAt: now(),
+  statusHistory: [],
+  tasks: [],
+  lastUpdated: now().slice(0, 10),
   quoteIds: [],
   createdAt: now(),
   updatedAt: now(),
@@ -121,9 +151,22 @@ const quoteFromLead = (lead?: Lead): Quote => ({
     },
   ],
   equipment: [],
+  equipmentCosts: {},
+  allocation: [],
+  supplierMonths: 8,
   leaseMonths: 24,
+  manualLeasePerSet: 0,
   saleMargin: 15,
+  clientCostMonths: 36,
   extraMonthlyCost: 0,
+  clientPayTerm: 0,
+  importerPayTerm: 0,
+  coffeeSupplierPayTerm: 0,
+  cashflowMonths: 36,
+  financingMonths: 0,
+  financedAmount: 0,
+  annualInterest: 0,
+  applyVolumeDiscount: true,
   owner: lead?.owner || "בועז",
   notes: "",
   createdAt: now(),
@@ -156,7 +199,7 @@ function FlowStrip({
         <span className="flow-icon">
           <UsersRound size={18} />
         </span>
-        <b>{leads.filter((lead) => !["נסגר", "לא רלוונטי"].includes(lead.status)).length}</b>
+        <b>{leads.filter((lead) => !lead.deleted && !["נסגר", "לא רלוונטי"].includes(lead.status)).length}</b>
         <small>לידים פעילים</small>
       </div>
       <ArrowLeft size={20} />
@@ -179,9 +222,129 @@ function FlowStrip({
   );
 }
 
+type LeadTab =
+  | "לטיפול היום"
+  | "לידים בתהליך"
+  | "מתקדם"
+  | "פגישות"
+  | "הצעות"
+  | "לפנייה עתידית"
+  | "נסגר"
+  | "לא רלוונטי"
+  | "נמחקו";
+
+const leadTabs: LeadTab[] = [
+  "לטיפול היום",
+  "לידים בתהליך",
+  "מתקדם",
+  "פגישות",
+  "הצעות",
+  "לפנייה עתידית",
+  "נסגר",
+  "לא רלוונטי",
+  "נמחקו",
+];
+
+const today = () => new Date().toISOString().slice(0, 10);
+const isDue = (value: string) => Boolean(value && value <= today());
+const isActiveLead = (lead: Lead) =>
+  !lead.deleted &&
+  !["נסגר", "לא רלוונטי", "לפנייה עתידית"].includes(lead.status);
+
+function leadMatchesTab(lead: Lead, tab: LeadTab) {
+  if (tab === "נמחקו") return lead.deleted;
+  if (lead.deleted) return false;
+  if (tab === "לטיפול היום") {
+    return isActiveLead(lead) && (isDue(lead.followUpDate) || lead.priority === "גבוהה");
+  }
+  if (tab === "לידים בתהליך") return isActiveLead(lead);
+  if (tab === "מתקדם") {
+    return [
+      "בהמתנה לקביעת פגישה",
+      "נקבעה פגישה",
+      "בהמתנה להצעת מחיר",
+      "נשלחה הצעת מחיר",
+    ].includes(lead.status);
+  }
+  if (tab === "פגישות") return lead.status === "נקבעה פגישה";
+  if (tab === "הצעות") return lead.status === "נשלחה הצעת מחיר";
+  if (tab === "לפנייה עתידית") return lead.status === "לפנייה עתידית";
+  return lead.status === tab;
+}
+
+function csvCell(value: unknown) {
+  const textValue = String(value ?? "");
+  return `"${textValue.replaceAll('"', '""')}"`;
+}
+
+function exportLeadsCsv(leads: Lead[]) {
+  const headers = [
+    "שם חברה",
+    "כמות עובדים",
+    "מיקום",
+    "חיבור",
+    "איש קשר",
+    "תפקיד",
+    "טלפון",
+    "מייל",
+    "אחראי",
+    "רמת עדיפות",
+    "תאריך פולואפ",
+    "מצב קיים",
+    "סטטוס",
+    "הערות",
+    "ספק",
+    "סוג מכונות",
+    "כמות מכונות",
+    "צריכה חודשית",
+    "מחיר לקילו",
+    "תאריך פגישה",
+    "שעת פגישה",
+    "מיקום פגישה",
+    "מייל לזימון",
+  ];
+  const rows = leads
+    .filter((lead) => !lead.deleted)
+    .map((lead) => [
+      lead.company,
+      lead.employees,
+      lead.location,
+      lead.connection,
+      lead.contactName,
+      lead.contactRole,
+      lead.phone,
+      lead.email,
+      lead.owner,
+      lead.priority,
+      lead.followUpDate,
+      lead.currentStatus,
+      lead.status,
+      lead.notes,
+      lead.supplier,
+      lead.machineType,
+      lead.machineCount,
+      lead.monthlyConsumption,
+      lead.pricePerKg,
+      lead.meetingDate,
+      lead.meetingTime,
+      lead.meetingLocation,
+      lead.meetingGuest,
+    ]);
+  const csv = [headers, ...rows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(
+    new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }),
+  );
+  link.download = `mister-bean-leads-${today()}.csv`;
+  link.click();
+}
+
 export function LeadsWorkspace({
   workspace,
   readOnly,
+  canMigrate,
   onSaveLead,
   onSaveQuote,
   onImport,
@@ -189,27 +352,192 @@ export function LeadsWorkspace({
 }: {
   workspace: SalesWorkspace;
   readOnly: boolean;
+  canMigrate: boolean;
   onSaveLead: (lead: Lead) => Promise<void>;
   onSaveQuote: (quote: Quote) => Promise<void>;
   onImport: (workspace: SalesWorkspace) => Promise<void>;
   onOpenQuotes: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<LeadTab>("לידים בתהליך");
   const [status, setStatus] = useState("הכל");
   const [owner, setOwner] = useState("הכל");
+  const [priority, setPriority] = useState("הכל");
+  const [sortKey, setSortKey] = useState<keyof Lead>("followUpDate");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [editing, setEditing] = useState<Lead | null>(null);
   const [quoteLead, setQuoteLead] = useState<Lead | null>(null);
   const [importing, setImporting] = useState(false);
-  const rows = workspace.leads.filter((lead) => {
-    const haystack =
-      `${lead.company} ${lead.contactName} ${lead.phone} ${lead.email} ${lead.location}`.toLowerCase();
-    return (
-      haystack.includes(query.toLowerCase()) &&
-      (status === "הכל" || lead.status === status) &&
-      (owner === "הכל" || lead.owner === owner)
-    );
-  });
+  const promotedFutureLeads = useRef(new Set<string>());
+  useEffect(() => {
+    if (readOnly) return;
+    workspace.leads
+      .filter(
+        (lead) =>
+          !lead.deleted &&
+          lead.status === "לפנייה עתידית" &&
+          isDue(lead.followUpDate) &&
+          !promotedFutureLeads.current.has(lead.id),
+      )
+      .forEach((lead) => {
+        promotedFutureLeads.current.add(lead.id);
+        void onSaveLead({
+          ...lead,
+          status: "לא טופל",
+          priority: "גבוהה",
+          sheet: "ראשוני",
+          statusChangedAt: now(),
+          statusHistory: [
+            ...(lead.statusHistory || []),
+            {
+              from: "לפנייה עתידית",
+              to: "לא טופל",
+              changedAt: now(),
+            },
+          ],
+          updatedAt: now(),
+        });
+      });
+  }, [onSaveLead, readOnly, workspace.leads]);
+  const rows = workspace.leads
+    .filter((lead) => {
+      const haystack =
+        `${lead.company} ${lead.contactName} ${lead.phone} ${lead.email} ${lead.location}`.toLowerCase();
+      return (
+        haystack.includes(query.toLowerCase()) &&
+        leadMatchesTab(lead, tab) &&
+        (status === "הכל" || lead.status === status) &&
+        (owner === "הכל" || lead.owner === owner) &&
+        (priority === "הכל" || lead.priority === priority)
+      );
+    })
+    .sort((a, b) => {
+      const left = String(a[sortKey] ?? "");
+      const right = String(b[sortKey] ?? "");
+      const compared = left.localeCompare(right, "he", { numeric: true });
+      return sortDirection === "asc" ? compared : -compared;
+    });
   const owners = [...new Set(workspace.leads.map((lead) => lead.owner).filter(Boolean))];
+  const toggleSort = (key: keyof Lead) => {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDirection("asc");
+    }
+  };
+  const saveChecked = async (lead: Lead) => {
+    const duplicate = workspace.leads.find(
+      (item) =>
+        item.id !== lead.id &&
+        !item.deleted &&
+        ((lead.email &&
+          item.email.trim().toLowerCase() === lead.email.trim().toLowerCase()) ||
+          (lead.phone &&
+            item.phone.replace(/\D/g, "") === lead.phone.replace(/\D/g, "")) ||
+          (lead.company &&
+            item.company.trim().toLowerCase() ===
+              lead.company.trim().toLowerCase())),
+    );
+    if (
+      duplicate &&
+      !window.confirm(
+        `נראה שכבר קיים ליד דומה: ${duplicate.company}. להמשיך לשמור בכל זאת?`,
+      )
+    ) {
+      return false;
+    }
+    await onSaveLead(lead);
+    return true;
+  };
+  const importCsv = async (file: File) => {
+    const textValue = await file.text();
+    const parseLine = (line: string) => {
+      const values: string[] = [];
+      let current = "";
+      let quoted = false;
+      for (let index = 0; index < line.length; index += 1) {
+        const character = line[index];
+        if (character === '"') {
+          if (quoted && line[index + 1] === '"') {
+            current += '"';
+            index += 1;
+          } else {
+            quoted = !quoted;
+          }
+        } else if (character === "," && !quoted) {
+          values.push(current);
+          current = "";
+        } else {
+          current += character;
+        }
+      }
+      values.push(current);
+      return values;
+    };
+    const lines = textValue
+      .replace(/^\uFEFF/, "")
+      .split(/\r?\n/)
+      .filter(Boolean);
+    if (lines.length < 2) return;
+    const headers = parseLine(lines[0]);
+    const value = (row: string[], key: string) =>
+      row[headers.indexOf(key)] || "";
+    const imported = lines.slice(1).map((line) => {
+      const row = parseLine(line);
+      return {
+        ...emptyLead(),
+        company: value(row, "שם חברה"),
+        employees: Number(value(row, "כמות עובדים")) || 0,
+        location: value(row, "מיקום"),
+        connection: value(row, "חיבור"),
+        contactName: value(row, "איש קשר"),
+        contactRole: value(row, "תפקיד"),
+        phone: value(row, "טלפון"),
+        email: value(row, "מייל"),
+        owner: value(row, "אחראי") || "בועז",
+        priority: (["נמוכה", "בינונית", "גבוהה"].includes(
+          value(row, "רמת עדיפות"),
+        )
+          ? value(row, "רמת עדיפות")
+          : "בינונית") as LeadPriority,
+        followUpDate: value(row, "תאריך פולואפ"),
+        currentStatus: value(row, "מצב קיים"),
+        status: (leadStatuses.includes(value(row, "סטטוס") as LeadStatus)
+          ? value(row, "סטטוס")
+          : "לא טופל") as LeadStatus,
+        notes: value(row, "הערות"),
+        supplier: value(row, "ספק"),
+        machineType: value(row, "סוג מכונות"),
+        machineCount: Number(value(row, "כמות מכונות")) || 0,
+        monthlyConsumption: Number(value(row, "צריכה חודשית")) || 0,
+        pricePerKg: Number(value(row, "מחיר לקילו")) || 0,
+        meetingDate: value(row, "תאריך פגישה"),
+        meetingTime: value(row, "שעת פגישה") || "09:00",
+        meetingLocation: value(row, "מיקום פגישה"),
+        meetingGuest: value(row, "מייל לזימון"),
+      };
+    }).filter((lead) => lead.company);
+    const existingKeys = new Set(
+      workspace.leads.flatMap((lead) => [
+        lead.email.trim().toLowerCase(),
+        lead.phone.replace(/\D/g, ""),
+        lead.company.trim().toLowerCase(),
+      ]).filter(Boolean),
+    );
+    const unique = imported.filter(
+      (lead) =>
+        ![
+          lead.email.trim().toLowerCase(),
+          lead.phone.replace(/\D/g, ""),
+          lead.company.trim().toLowerCase(),
+        ].some((key) => key && existingKeys.has(key)),
+    );
+    await onImport({ leads: unique, quotes: [] });
+    window.alert(
+      `יובאו ${unique.length} לידים. ${imported.length - unique.length} כפילויות דולגו.`,
+    );
+  };
 
   return (
     <div className="sales-workspace">
@@ -222,13 +550,33 @@ export function LeadsWorkspace({
           <button className="sales-secondary" onClick={onOpenQuotes}>
             <FileText size={17} /> להצעות מחיר
           </button>
+          {canMigrate && (
+            <button
+              className="sales-secondary"
+              disabled={readOnly}
+              onClick={() => setImporting(true)}
+            >
+              <FileInput size={17} /> העברת נתונים
+            </button>
+          )}
           <button
             className="sales-secondary"
-            disabled={readOnly}
-            onClick={() => setImporting(true)}
+            onClick={() => exportLeadsCsv(workspace.leads)}
           >
-            <FileInput size={17} /> ייבוא
+            <Download size={17} /> ייצוא
           </button>
+          <label className="sales-secondary sales-file-button">
+            <Upload size={17} /> ייבוא CSV
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importCsv(file);
+                event.target.value = "";
+              }}
+            />
+          </label>
           <button
             className="sales-primary"
             disabled={readOnly}
@@ -238,11 +586,29 @@ export function LeadsWorkspace({
           </button>
         </div>
       </div>
+      <div className="lead-tabs">
+        {leadTabs.map((item) => {
+          const count = workspace.leads.filter((lead) =>
+            leadMatchesTab(lead, item),
+          ).length;
+          return (
+            <button
+              key={item}
+              className={`${tab === item ? "active" : ""} ${
+                ["לא רלוונטי", "נמחקו"].includes(item) ? "danger" : ""
+              }`}
+              onClick={() => setTab(item)}
+            >
+              {item} <b>{count}</b>
+            </button>
+          );
+        })}
+      </div>
       <FlowStrip leads={workspace.leads} quotes={workspace.quotes} />
       <div className="sales-kpis">
         <SalesKpi
           label="כל הלידים"
-          value={workspace.leads.length}
+          value={workspace.leads.filter((lead) => !lead.deleted).length}
           detail="במאגר המשותף"
         />
         <SalesKpi
@@ -293,17 +659,26 @@ export function LeadsWorkspace({
               <option key={item}>{item}</option>
             ))}
           </select>
+          <select
+            value={priority}
+            onChange={(event) => setPriority(event.target.value)}
+          >
+            <option>הכל</option>
+            <option>גבוהה</option>
+            <option>בינונית</option>
+            <option>נמוכה</option>
+          </select>
         </div>
         <div className="sales-table-wrap">
           <table className="sales-table">
             <thead>
               <tr>
-                <th>חברה</th>
+                <th><button className="sales-sort" onClick={() => toggleSort("company")}>חברה</button></th>
                 <th>איש קשר</th>
-                <th>סטטוס</th>
-                <th>אחראי</th>
-                <th>פולואפ</th>
-                <th>צריכה</th>
+                <th><button className="sales-sort" onClick={() => toggleSort("status")}>סטטוס</button></th>
+                <th><button className="sales-sort" onClick={() => toggleSort("owner")}>אחראי</button></th>
+                <th><button className="sales-sort" onClick={() => toggleSort("followUpDate")}>פולואפ</button></th>
+                <th><button className="sales-sort" onClick={() => toggleSort("monthlyConsumption")}>צריכה</button></th>
                 <th />
               </tr>
             </thead>
@@ -319,7 +694,36 @@ export function LeadsWorkspace({
                     <small>{lead.phone}</small>
                   </td>
                   <td>
-                    <Status>{lead.status}</Status>
+                    <select
+                      className="lead-inline-status"
+                      value={lead.status}
+                      disabled={readOnly}
+                      onChange={(event) => {
+                        const nextStatus = event.target.value as LeadStatus;
+                        void onSaveLead({
+                          ...lead,
+                          status: nextStatus,
+                          sheet:
+                            nextStatus === "לפנייה עתידית"
+                              ? "לפנייה עתידית"
+                              : lead.sheet,
+                          statusChangedAt: now(),
+                          statusHistory: [
+                            ...(lead.statusHistory || []),
+                            {
+                              from: lead.status,
+                              to: nextStatus,
+                              changedAt: now(),
+                            },
+                          ],
+                          updatedAt: now(),
+                        });
+                      }}
+                    >
+                      {leadStatuses.map((item) => (
+                        <option key={item}>{item}</option>
+                      ))}
+                    </select>
                   </td>
                   <td>{lead.owner}</td>
                   <td>{displayDate(lead.followUpDate)}</td>
@@ -384,8 +788,27 @@ export function LeadsWorkspace({
           readOnly={readOnly}
           onClose={() => setEditing(null)}
           onSave={async (lead) => {
-            await onSaveLead(lead);
+            if (await saveChecked(lead)) setEditing(null);
+          }}
+          onDelete={async (lead) => {
+            await onSaveLead({
+              ...lead,
+              deleted: true,
+              deletedAt: now(),
+              updatedAt: now(),
+            });
             setEditing(null);
+            setTab("נמחקו");
+          }}
+          onRestore={async (lead) => {
+            await onSaveLead({
+              ...lead,
+              deleted: false,
+              deletedAt: undefined,
+              updatedAt: now(),
+            });
+            setEditing(null);
+            setTab("לידים בתהליך");
           }}
         />
       )}
@@ -401,7 +824,7 @@ export function LeadsWorkspace({
           }}
         />
       )}
-      {importing && (
+      {importing && canMigrate && (
         <ImportModal
           onClose={() => setImporting(false)}
           onImport={async (data) => {
@@ -418,12 +841,14 @@ export function QuotesWorkspace({
   workspace,
   readOnly,
   onSaveQuote,
+  onDeleteQuote,
   onConvert,
   onOpenLeads,
 }: {
   workspace: SalesWorkspace;
   readOnly: boolean;
   onSaveQuote: (quote: Quote) => Promise<void>;
+  onDeleteQuote: (quoteId: string) => Promise<void>;
   onConvert: (quote: Quote, lead?: Lead) => Promise<string>;
   onOpenLeads: () => void;
 }) {
@@ -538,15 +963,15 @@ export function QuotesWorkspace({
                 <div className="quote-card-metrics">
                   <span>
                     <small>צריכה חודשית</small>
-                    <strong>{metrics.monthlyKg} ק״ג</strong>
+                    <strong>{metrics.consumption.consumptionKg} ק״ג</strong>
                   </span>
                   <span>
-                    <small>מחיר חודשי</small>
-                    <strong>{money(metrics.monthlyRevenue)}</strong>
+                    <small>הכנסה מפולים</small>
+                    <strong>{money(metrics.beans.income)}</strong>
                   </span>
                   <span>
-                    <small>רווח חודשי</small>
-                    <strong>{money(metrics.monthlyProfit)}</strong>
+                    <small>יתרה חודשית</small>
+                    <strong>{money(metrics.profitability.monthlyBalance)}</strong>
                   </span>
                 </div>
                 <p>
@@ -555,6 +980,21 @@ export function QuotesWorkspace({
                 <footer>
                   <button onClick={() => setEditing(quote)}>
                     <Pencil size={15} /> פתיחה
+                  </button>
+                  <button
+                    className="sales-danger"
+                    disabled={readOnly}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `למחוק את "${quote.versionName}" עבור ${quote.clientName}?`,
+                        )
+                      ) {
+                        void onDeleteQuote(quote.id);
+                      }
+                    }}
+                  >
+                    <Trash2 size={15} /> מחיקה
                   </button>
                   {quote.status === "אושרה" && !quote.accountId && (
                     <button
@@ -614,11 +1054,15 @@ function LeadModal({
   readOnly,
   onClose,
   onSave,
+  onDelete,
+  onRestore,
 }: {
   lead: Lead;
   readOnly: boolean;
   onClose: () => void;
   onSave: (lead: Lead) => Promise<void>;
+  onDelete: (lead: Lead) => Promise<void>;
+  onRestore: (lead: Lead) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(lead);
   const [saving, setSaving] = useState(false);
@@ -628,10 +1072,87 @@ function LeadModal({
     event.preventDefault();
     setSaving(true);
     try {
-      await onSave({ ...draft, updatedAt: now() });
+      const changed = draft.status !== lead.status;
+      await onSave({
+        ...draft,
+        sheet:
+          draft.status === "לפנייה עתידית"
+            ? "לפנייה עתידית"
+            : draft.sheet === "לפנייה עתידית"
+              ? "ראשוני"
+              : draft.sheet,
+        statusChangedAt: changed ? now() : draft.statusChangedAt,
+        statusHistory: changed
+          ? [
+              ...(draft.statusHistory || []),
+              {
+                from: lead.status,
+                to: draft.status,
+                changedAt: now(),
+              },
+            ]
+          : draft.statusHistory || [],
+        lastUpdated: today(),
+        updatedAt: now(),
+      });
     } finally {
       setSaving(false);
     }
+  };
+  const meetingStart = () => {
+    if (!draft.meetingDate) return null;
+    const time = draft.meetingTime || "09:00";
+    const compact = `${draft.meetingDate.replaceAll("-", "")}T${time.replace(":", "")}00`;
+    const [hours, minutes] = time.split(":").map(Number);
+    const end = new Date(`${draft.meetingDate}T${time}:00`);
+    end.setHours(hours + 1, minutes, 0, 0);
+    const endCompact = `${end.toISOString().slice(0, 10).replaceAll("-", "")}T${end
+      .toTimeString()
+      .slice(0, 8)
+      .replaceAll(":", "")}`;
+    return { start: compact, end: endCompact };
+  };
+  const openCalendar = () => {
+    const range = meetingStart();
+    if (!range) return;
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: `פגישה — ${draft.company}`,
+      dates: `${range.start}/${range.end}`,
+      location: draft.meetingLocation,
+      add: draft.meetingGuest,
+      details: `${draft.contactName} · ${draft.phone}`,
+    });
+    window.open(
+      `https://calendar.google.com/calendar/render?${params.toString()}`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+  const downloadIcs = () => {
+    const range = meetingStart();
+    if (!range) return;
+    const content = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "BEGIN:VEVENT",
+      `UID:${Date.now()}@mister-bean`,
+      `SUMMARY:פגישה — ${draft.company}`,
+      `DTSTART:${range.start}`,
+      `DTEND:${range.end}`,
+      `LOCATION:${draft.meetingLocation}`,
+      draft.meetingGuest
+        ? `ATTENDEE;RSVP=TRUE:mailto:${draft.meetingGuest}`
+        : "",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].filter(Boolean).join("\r\n");
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(
+      new Blob([content], { type: "text/calendar;charset=utf-8" }),
+    );
+    link.download = `פגישה-${draft.company || "לקוח"}.ics`;
+    link.click();
   };
   return (
     <SalesModal title={lead.company ? `ליד · ${lead.company}` : "ליד חדש"} onClose={onClose}>
@@ -650,6 +1171,13 @@ function LeadModal({
             <input
               value={draft.location}
               onChange={(event) => update("location", event.target.value)}
+            />
+          </label>
+          <label>
+            <span>חיבור / מקור</span>
+            <input
+              value={draft.connection}
+              onChange={(event) => update("connection", event.target.value)}
             />
           </label>
           <label>
@@ -748,6 +1276,48 @@ function LeadModal({
             />
           </label>
           <label>
+            <span>סוג מכונות</span>
+            <input
+              value={draft.machineType}
+              onChange={(event) => update("machineType", event.target.value)}
+            />
+          </label>
+          <label>
+            <span>מחיר נוכחי לק״ג</span>
+            <input
+              type="number"
+              min="0"
+              value={draft.pricePerKg}
+              onChange={(event) => update("pricePerKg", +event.target.value)}
+            />
+          </label>
+          <label>
+            <span>האם בחוזה קיים?</span>
+            <select
+              value={draft.hasContract ? "כן" : "לא"}
+              onChange={(event) =>
+                update("hasContract", event.target.value === "כן")
+              }
+            >
+              <option>לא</option>
+              <option>כן</option>
+            </select>
+          </label>
+          <label className="full">
+            <span>מצב קיים</span>
+            <input
+              value={draft.currentStatus}
+              onChange={(event) => update("currentStatus", event.target.value)}
+            />
+          </label>
+          <label className="full">
+            <span>הפעולה הבאה</span>
+            <input
+              value={draft.nextAction}
+              onChange={(event) => update("nextAction", event.target.value)}
+            />
+          </label>
+          <label>
             <span>תאריך פגישה</span>
             <input
               type="date"
@@ -763,6 +1333,33 @@ function LeadModal({
               onChange={(event) => update("meetingTime", event.target.value)}
             />
           </label>
+          <label>
+            <span>מיקום פגישה</span>
+            <input
+              value={draft.meetingLocation}
+              onChange={(event) =>
+                update("meetingLocation", event.target.value)
+              }
+            />
+          </label>
+          <label>
+            <span>מייל לזימון</span>
+            <input
+              type="email"
+              value={draft.meetingGuest}
+              onChange={(event) => update("meetingGuest", event.target.value)}
+            />
+          </label>
+          {draft.meetingDate && (
+            <div className="lead-calendar-actions full">
+              <button type="button" onClick={openCalendar}>
+                <CalendarDays size={16} /> פתיחה ב־Google Calendar
+              </button>
+              <button type="button" onClick={downloadIcs}>
+                <Download size={16} /> הורדת ICS
+              </button>
+            </div>
+          )}
           <label className="full">
             <span>הערות</span>
             <textarea
@@ -770,8 +1367,49 @@ function LeadModal({
               onChange={(event) => update("notes", event.target.value)}
             />
           </label>
+          {!!draft.statusHistory?.length && (
+            <details className="lead-history full">
+              <summary>היסטוריית סטטוסים ({draft.statusHistory.length})</summary>
+              <ol>
+                {[...draft.statusHistory].reverse().map((entry, index) => (
+                  <li key={`${entry.changedAt}-${index}`}>
+                    <span>{displayDate(entry.changedAt)}</span>
+                    <b>{entry.from || "—"} ← {entry.to}</b>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
         </div>
         <footer>
+          {lead.deleted ? (
+            <button
+              type="button"
+              disabled={readOnly || saving}
+              onClick={() => void onRestore(draft)}
+            >
+              שחזור ליד
+            </button>
+          ) : (
+            lead.company && (
+              <button
+                type="button"
+                className="sales-danger"
+                disabled={readOnly || saving}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `להעביר את ${lead.company} לכרטיסיית נמחקו?`,
+                    )
+                  ) {
+                    void onDelete(draft);
+                  }
+                }}
+              >
+                <Trash2 size={16} /> מחיקה
+              </button>
+            )
+          )}
           <button type="button" onClick={onClose}>ביטול</button>
           <button className="sales-primary" disabled={readOnly || saving}>
             {saving ? "שומר…" : "שמירת ליד"}
@@ -783,47 +1421,66 @@ function LeadModal({
 }
 
 function quoteMetrics(quote: Quote) {
-  const recommendedKg = Math.ceil(
-    (quote.employees *
-      quote.cupsPerEmployee *
-      quote.workDaysMonth *
-      quote.gramsPerCup) /
-      1000,
+  return calculateQuote(quote);
+}
+
+function downloadQuoteSummary(quote: Quote) {
+  const metrics = calculateQuote(quote);
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = 760;
+  const context = canvas.getContext("2d");
+  if (!context) return;
+  context.fillStyle = "#f3f8f4";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#174d3b";
+  context.fillRect(0, 0, canvas.width, 150);
+  context.direction = "rtl";
+  context.textAlign = "right";
+  context.fillStyle = "#fff";
+  context.font = "700 42px Arial";
+  context.fillText("Mister Bean · תמונת עסקה", 1120, 66);
+  context.font = "500 25px Arial";
+  context.fillText(`${quote.clientName} · ${quote.versionName}`, 1120, 112);
+  const cards = [
+    ["צריכה חודשית", `${metrics.consumption.consumptionKg.toFixed(1)} ק״ג`],
+    ["הכנסה חודשית מפולים", money(metrics.beans.income)],
+    ["עלות ציוד", money(metrics.equipment.total)],
+    ["יתרה חודשית", money(metrics.profitability.monthlyBalance)],
+    ["שיא חשיפה", money(metrics.cashflow.exposure)],
+    [
+      "חודש איזון",
+      metrics.cashflow.breakEvenMonth
+        ? String(metrics.cashflow.breakEvenMonth)
+        : "לא בתקופה",
+    ],
+  ];
+  cards.forEach(([label, value], index) => {
+    const column = index % 3;
+    const row = Math.floor(index / 3);
+    const x = 70 + column * 370;
+    const y = 210 + row * 190;
+    context.fillStyle = "#fff";
+    context.fillRect(x, y, 330, 145);
+    context.fillStyle = "#64746d";
+    context.font = "500 20px Arial";
+    context.textAlign = "right";
+    context.fillText(label, x + 290, y + 45);
+    context.fillStyle = "#17372d";
+    context.font = "700 30px Arial";
+    context.fillText(value, x + 290, y + 100);
+  });
+  context.fillStyle = "#64746d";
+  context.font = "500 18px Arial";
+  context.fillText(
+    "פלט פנימי להצגת תמונת העסקה המרכזית",
+    1120,
+    690,
   );
-  const monthlyKg =
-    quote.knownKg ||
-    quote.blends.reduce((sum, blend) => sum + blend.quantityKg, 0) ||
-    recommendedKg;
-  const beanRevenue = quote.blends.reduce(
-    (sum, blend) => sum + blend.quantityKg * blend.pricePerKg,
-    0,
-  );
-  const beanCost = quote.blends.reduce(
-    (sum, blend) => sum + blend.quantityKg * blend.costPerKg,
-    0,
-  );
-  const equipmentMonthlyRevenue = quote.equipment.reduce(
-    (sum, item) => sum + item.quantity * item.monthlyPrice,
-    0,
-  );
-  const equipmentCost = quote.equipment.reduce(
-    (sum, item) => sum + item.quantity * item.unitCost,
-    0,
-  );
-  const monthlyRevenue =
-    beanRevenue + equipmentMonthlyRevenue + quote.extraMonthlyCost;
-  const monthlyProfit =
-    monthlyRevenue -
-    beanCost -
-    equipmentCost / Math.max(1, quote.leaseMonths);
-  return {
-    recommendedKg,
-    monthlyKg,
-    beanRevenue,
-    equipmentCost,
-    monthlyRevenue,
-    monthlyProfit,
-  };
+  const link = document.createElement("a");
+  link.download = `mister-bean-${quote.clientName || "quote"}.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
 }
 
 function QuoteModal({
@@ -840,6 +1497,8 @@ function QuoteModal({
   const [draft, setDraft] = useState(quote);
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [recommendationBaseline, setRecommendationBaseline] =
+    useState<Quote | null>(null);
   const metrics = useMemo(() => quoteMetrics(draft), [draft]);
   const update = <K extends keyof Quote>(key: K, value: Quote[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
@@ -857,17 +1516,152 @@ function QuoteModal({
         itemIndex === index ? { ...item, ...data } : item,
       ),
     );
-  const submit = async () => {
+  const setCatalogQuantity = (
+    key: string,
+    quantity: number,
+    options: {
+      label: string;
+      cost: number;
+      importer: string;
+      capacityPerDay?: number;
+      addonKeys?: string[];
+    },
+  ) => {
+    const existingIndex = draft.equipment.findIndex(
+      (item) => (item.key || item.model) === key,
+    );
+    if (existingIndex >= 0) {
+      updateEquipment(existingIndex, {
+        quantity,
+        unitCost: options.cost,
+        importer: options.importer,
+        capacityPerDay: options.capacityPerDay,
+        addonKeys: options.addonKeys,
+      });
+      return;
+    }
+    update("equipment", [
+      ...draft.equipment,
+      {
+        key,
+        model: options.label,
+        quantity,
+        unitCost: options.cost,
+        importer: options.importer,
+        capacityPerDay: options.capacityPerDay,
+        addonKeys: options.addonKeys,
+        commercialModel: "ללא עלות",
+        monthlyPrice: 0,
+      },
+    ]);
+  };
+  const quantityFor = (key: string) =>
+    draft.equipment.find((item) => (item.key || item.model) === key)?.quantity ||
+    0;
+  const applyRecommendation = () => {
+    const recommendation = recommendedEquipment(metrics.consumption.dailyCups);
+    const quantities: Record<string, number> = {
+      f15: recommendation.f15,
+      c12: recommendation.c12,
+      emax: recommendation.emilio,
+    };
+    const addonQuantities: Record<string, number> = {};
+    for (const item of equipmentCatalog) {
+      const quantity = quantities[item.key] || 0;
+      for (const addonKey of item.addonKeys) {
+        addonQuantities[addonKey] = (addonQuantities[addonKey] || 0) + quantity;
+      }
+    }
+    const machineItems = equipmentCatalog
+      .filter((item) => (quantities[item.key] || 0) > 0)
+      .map((item) => ({
+        key: item.key,
+        model: item.label,
+        quantity: quantities[item.key],
+        unitCost: item.cost,
+        importer: item.importer,
+        capacityPerDay: item.capacityPerDay,
+        addonKeys: item.addonKeys,
+        commercialModel: "ללא עלות" as const,
+        monthlyPrice: 0,
+      }));
+    const addonItems = addonCatalog
+      .filter((item) => (addonQuantities[item.key] || 0) > 0)
+      .map((item) => ({
+        key: item.key,
+        model: item.label,
+        quantity: addonQuantities[item.key],
+        unitCost: item.cost,
+        importer: item.importer,
+        commercialModel: "ללא עלות" as const,
+        monthlyPrice: 0,
+      }));
+    update("equipment", [...machineItems, ...addonItems]);
+  };
+  const allocationFor = (item: QuoteEquipment) => {
+    const key = item.key || item.model;
+    return (
+      draft.allocation.find((row) => row.key === key) || {
+        key,
+        free: item.commercialModel === "ללא עלות" ? item.quantity : 0,
+        lease: item.commercialModel === "השכרה" ? item.quantity : 0,
+        sale: item.commercialModel === "מכירה" ? item.quantity : 0,
+      }
+    );
+  };
+  const updateAllocation = (
+    item: QuoteEquipment,
+    field: "free" | "lease" | "sale",
+    value: number,
+  ) => {
+    const key = item.key || item.model;
+    const current = allocationFor(item);
+    const next = { ...current, [field]: Math.max(0, value) };
+    update("allocation", [
+      ...draft.allocation.filter((row) => row.key !== key),
+      next,
+    ]);
+  };
+  const applyBeanPriceRecommendation = () => {
+    if (!recommendationBaseline) setRecommendationBaseline(draft);
+    const increase = metrics.profitability.targetBeanPriceIncrease;
+    update(
+      "blends",
+      draft.blends.map((blend) => ({
+        ...blend,
+        pricePerKg: blend.pricePerKg + increase,
+      })),
+    );
+  };
+  const applyLeaseRecommendation = () => {
+    if (!recommendationBaseline) setRecommendationBaseline(draft);
+    update(
+      "manualLeasePerSet",
+      (draft.manualLeasePerSet || 0) +
+        metrics.profitability.targetLeaseIncrease,
+    );
+  };
+  const submit = async (asCopy = false) => {
     setSaving(true);
     try {
       const approvedAt =
         draft.status === "אושרה" ? draft.approvedAt || now() : draft.approvedAt;
-      await onSave({ ...draft, approvedAt, updatedAt: now() });
+      await onSave({
+        ...draft,
+        id: asCopy ? id("quote") : draft.id,
+        versionName: asCopy
+          ? `${draft.versionName || "הצעה"} · עותק`
+          : draft.versionName,
+        approvedAt,
+        updatedAt: now(),
+        savedAt: now(),
+      });
+      onClose();
     } finally {
       setSaving(false);
     }
   };
-  const steps = ["לקוח וצריכה", "פולים", "ציוד ומתווה", "סיכום"];
+  const steps = ["לקוח וצריכה", "פולים", "ציוד", "מתווה ומימון", "סיכום"];
 
   return (
     <SalesModal
@@ -966,11 +1760,31 @@ function QuoteModal({
                   onChange={(event) => update("gramsPerCup", +event.target.value)}
                 />
               </label>
+              <label>
+                <span>ימי עבודה בחודש</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={draft.workDaysMonth}
+                  onChange={(event) => update("workDaysMonth", +event.target.value)}
+                />
+              </label>
+              <label>
+                <span>מספר מכונות מבוקש</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={draft.requestedMachines}
+                  onChange={(event) =>
+                    update("requestedMachines", +event.target.value)
+                  }
+                />
+              </label>
               <div className="quote-recommendation full">
                 <Sparkles size={19} />
                 <div>
                   <small>המלצת צריכה לפי הנתונים</small>
-                  <strong>{metrics.recommendedKg} ק״ג בחודש</strong>
+                  <strong>{metrics.consumption.recommendedKg} ק״ג בחודש</strong>
                 </div>
               </div>
             </div>
@@ -993,14 +1807,39 @@ function QuoteModal({
                   <Plus size={15} /> הוספת בלנד
                 </button>
               </div>
+              <label className="quote-discount-toggle">
+                <input
+                  type="checkbox"
+                  checked={draft.applyVolumeDiscount}
+                  onChange={(event) =>
+                    update("applyVolumeDiscount", event.target.checked)
+                  }
+                />
+                <span>הפעלת הנחת כמות של 10% על הק״ג שמעל 100 ק״ג</span>
+              </label>
               {draft.blends.map((blend, index) => (
                 <div className="quote-line" key={`${blend.name}-${index}`}>
                   <label>
                     <span>בלנד</span>
-                    <input
+                    <select
                       value={blend.name}
-                      onChange={(event) => updateBlend(index, { name: event.target.value })}
-                    />
+                      onChange={(event) => {
+                        const selected = blendCatalog.find(
+                          (item) => item.name === event.target.value,
+                        );
+                        updateBlend(index, {
+                          name: event.target.value,
+                          costPerKg: selected?.cost || blend.costPerKg,
+                          pricePerKg: selected
+                            ? selected.cost + 40
+                            : blend.pricePerKg,
+                        });
+                      }}
+                    >
+                      {blendCatalog.map((item) => (
+                        <option key={item.name}>{item.name}</option>
+                      ))}
+                    </select>
                   </label>
                   <label>
                     <span>כמות ק״ג</span>
@@ -1054,110 +1893,138 @@ function QuoteModal({
             <div className="quote-lines">
               <div className="quote-lines-head">
                 <div>
-                  <h3>ציוד ומתווה מסחרי</h3>
-                  <p>בחירת מכונות והאופן שבו הן מסופקות</p>
+                  <h3>ציוד לפי יבואן</h3>
+                  <p>מכונות, ציוד נלווה ועלויות בפועל</p>
                 </div>
-                <button
-                  onClick={() =>
-                    update("equipment", [
-                      ...draft.equipment,
-                      {
-                        model: machineModels[0],
-                        quantity: 1,
-                        unitCost: 4090,
-                        commercialModel: "ללא עלות",
-                        monthlyPrice: 0,
-                      },
-                    ])
-                  }
-                >
-                  <Plus size={15} /> הוספת ציוד
+                <button onClick={applyRecommendation}>
+                  <Sparkles size={15} /> מלא לפי המלצת המערכת
                 </button>
               </div>
-              {draft.equipment.map((item, index) => (
-                <div className="quote-line equipment" key={`${item.model}-${index}`}>
-                  <label>
-                    <span>דגם</span>
-                    <select
-                      value={item.model}
-                      onChange={(event) =>
-                        updateEquipment(index, { model: event.target.value })
-                      }
-                    >
-                      {machineModels.map((model) => (
-                        <option key={model}>{model}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    <span>כמות</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={item.quantity}
-                      onChange={(event) =>
-                        updateEquipment(index, { quantity: +event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    <span>עלות יחידה</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={item.unitCost}
-                      onChange={(event) =>
-                        updateEquipment(index, { unitCost: +event.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    <span>מתווה</span>
-                    <select
-                      value={item.commercialModel}
-                      onChange={(event) =>
-                        updateEquipment(index, {
-                          commercialModel: event.target.value as QuoteEquipment["commercialModel"],
-                        })
-                      }
-                    >
-                      <option>ללא עלות</option>
-                      <option>השכרה</option>
-                      <option>מכירה</option>
-                    </select>
-                  </label>
-                  <label>
-                    <span>חיוב חודשי</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={item.monthlyPrice}
-                      onChange={(event) =>
-                        updateEquipment(index, { monthlyPrice: +event.target.value })
-                      }
-                    />
-                  </label>
-                  <button
-                    className="line-remove"
-                    onClick={() =>
-                      update(
-                        "equipment",
-                        draft.equipment.filter((_, itemIndex) => itemIndex !== index),
+              <div className="equipment-importer-grid">
+                {(Object.keys(importers) as Array<keyof typeof importers>).map(
+                  (importerKey) => (
+                    <section className="equipment-importer" key={importerKey}>
+                      <h4>{importers[importerKey]}</h4>
+                      {equipmentCatalog
+                        .filter((item) => item.importer === importerKey)
+                        .map((item) => {
+                          const selected = draft.equipment.find(
+                            (row) => (row.key || row.model) === item.key,
+                          );
+                          return (
+                            <div className="equipment-catalog-row" key={item.key}>
+                              <div>
+                                <strong>{item.label}</strong>
+                                <small>
+                                  תפוקה {item.capacityPerDay} כוסות ביום
+                                </small>
+                              </div>
+                              <label>
+                                <span>כמות</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={quantityFor(item.key)}
+                                  onChange={(event) =>
+                                    setCatalogQuantity(item.key, +event.target.value, {
+                                      label: item.label,
+                                      cost: selected?.unitCost ?? item.cost,
+                                      importer: item.importer,
+                                      capacityPerDay: item.capacityPerDay,
+                                      addonKeys: item.addonKeys,
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label>
+                                <span>עלות בפועל</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={selected?.unitCost ?? item.cost}
+                                  onChange={(event) =>
+                                    setCatalogQuantity(
+                                      item.key,
+                                      selected?.quantity || 0,
+                                      { ...item, cost: +event.target.value },
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
+                          );
+                        })}
+                      <h5>ציוד נלווה</h5>
+                      {addonCatalog
+                        .filter((item) => item.importer === importerKey)
+                        .map((item) => {
+                          const selected = draft.equipment.find(
+                            (row) => (row.key || row.model) === item.key,
+                          );
+                          return (
+                            <div className="equipment-catalog-row addon" key={item.key}>
+                              <strong>{item.label}</strong>
+                              <label>
+                                <span>כמות</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={quantityFor(item.key)}
+                                  onChange={(event) =>
+                                    setCatalogQuantity(item.key, +event.target.value, {
+                                      label: item.label,
+                                      cost: selected?.unitCost ?? item.cost,
+                                      importer: item.importer,
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label>
+                                <span>עלות בפועל</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={selected?.unitCost ?? item.cost}
+                                  onChange={(event) =>
+                                    setCatalogQuantity(
+                                      item.key,
+                                      selected?.quantity || 0,
+                                      { ...item, cost: +event.target.value },
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
+                          );
+                        })}
+                    </section>
+                  ),
+                )}
+              </div>
+              <div className="quote-recommendation">
+                <Sparkles size={19} />
+                <div>
+                  <small>המלצת ציוד לפי הצריכה</small>
+                  <strong>
+                    {Object.entries(recommendedEquipment(metrics.consumption.dailyCups))
+                      .filter(([key, value]) =>
+                        ["f15", "c12", "emilio"].includes(key) && Number(value) > 0,
                       )
-                    }
-                  >
-                    <X size={16} />
-                  </button>
+                      .map(([key, value]) => `${value} × ${key}`)
+                      .join(" · ") || "לא נדרש ציוד"}
+                  </strong>
                 </div>
-              ))}
+              </div>
               <div className="sales-form-grid compact">
                 <label>
-                  <span>פריסת ציוד בחודשים</span>
+                  <span>פריסת תשלום ליבואן</span>
                   <input
                     type="number"
                     min="1"
-                    value={draft.leaseMonths}
-                    onChange={(event) => update("leaseMonths", +event.target.value)}
+                    value={draft.supplierMonths}
+                    onChange={(event) =>
+                      update("supplierMonths", +event.target.value)
+                    }
                   />
                 </label>
                 <label>
@@ -1173,35 +2040,369 @@ function QuoteModal({
             </div>
           )}
           {step === 3 && (
+            <div className="quote-lines">
+              <div className="quote-lines-head">
+                <div>
+                  <h3>מתווה ציוד, תנאי תשלום ומימון</h3>
+                  <p>חלוקת הציוד ובדיקת מבנה העסקה</p>
+                </div>
+              </div>
+              <div className="allocation-list">
+                {draft.equipment
+                  .filter(
+                    (item) =>
+                      item.quantity > 0 &&
+                      equipmentCatalog.some(
+                        (catalog) => catalog.key === (item.key || item.model),
+                      ),
+                  )
+                  .map((item) => {
+                    const allocation = allocationFor(item);
+                    const remaining =
+                      item.quantity -
+                      allocation.free -
+                      allocation.lease -
+                      allocation.sale;
+                    return (
+                      <div className="allocation-row" key={item.key || item.model}>
+                        <strong>{item.model}</strong>
+                        <label>
+                          <span>כמות</span>
+                          <input value={item.quantity} readOnly />
+                        </label>
+                        {(["free", "lease", "sale"] as const).map((field) => (
+                          <label key={field}>
+                            <span>
+                              {field === "free"
+                                ? "ללא עלות"
+                                : field === "lease"
+                                  ? "השכרה"
+                                  : "מכירה"}
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={allocation[field]}
+                              onChange={(event) =>
+                                updateAllocation(item, field, +event.target.value)
+                              }
+                            />
+                          </label>
+                        ))}
+                        <small className={remaining < 0 ? "negative" : ""}>
+                          {remaining < 0
+                            ? `חריגה של ${Math.abs(remaining)}`
+                            : `נותרו לחלוקה: ${remaining}`}
+                        </small>
+                      </div>
+                    );
+                  })}
+              </div>
+              <div className="sales-form-grid">
+                <label>
+                  <span>תקופה לכיסוי ציוד בהשכרה</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={draft.leaseMonths}
+                    onChange={(event) => update("leaseMonths", +event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>שכירות ידנית לסט</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={draft.manualLeasePerSet}
+                    onChange={(event) =>
+                      update("manualLeasePerSet", +event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  <span>רווח רצוי במכירה</span>
+                  <div className="input-suffix">
+                    <input
+                      type="number"
+                      min="0"
+                      value={draft.saleMargin}
+                      onChange={(event) => update("saleMargin", +event.target.value)}
+                    />
+                    <b>%</b>
+                  </div>
+                </label>
+                <label>
+                  <span>תקופת חוזה לחישוב</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={draft.clientCostMonths}
+                    onChange={(event) =>
+                      update("clientCostMonths", +event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  <span>תנאי תשלום לקוח</span>
+                  <select
+                    value={draft.clientPayTerm}
+                    onChange={(event) =>
+                      update("clientPayTerm", +event.target.value)
+                    }
+                  >
+                    {[0, 1, 2, 3].map((value) => (
+                      <option value={value} key={value}>
+                        {value ? `שוטף + ${value * 30}` : "מיידי"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>תנאי תשלום ליבואן</span>
+                  <select
+                    value={draft.importerPayTerm}
+                    onChange={(event) =>
+                      update("importerPayTerm", +event.target.value)
+                    }
+                  >
+                    {[0, 1, 2, 3].map((value) => (
+                      <option value={value} key={value}>
+                        {value ? `שוטף + ${value * 30}` : "מיידי"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>תנאי תשלום ספק פולים</span>
+                  <select
+                    value={draft.coffeeSupplierPayTerm}
+                    onChange={(event) =>
+                      update("coffeeSupplierPayTerm", +event.target.value)
+                    }
+                  >
+                    {[0, 1, 2, 3].map((value) => (
+                      <option value={value} key={value}>
+                        {value ? `שוטף + ${value * 30}` : "מיידי"}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>תקופת תזרים</span>
+                  <input
+                    type="number"
+                    min="12"
+                    value={draft.cashflowMonths}
+                    onChange={(event) =>
+                      update("cashflowMonths", +event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+              <details className="quote-financing" open={draft.financingMonths > 0}>
+                <summary>מימון העסקה</summary>
+                <div className="sales-form-grid compact">
+                  <label>
+                    <span>תקופת המימון</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={draft.financingMonths}
+                      onChange={(event) =>
+                        update("financingMonths", +event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>סכום המימון</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={draft.financedAmount}
+                      onChange={(event) =>
+                        update("financedAmount", +event.target.value)
+                      }
+                    />
+                  </label>
+                  <label>
+                    <span>ריבית שנתית</span>
+                    <div className="input-suffix">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={draft.annualInterest}
+                        onChange={(event) =>
+                          update("annualInterest", +event.target.value)
+                        }
+                      />
+                      <b>%</b>
+                    </div>
+                  </label>
+                </div>
+                <div className="quote-summary-grid">
+                  <div>
+                    <small>החזר חודשי</small>
+                    <strong>{money(metrics.financing.payment)}</strong>
+                  </div>
+                  <div>
+                    <small>ציוד שלא מומן</small>
+                    <strong>
+                      {money(metrics.financing.unfinancedEquipment)}
+                    </strong>
+                  </div>
+                  <div>
+                    <small>עלות ריבית כוללת</small>
+                    <strong>{money(metrics.financing.interest)}</strong>
+                  </div>
+                </div>
+              </details>
+            </div>
+          )}
+          {step === 4 && (
             <div className="quote-summary">
               <div className="quote-summary-hero">
                 <span>
                   <CircleDollarSign size={23} />
                 </span>
                 <div>
-                  <small>מחיר חודשי ללקוח</small>
-                  <strong>{money(metrics.monthlyRevenue)}</strong>
+                  <small>יתרה חודשית לאחר תשלומים</small>
+                  <strong>{money(metrics.profitability.monthlyBalance)}</strong>
                 </div>
                 <Status>{draft.status}</Status>
               </div>
               <div className="quote-summary-grid">
                 <div>
                   <small>צריכה חודשית</small>
-                  <strong>{metrics.monthlyKg} ק״ג</strong>
+                  <strong>{metrics.consumption.consumptionKg} ק״ג</strong>
                 </div>
                 <div>
                   <small>הכנסה מפולים</small>
-                  <strong>{money(metrics.beanRevenue)}</strong>
+                  <strong>{money(metrics.beans.income)}</strong>
                 </div>
                 <div>
                   <small>עלות ציוד</small>
-                  <strong>{money(metrics.equipmentCost)}</strong>
+                  <strong>{money(metrics.equipment.total)}</strong>
                 </div>
-                <div className={metrics.monthlyProfit < 0 ? "negative" : "positive"}>
-                  <small>רווח חודשי מוערך</small>
-                  <strong>{money(metrics.monthlyProfit)}</strong>
+                <div
+                  className={
+                    metrics.profitability.monthlyBalance < 0
+                      ? "negative"
+                      : "positive"
+                  }
+                >
+                  <small>רווח תפעולי חודשי</small>
+                  <strong>{money(metrics.profitability.operatingProfit)}</strong>
+                </div>
+                <div>
+                  <small>שיא חשיפה תזרימית</small>
+                  <strong>{money(metrics.cashflow.exposure)}</strong>
+                </div>
+                <div>
+                  <small>חודש איזון</small>
+                  <strong>
+                    {metrics.cashflow.breakEvenMonth || "לא בתקופה"}
+                  </strong>
+                </div>
+                <div>
+                  <small>מינימום ק״ג לאיזון</small>
+                  <strong>
+                    {metrics.profitability.minimumKgToBreakEven} ק״ג
+                  </strong>
+                </div>
+                <div>
+                  <small>עלות לכוס ללקוח</small>
+                  <strong>{cupMoney(metrics.beans.costPerCup)}</strong>
+                </div>
+                <div>
+                  <small>רווח לתקופת החוזה</small>
+                  <strong>
+                    {money(metrics.profitability.totalContractProfit)}
+                  </strong>
                 </div>
               </div>
+              <section className="quote-improvement">
+                <h3>המלצה לשיפור העסקה</h3>
+                {metrics.profitability.monthlyBalance >= 500 ? (
+                  <p className="positive">
+                    העסקה עומדת ביעד של יתרה חודשית הגבוהה מ־500 ₪.
+                  </p>
+                ) : (
+                  <div className="quote-summary-grid">
+                    <div>
+                      <small>תוספת נדרשת למחיר ק״ג</small>
+                      <strong>
+                        {money(metrics.profitability.targetBeanPriceIncrease)}
+                      </strong>
+                      <button onClick={applyBeanPriceRecommendation}>
+                        החלה על המחירים
+                      </button>
+                    </div>
+                    <div>
+                      <small>או תוספת שכירות לסט</small>
+                      <strong>
+                        {money(metrics.profitability.targetLeaseIncrease)}
+                      </strong>
+                      <button
+                        disabled={!metrics.profitability.targetLeaseIncrease}
+                        onClick={applyLeaseRecommendation}
+                      >
+                        החלה על השכירות
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {recommendationBaseline && (
+                  <button
+                    className="quote-undo"
+                    onClick={() => {
+                      setDraft(recommendationBaseline);
+                      setRecommendationBaseline(null);
+                    }}
+                  >
+                    ביטול שינויי ההמלצה
+                  </button>
+                )}
+              </section>
+              <details className="cashflow-details">
+                <summary>תזרים חודשי מלא</summary>
+                <div className="cashflow-table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>חודש</th>
+                        <th>הכנסות</th>
+                        <th>יבואן</th>
+                        <th>פולים</th>
+                        <th>נוספות</th>
+                        <th>מימון</th>
+                        <th>תזרים</th>
+                        <th>מצטבר</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {metrics.cashflow.rows.map((row) => (
+                        <tr key={row.month}>
+                          <td>{row.month}{row.isTail ? " *" : ""}</td>
+                          <td>{money(row.income)}</td>
+                          <td>{money(row.importer)}</td>
+                          <td>{money(row.coffee)}</td>
+                          <td>{money(row.extra)}</td>
+                          <td>{money(row.financing)}</td>
+                          <td>{money(row.net)}</td>
+                          <td>{money(row.cumulative)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+              <button
+                className="quote-graphic-button"
+                onClick={() => downloadQuoteSummary(draft)}
+              >
+                פלט גרפי קצר
+              </button>
               <label className="quote-notes">
                 <span>הערות פנימיות</span>
                 <textarea
@@ -1218,19 +2419,19 @@ function QuoteModal({
           <dl>
             <div>
               <dt>צריכה</dt>
-              <dd>{metrics.monthlyKg} ק״ג</dd>
+              <dd>{metrics.consumption.consumptionKg} ק״ג</dd>
             </div>
             <div>
               <dt>מכונות</dt>
               <dd>{draft.equipment.reduce((sum, item) => sum + item.quantity, 0)}</dd>
             </div>
             <div>
-              <dt>מחיר חודשי</dt>
-              <dd>{money(metrics.monthlyRevenue)}</dd>
+              <dt>הכנסה מפולים</dt>
+              <dd>{money(metrics.beans.income)}</dd>
             </div>
             <div>
-              <dt>רווח חודשי</dt>
-              <dd>{money(metrics.monthlyProfit)}</dd>
+              <dt>יתרה חודשית</dt>
+              <dd>{money(metrics.profitability.monthlyBalance)}</dd>
             </div>
           </dl>
         </aside>
@@ -1244,13 +2445,21 @@ function QuoteModal({
               המשך
             </button>
           ) : (
-            <button
-              className="sales-primary"
-              disabled={readOnly || saving || !draft.clientName}
-              onClick={() => void submit()}
-            >
-              {saving ? "שומר…" : "שמירת הצעה"}
-            </button>
+            <>
+              <button
+                disabled={readOnly || saving || !draft.clientName}
+                onClick={() => void submit(true)}
+              >
+                שמור כגרסה חדשה
+              </button>
+              <button
+                className="sales-primary"
+                disabled={readOnly || saving || !draft.clientName}
+                onClick={() => void submit(false)}
+              >
+                {saving ? "שומר…" : "שמירת הצעה"}
+              </button>
+            </>
           )}
         </div>
       </footer>
@@ -1265,49 +2474,223 @@ function ImportModal({
   onClose: () => void;
   onImport: (workspace: SalesWorkspace) => Promise<void>;
 }) {
+  const [mode, setMode] = useState<"automatic" | "manual">("automatic");
+  const [email, setEmail] = useState("boaz@pacifictrade.co");
+  const [leadsPassword, setLeadsPassword] = useState("");
+  const [quotesPassword, setQuotesPassword] = useState("");
+  const [samePassword, setSamePassword] = useState(true);
   const [leadsJson, setLeadsJson] = useState("");
   const [quotesJson, setQuotesJson] = useState("");
+  const [snapshot, setSnapshot] = useState<LegacyMigrationSnapshot | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const importData = async () => {
+  const connect = async () => {
     setError("");
     setBusy(true);
     try {
-      const workspace = parseLegacyWorkspace(
-        leadsJson ? JSON.parse(leadsJson) : {},
-        quotesJson ? JSON.parse(quotesJson) : [],
-      );
+      const nextSnapshot =
+        mode === "automatic"
+          ? await fetchLegacyWorkspace({
+              email,
+              leadsPassword,
+              quotesPassword: samePassword ? leadsPassword : quotesPassword,
+            })
+          : {
+              workspace: parseLegacyWorkspace(
+                leadsJson ? JSON.parse(leadsJson) : {},
+                quotesJson ? JSON.parse(quotesJson) : [],
+              ),
+              rawLeads: leadsJson ? JSON.parse(leadsJson) : {},
+              rawQuotes: quotesJson ? JSON.parse(quotesJson) : {},
+              fetchedAt: now(),
+            };
+      const workspace = nextSnapshot.workspace;
       if (!workspace.leads.length && !workspace.quotes.length) {
         throw new Error("לא נמצאו רשומות לייבוא.");
       }
-      await onImport(workspace);
+      setSnapshot(nextSnapshot);
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setError(
+        message.includes("auth/invalid-credential")
+          ? "פרטי הכניסה לאחת ממערכות המקור אינם נכונים."
+          : message,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+  const importData = async () => {
+    if (!snapshot) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onImport(snapshot.workspace);
+      onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
       setBusy(false);
     }
   };
+  const downloadBackup = () => {
+    if (!snapshot) return;
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(
+      new Blob(
+        [
+          JSON.stringify(
+            {
+              fetchedAt: snapshot.fetchedAt,
+              leads: snapshot.rawLeads,
+              quotes: snapshot.rawQuotes,
+            },
+            null,
+            2,
+          ),
+        ],
+        { type: "application/json" },
+      ),
+    );
+    link.download = `mister-bean-legacy-backup-${now().slice(0, 10)}.json`;
+    link.click();
+  };
   return (
     <SalesModal title="ייבוא מהמערכות הקודמות" onClose={onClose}>
       <div className="import-modal">
         <div className="import-note">
           <FileInput size={19} />
-          <p>הדבקת ייצוא JSON אינה מוחקת מידע קיים. רשומות מיובאות נשמרות עם מזהה המקור לצורך מעקב.</p>
+          <p>
+            ההעברה קוראת את הנתונים ישירות משני פרויקטי Firebase הישנים.
+            הסיסמאות משמשות להתחברות חד־פעמית בדפדפן ואינן נשמרות.
+          </p>
         </div>
-        <label>
-          <span>JSON ממערכת הלידים</span>
-          <textarea value={leadsJson} onChange={(event) => setLeadsJson(event.target.value)} />
-        </label>
-        <label>
-          <span>JSON ממערכת הצעות המחיר</span>
-          <textarea value={quotesJson} onChange={(event) => setQuotesJson(event.target.value)} />
-        </label>
+        <div className="import-mode-tabs">
+          <button
+            className={mode === "automatic" ? "active" : ""}
+            onClick={() => {
+              setMode("automatic");
+              setSnapshot(null);
+            }}
+          >
+            חיבור ישיר
+          </button>
+          <button
+            className={mode === "manual" ? "active" : ""}
+            onClick={() => {
+              setMode("manual");
+              setSnapshot(null);
+            }}
+          >
+            קובץ גיבוי
+          </button>
+        </div>
+        {mode === "automatic" ? (
+          <div className="sales-form-grid">
+            <label className="full">
+              <span>כתובת הדוא״ל במערכות הישנות</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                autoComplete="username"
+              />
+            </label>
+            <label>
+              <span>סיסמת מערכת הלידים</span>
+              <input
+                type="password"
+                value={leadsPassword}
+                onChange={(event) => setLeadsPassword(event.target.value)}
+                autoComplete="current-password"
+              />
+            </label>
+            {!samePassword && (
+              <label>
+                <span>סיסמת מערכת ההצעות</span>
+                <input
+                  type="password"
+                  value={quotesPassword}
+                  onChange={(event) => setQuotesPassword(event.target.value)}
+                  autoComplete="current-password"
+                />
+              </label>
+            )}
+            <label className="import-same-password">
+              <input
+                type="checkbox"
+                checked={samePassword}
+                onChange={(event) => setSamePassword(event.target.checked)}
+              />
+              <span>אותה סיסמה בשתי המערכות</span>
+            </label>
+          </div>
+        ) : (
+          <>
+            <label>
+              <span>JSON ממערכת הלידים</span>
+              <textarea
+                value={leadsJson}
+                onChange={(event) => setLeadsJson(event.target.value)}
+              />
+            </label>
+            <label>
+              <span>JSON ממערכת הצעות המחיר</span>
+              <textarea
+                value={quotesJson}
+                onChange={(event) => setQuotesJson(event.target.value)}
+              />
+            </label>
+          </>
+        )}
+        {snapshot && (
+          <section className="migration-preview">
+            <h3>הנתונים נמצאו</h3>
+            <div>
+              <span>
+                <b>{snapshot.workspace.leads.length}</b>
+                לידים
+              </span>
+              <span>
+                <b>{snapshot.workspace.quotes.length}</b>
+                גרסאות הצעה
+              </span>
+              <span>
+                <b>
+                  {
+                    snapshot.workspace.leads.filter((lead) => lead.deleted)
+                      .length
+                  }
+                </b>
+                לידים שנמחקו
+              </span>
+            </div>
+            <button onClick={downloadBackup}>הורדת גיבוי לפני העברה</button>
+          </section>
+        )}
         {error && <div className="sales-import-error">{error}</div>}
         <footer>
           <button onClick={onClose}>ביטול</button>
-          <button className="sales-primary" disabled={busy} onClick={() => void importData()}>
-            {busy ? "מייבא…" : "ייבוא נתונים"}
-          </button>
+          {!snapshot ? (
+            <button
+              className="sales-primary"
+              disabled={
+                busy ||
+                (mode === "automatic" && (!email || !leadsPassword))
+              }
+              onClick={() => void connect()}
+            >
+              {busy ? "מתחבר…" : "בדיקת נתונים"}
+            </button>
+          ) : (
+            <button
+              className="sales-primary"
+              disabled={busy}
+              onClick={() => void importData()}
+            >
+              {busy ? "מעביר…" : "העברת הנתונים למערכת"}
+            </button>
+          )}
         </footer>
       </div>
     </SalesModal>

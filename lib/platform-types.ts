@@ -122,6 +122,26 @@ export type LeadStatus =
   | "נסגר"
   | "לא רלוונטי";
 
+export type LeadStatusHistoryEntry = {
+  from: string;
+  to: string;
+  changedAt: string;
+  changedBy?: string;
+};
+
+export type LeadTask = {
+  id: string;
+  title: string;
+  status: "פתוחה" | "בטיפול" | "נדחתה" | "בוצעה" | "בוטלה";
+  priority: LeadPriority;
+  owner: string;
+  dueDate: string;
+  dueTime: string;
+  note: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Lead = {
   id: string;
   company: string;
@@ -143,9 +163,19 @@ export type Lead = {
   monthlyConsumption: number;
   pricePerKg: number;
   notes: string;
+  currentStatus: string;
+  nextAction: string;
   meetingDate: string;
   meetingTime: string;
   meetingLocation: string;
+  meetingGuest: string;
+  sheet: string;
+  deleted: boolean;
+  deletedAt?: string;
+  statusChangedAt: string;
+  statusHistory: LeadStatusHistoryEntry[];
+  tasks: LeadTask[];
+  lastUpdated: string;
   quoteIds: string[];
   convertedAccountId?: string;
   legacyId?: string;
@@ -168,11 +198,22 @@ export type QuoteBlend = {
 };
 
 export type QuoteEquipment = {
+  key?: string;
   model: string;
   quantity: number;
   unitCost: number;
+  importer?: "tavor" | "ypeper" | string;
+  capacityPerDay?: number;
+  addonKeys?: string[];
   commercialModel: "ללא עלות" | "השכרה" | "מכירה";
   monthlyPrice: number;
+};
+
+export type QuoteAllocation = {
+  key: string;
+  free: number;
+  lease: number;
+  sale: number;
 };
 
 export type Quote = {
@@ -191,11 +232,27 @@ export type Quote = {
   workDaysMonth: number;
   blends: QuoteBlend[];
   equipment: QuoteEquipment[];
+  equipmentCosts: Record<string, number>;
+  allocation: QuoteAllocation[];
+  supplierMonths: number;
   leaseMonths: number;
+  manualLeasePerSet: number;
   saleMargin: number;
+  clientCostMonths: number;
   extraMonthlyCost: number;
+  clientPayTerm: number;
+  importerPayTerm: number;
+  coffeeSupplierPayTerm: number;
+  cashflowMonths: number;
+  financingMonths: number;
+  financedAmount: number;
+  annualInterest: number;
+  applyVolumeDiscount: boolean;
   owner: string;
   notes: string;
+  clientKey?: string;
+  savedAt?: string;
+  legacyId?: string;
   createdAt: string;
   updatedAt: string;
   approvedAt?: string;
