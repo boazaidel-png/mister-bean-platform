@@ -11,7 +11,13 @@ import {
   FileInput,
   FileText,
   Filter,
+  ChevronDown,
+  ChevronUp,
+  Clock3,
+  LayoutGrid,
+  List,
   Pencil,
+  Phone,
   Plus,
   Search,
   Sparkles,
@@ -251,6 +257,30 @@ const isActiveLead = (lead: Lead) =>
   !lead.deleted &&
   !["נסגר", "לא רלוונטי", "לפנייה עתידית"].includes(lead.status);
 
+const leadPipelineStages = ["פנייה", "שיחה", "פגישה", "הצעה", "סגירה"];
+function leadPipelineIndex(status: LeadStatus) {
+  if (status === "נסגר") return 4;
+  if (["בהמתנה להצעת מחיר", "נשלחה הצעת מחיר"].includes(status)) return 3;
+  if (
+    ["בהמתנה לקביעת פגישה", "נקבעה פגישה"].includes(status)
+  ) {
+    return 2;
+  }
+  if (["בוצעה שיחה ראשונית", "בהמתנה לפרטים"].includes(status)) return 1;
+  return 0;
+}
+
+function leadFollowUpState(lead: Lead) {
+  if (!lead.followUpDate) return { label: "לא נקבע פולואפ", tone: "muted" };
+  if (lead.followUpDate < today()) {
+    return { label: `באיחור · ${displayDate(lead.followUpDate)}`, tone: "late" };
+  }
+  if (lead.followUpDate === today()) {
+    return { label: "לטיפול היום", tone: "today" };
+  }
+  return { label: displayDate(lead.followUpDate), tone: "future" };
+}
+
 function leadMatchesTab(lead: Lead, tab: LeadTab) {
   if (tab === "נמחקו") return lead.deleted;
   if (lead.deleted) return false;
@@ -365,6 +395,7 @@ export function LeadsWorkspace({
   const [priority, setPriority] = useState("הכל");
   const [sortKey, setSortKey] = useState<keyof Lead>("followUpDate");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
   const [editing, setEditing] = useState<Lead | null>(null);
   const [quoteLead, setQuoteLead] = useState<Lead | null>(null);
   const [importing, setImporting] = useState(false);
@@ -425,6 +456,24 @@ export function LeadsWorkspace({
       setSortKey(key);
       setSortDirection("asc");
     }
+  };
+  const updateLeadStatus = (lead: Lead, nextStatus: LeadStatus) => {
+    void onSaveLead({
+      ...lead,
+      status: nextStatus,
+      sheet:
+        nextStatus === "לפנייה עתידית" ? "לפנייה עתידית" : lead.sheet,
+      statusChangedAt: now(),
+      statusHistory: [
+        ...(lead.statusHistory || []),
+        {
+          from: lead.status,
+          to: nextStatus,
+          changedAt: now(),
+        },
+      ],
+      updatedAt: now(),
+    });
   };
   const saveChecked = async (lead: Lead) => {
     const duplicate = workspace.leads.find(
@@ -669,7 +718,143 @@ export function LeadsWorkspace({
             <option>נמוכה</option>
           </select>
         </div>
-        <div className="sales-table-wrap">
+        <div className="lead-results-head">
+          <div>
+            <strong>{rows.length} לידים</strong>
+            <span>בתצוגה הנוכחית</span>
+          </div>
+          <div className="lead-view-toggle" aria-label="בחירת תצוגת לידים">
+            <button
+              className={viewMode === "cards" ? "active" : ""}
+              onClick={() => setViewMode("cards")}
+              aria-pressed={viewMode === "cards"}
+            >
+              <LayoutGrid size={15} /> כרטיסים
+            </button>
+            <button
+              className={viewMode === "table" ? "active" : ""}
+              onClick={() => setViewMode("table")}
+              aria-pressed={viewMode === "table"}
+            >
+              <List size={15} /> טבלה
+            </button>
+          </div>
+        </div>
+        <div className={`lead-card-grid ${viewMode === "cards" ? "active" : ""}`}>
+          {rows.map((lead) => {
+            const pipelineIndex = leadPipelineIndex(lead.status);
+            const followUp = leadFollowUpState(lead);
+            return (
+              <article className="lead-work-card" key={lead.id}>
+                <header>
+                  <div className="lead-company-mark">
+                    {(lead.company || "?").slice(0, 2)}
+                  </div>
+                  <div className="lead-card-title">
+                    <div>
+                      <h3>{lead.company}</h3>
+                      <span className={`lead-priority ${lead.priority}`}>
+                        {lead.priority}
+                      </span>
+                    </div>
+                    <p>
+                      {lead.contactName || "איש קשר לא הוגדר"}
+                      {lead.location ? ` · ${lead.location}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    className="lead-card-edit"
+                    onClick={() => setEditing(lead)}
+                    aria-label={`עריכת ${lead.company}`}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                </header>
+                <div className="lead-pipeline" aria-label="התקדמות הליד">
+                  {leadPipelineStages.map((stage, index) => (
+                    <div
+                      className={`${index <= pipelineIndex ? "done" : ""} ${
+                        index === pipelineIndex ? "current" : ""
+                      }`}
+                      key={stage}
+                    >
+                      <i />
+                      <span>{stage}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="lead-card-status-row">
+                  <label>
+                    <span>סטטוס</span>
+                    <select
+                      className="lead-inline-status"
+                      value={lead.status}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        updateLeadStatus(
+                          lead,
+                          event.target.value as LeadStatus,
+                        )
+                      }
+                    >
+                      {leadStatuses.map((item) => (
+                        <option key={item}>{item}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className={`lead-followup ${followUp.tone}`}>
+                    <Clock3 size={15} />
+                    <div>
+                      <span>פולואפ</span>
+                      <strong>{followUp.label}</strong>
+                    </div>
+                  </div>
+                </div>
+                <div className="lead-next-action">
+                  <span>הפעולה הבאה</span>
+                  <strong>
+                    {lead.nextAction ||
+                      (lead.status === "לא טופל"
+                        ? "יצירת קשר ראשוני"
+                        : "לא הוגדרה פעולה")}
+                  </strong>
+                </div>
+                <dl className="lead-card-facts">
+                  <div>
+                    <dt>אחראי</dt>
+                    <dd>{lead.owner}</dd>
+                  </div>
+                  <div>
+                    <dt>צריכה</dt>
+                    <dd>{lead.monthlyConsumption || "—"} ק״ג</dd>
+                  </div>
+                  <div>
+                    <dt>מכונות</dt>
+                    <dd>{lead.machineCount || "—"}</dd>
+                  </div>
+                </dl>
+                <footer>
+                  {lead.phone ? (
+                    <a href={`tel:${lead.phone}`}>
+                      <Phone size={15} /> חיוג
+                    </a>
+                  ) : (
+                    <span />
+                  )}
+                  <button onClick={() => setEditing(lead)}>פתיחת ליד</button>
+                  <button
+                    className="quote-action"
+                    disabled={readOnly}
+                    onClick={() => setQuoteLead(lead)}
+                  >
+                    <FileText size={15} /> הצעה
+                  </button>
+                </footer>
+              </article>
+            );
+          })}
+        </div>
+        <div className={`sales-table-wrap ${viewMode === "table" ? "active" : ""}`}>
           <table className="sales-table">
             <thead>
               <tr>
@@ -698,27 +883,12 @@ export function LeadsWorkspace({
                       className="lead-inline-status"
                       value={lead.status}
                       disabled={readOnly}
-                      onChange={(event) => {
-                        const nextStatus = event.target.value as LeadStatus;
-                        void onSaveLead({
-                          ...lead,
-                          status: nextStatus,
-                          sheet:
-                            nextStatus === "לפנייה עתידית"
-                              ? "לפנייה עתידית"
-                              : lead.sheet,
-                          statusChangedAt: now(),
-                          statusHistory: [
-                            ...(lead.statusHistory || []),
-                            {
-                              from: lead.status,
-                              to: nextStatus,
-                              changedAt: now(),
-                            },
-                          ],
-                          updatedAt: now(),
-                        });
-                      }}
+                      onChange={(event) =>
+                        updateLeadStatus(
+                          lead,
+                          event.target.value as LeadStatus,
+                        )
+                      }
                     >
                       {leadStatuses.map((item) => (
                         <option key={item}>{item}</option>
@@ -746,39 +916,6 @@ export function LeadsWorkspace({
               ))}
             </tbody>
           </table>
-        </div>
-        <div className="sales-mobile-list">
-          {rows.map((lead) => (
-            <article key={lead.id}>
-              <header>
-                <div>
-                  <strong>{lead.company}</strong>
-                  <small>{lead.contactName || lead.location}</small>
-                </div>
-                <Status>{lead.status}</Status>
-              </header>
-              <dl>
-                <div>
-                  <dt>אחראי</dt>
-                  <dd>{lead.owner}</dd>
-                </div>
-                <div>
-                  <dt>פולואפ</dt>
-                  <dd>{displayDate(lead.followUpDate)}</dd>
-                </div>
-                <div>
-                  <dt>צריכה</dt>
-                  <dd>{lead.monthlyConsumption || "—"} ק״ג</dd>
-                </div>
-              </dl>
-              <footer>
-                <button onClick={() => setEditing(lead)}>עריכה</button>
-                <button disabled={readOnly} onClick={() => setQuoteLead(lead)}>
-                  יצירת הצעה
-                </button>
-              </footer>
-            </article>
-          ))}
         </div>
         {!rows.length && <div className="sales-empty">לא נמצאו לידים לפי הסינון שנבחר.</div>}
       </section>
@@ -857,11 +994,59 @@ export function QuotesWorkspace({
   const [editing, setEditing] = useState<Quote | null>(null);
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
-  const rows = workspace.quotes.filter(
-    (quote) =>
-      `${quote.clientName} ${quote.versionName}`.toLowerCase().includes(query.toLowerCase()) &&
-      (status === "הכל" || quote.status === status),
+  const [expandedClients, setExpandedClients] = useState<Set<string>>(
+    () => new Set(),
   );
+  const clientGroups = useMemo(() => {
+    const groups = new Map<string, { key: string; name: string; quotes: Quote[] }>();
+    workspace.quotes.forEach((quote) => {
+      const normalizedName = quote.clientName.trim().toLowerCase();
+      const key =
+        quote.clientKey ||
+        quote.leadId ||
+        normalizedName ||
+        quote.id;
+      const group = groups.get(key) || {
+        key,
+        name: quote.clientName || "הצעה ללא שם",
+        quotes: [],
+      };
+      group.quotes.push(quote);
+      groups.set(key, group);
+    });
+    return [...groups.values()]
+      .map((group) => ({
+        ...group,
+        quotes: [...group.quotes].sort((left, right) =>
+          (right.savedAt || right.updatedAt).localeCompare(
+            left.savedAt || left.updatedAt,
+          ),
+        ),
+      }))
+      .filter((group) => {
+        const haystack = `${group.name} ${group.quotes
+          .map((quote) => quote.versionName)
+          .join(" ")}`.toLowerCase();
+        return (
+          haystack.includes(query.toLowerCase()) &&
+          (status === "הכל" ||
+            group.quotes.some((quote) => quote.status === status))
+        );
+      })
+      .sort((left, right) =>
+        (right.quotes[0]?.savedAt || right.quotes[0]?.updatedAt || "").localeCompare(
+          left.quotes[0]?.savedAt || left.quotes[0]?.updatedAt || "",
+        ),
+      );
+  }, [query, status, workspace.quotes]);
+  const toggleClient = (key: string) => {
+    setExpandedClients((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const convert = async (quote: Quote) => {
     setBusyId(quote.id);
@@ -948,71 +1133,145 @@ export function QuotesWorkspace({
             ))}
           </select>
         </div>
-        <div className="quote-grid">
-          {rows.map((quote) => {
-            const metrics = quoteMetrics(quote);
+        <div className="quote-client-grid">
+          {clientGroups.map((group) => {
+            const latest = group.quotes[0];
+            const metrics = quoteMetrics(latest);
+            const isExpanded = expandedClients.has(group.key);
+            const approved = group.quotes.filter(
+              (quote) => quote.status === "אושרה",
+            ).length;
             return (
-              <article className="quote-card" key={quote.id}>
-                <header>
-                  <div>
-                    <small>{quote.versionName}</small>
-                    <h3>{quote.clientName || "הצעה ללא שם"}</h3>
+              <article
+                className={`quote-client-card ${isExpanded ? "expanded" : ""}`}
+                key={group.key}
+              >
+                <header className="quote-client-head">
+                  <div className="quote-client-mark">
+                    {group.name.slice(0, 2)}
                   </div>
-                  <Status>{quote.status}</Status>
+                  <div className="quote-client-title">
+                    <div>
+                      <h3>{group.name}</h3>
+                      <Status>{latest.status}</Status>
+                    </div>
+                    <p>
+                      {group.quotes.length} הצעות
+                      {approved ? ` · ${approved} אושרו` : ""}
+                      {latest.owner ? ` · ${latest.owner}` : ""}
+                    </p>
+                  </div>
+                  <button
+                    className="quote-client-toggle"
+                    onClick={() => toggleClient(group.key)}
+                    aria-expanded={isExpanded}
+                    aria-label={`${isExpanded ? "סגירת" : "פתיחת"} הצעות ${group.name}`}
+                  >
+                    {isExpanded ? <ChevronUp size={19} /> : <ChevronDown size={19} />}
+                  </button>
                 </header>
-                <div className="quote-card-metrics">
+                <div className="quote-client-metrics">
                   <span>
-                    <small>צריכה חודשית</small>
+                    <small>צריכה בהצעה האחרונה</small>
                     <strong>{metrics.consumption.consumptionKg} ק״ג</strong>
                   </span>
                   <span>
-                    <small>הכנסה מפולים</small>
-                    <strong>{money(metrics.beans.income)}</strong>
+                    <small>ציוד מוצע</small>
+                    <strong>
+                      {latest.equipment.reduce(
+                        (sum, item) => sum + item.quantity,
+                        0,
+                      )}{" "}
+                      פריטים
+                    </strong>
                   </span>
                   <span>
-                    <small>יתרה חודשית</small>
+                    <small>יתרה חודשית אחרונה</small>
                     <strong>{money(metrics.profitability.monthlyBalance)}</strong>
                   </span>
                 </div>
-                <p>
-                  {quote.employees} עובדים · {quote.equipment.reduce((sum, item) => sum + item.quantity, 0)} מכונות
-                </p>
-                <footer>
-                  <button onClick={() => setEditing(quote)}>
-                    <Pencil size={15} /> פתיחה
-                  </button>
-                  <button
-                    className="sales-danger"
-                    disabled={readOnly}
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `למחוק את "${quote.versionName}" עבור ${quote.clientName}?`,
-                        )
-                      ) {
-                        void onDeleteQuote(quote.id);
-                      }
-                    }}
-                  >
-                    <Trash2 size={15} /> מחיקה
-                  </button>
-                  {quote.status === "אושרה" && !quote.accountId && (
-                    <button
-                      className="convert-button"
-                      disabled={readOnly || busyId === quote.id}
-                      onClick={() => void convert(quote)}
-                    >
-                      <CheckCircle2 size={15} />
-                      {busyId === quote.id ? "מקים…" : "הקמת לקוח"}
-                    </button>
-                  )}
-                  {quote.accountId && <span className="converted-label">לקוח הוקם</span>}
-                </footer>
+                <button
+                  className="quote-client-open"
+                  onClick={() => toggleClient(group.key)}
+                >
+                  {isExpanded
+                    ? "הסתרת הצעות"
+                    : `הצגת ${group.quotes.length} ההצעות של הלקוח`}
+                  {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+                {isExpanded && (
+                  <div className="quote-version-list">
+                    {group.quotes.map((quote, index) => {
+                      const versionMetrics = quoteMetrics(quote);
+                      return (
+                        <section className="quote-version-row" key={quote.id}>
+                          <div className="quote-version-name">
+                            <span>{index === 0 ? "אחרונה" : `#${group.quotes.length - index}`}</span>
+                            <div>
+                              <strong>{quote.versionName}</strong>
+                              <small>
+                                עודכנה {displayDate(quote.savedAt || quote.updatedAt)}
+                              </small>
+                            </div>
+                          </div>
+                          <Status>{quote.status}</Status>
+                          <div className="quote-version-value">
+                            <small>צריכה</small>
+                            <strong>
+                              {versionMetrics.consumption.consumptionKg} ק״ג
+                            </strong>
+                          </div>
+                          <div className="quote-version-value">
+                            <small>יתרה חודשית</small>
+                            <strong>
+                              {money(
+                                versionMetrics.profitability.monthlyBalance,
+                              )}
+                            </strong>
+                          </div>
+                          <div className="quote-version-actions">
+                            <button onClick={() => setEditing(quote)}>
+                              <Pencil size={15} /> פתיחה
+                            </button>
+                            <button
+                              className="sales-danger"
+                              disabled={readOnly}
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    `למחוק את "${quote.versionName}" עבור ${quote.clientName}?`,
+                                  )
+                                ) {
+                                  void onDeleteQuote(quote.id);
+                                }
+                              }}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                            {quote.status === "אושרה" && !quote.accountId && (
+                              <button
+                                className="convert-button"
+                                disabled={readOnly || busyId === quote.id}
+                                onClick={() => void convert(quote)}
+                              >
+                                <CheckCircle2 size={15} />
+                                {busyId === quote.id ? "מקים…" : "הקמת לקוח"}
+                              </button>
+                            )}
+                            {quote.accountId && (
+                              <span className="converted-label">לקוח הוקם</span>
+                            )}
+                          </div>
+                        </section>
+                      );
+                    })}
+                  </div>
+                )}
               </article>
             );
           })}
         </div>
-        {!rows.length && <div className="sales-empty">לא נמצאו הצעות מחיר.</div>}
+        {!clientGroups.length && <div className="sales-empty">לא נמצאו הצעות מחיר.</div>}
       </section>
       {editing && (
         <QuoteModal
