@@ -6,6 +6,7 @@ import {
   Building2,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
   CircleDollarSign,
   Download,
   FileInput,
@@ -402,7 +403,7 @@ export function LeadsWorkspace({
   const [priority, setPriority] = useState("הכל");
   const [sortKey, setSortKey] = useState<keyof Lead>("followUpDate");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
-  const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
+  const [viewMode, setViewMode] = useState<"cards" | "table">("table");
   const [editing, setEditing] = useState<Lead | null>(null);
   const [quoteLead, setQuoteLead] = useState<Lead | null>(null);
   const [importing, setImporting] = useState(false);
@@ -452,6 +453,8 @@ export function LeadsWorkspace({
     .sort((a, b) => {
       const left = String(a[sortKey] ?? "");
       const right = String(b[sortKey] ?? "");
+      if (!left && right) return 1;
+      if (left && !right) return -1;
       const compared = left.localeCompare(right, "he", { numeric: true });
       return sortDirection === "asc" ? compared : -compared;
     });
@@ -732,18 +735,18 @@ export function LeadsWorkspace({
           </div>
           <div className="lead-view-toggle" aria-label="בחירת תצוגת לידים">
             <button
+              className={viewMode === "table" ? "active" : ""}
+              onClick={() => setViewMode("table")}
+              aria-pressed={viewMode === "table"}
+            >
+              <List size={15} /> רשימה
+            </button>
+            <button
               className={viewMode === "cards" ? "active" : ""}
               onClick={() => setViewMode("cards")}
               aria-pressed={viewMode === "cards"}
             >
               <LayoutGrid size={15} /> כרטיסים
-            </button>
-            <button
-              className={viewMode === "table" ? "active" : ""}
-              onClick={() => setViewMode("table")}
-              aria-pressed={viewMode === "table"}
-            >
-              <List size={15} /> טבלה
             </button>
           </div>
         </div>
@@ -870,6 +873,7 @@ export function LeadsWorkspace({
                 <th><button className="sales-sort" onClick={() => toggleSort("status")}>סטטוס</button></th>
                 <th><button className="sales-sort" onClick={() => toggleSort("owner")}>אחראי</button></th>
                 <th><button className="sales-sort" onClick={() => toggleSort("followUpDate")}>פולואפ</button></th>
+                <th>הפעולה הבאה</th>
                 <th><button className="sales-sort" onClick={() => toggleSort("monthlyConsumption")}>צריכה</button></th>
                 <th />
               </tr>
@@ -904,6 +908,9 @@ export function LeadsWorkspace({
                   </td>
                   <td>{lead.owner}</td>
                   <td>{displayDate(lead.followUpDate)}</td>
+                  <td>
+                    {lead.nextAction || (lead.status === "לא טופל" ? "יצירת קשר ראשוני" : "—")}
+                  </td>
                   <td>{lead.monthlyConsumption || "—"} ק״ג</td>
                   <td>
                     <div className="sales-row-actions">
@@ -923,6 +930,79 @@ export function LeadsWorkspace({
               ))}
             </tbody>
           </table>
+        </div>
+        <div className={`lead-compact-list ${viewMode === "table" ? "active" : ""}`}>
+          {rows.map((lead) => {
+            const followUp = leadFollowUpState(lead);
+            return (
+              <article className="lead-list-item" key={lead.id}>
+                <button
+                  className="lead-list-main"
+                  onClick={() => setEditing(lead)}
+                  aria-label={`פתיחת הליד ${lead.company}`}
+                >
+                  <span className="lead-company-mark">
+                    {(lead.company || "?").slice(0, 2)}
+                  </span>
+                  <span className="lead-list-title">
+                    <strong>{lead.company}</strong>
+                    <small>
+                      {lead.contactName || "איש קשר לא הוגדר"}
+                      {lead.phone ? ` · ${lead.phone}` : ""}
+                    </small>
+                  </span>
+                  <ChevronLeft size={18} />
+                </button>
+                <div className="lead-list-details">
+                  <label>
+                    <span>סטטוס</span>
+                    <select
+                      className="lead-inline-status"
+                      value={lead.status}
+                      disabled={readOnly}
+                      onChange={(event) =>
+                        updateLeadStatus(lead, event.target.value as LeadStatus)
+                      }
+                    >
+                      {leadStatuses.map((item) => (
+                        <option key={item}>{item}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className={`lead-list-followup ${followUp.tone}`}>
+                    <Clock3 size={14} />
+                    <small>פולואפ</small>
+                    <strong>{followUp.label}</strong>
+                  </span>
+                </div>
+                <div className="lead-list-next">
+                  <span>הפעולה הבאה</span>
+                  <strong>
+                    {lead.nextAction ||
+                      (lead.status === "לא טופל"
+                        ? "יצירת קשר ראשוני"
+                        : "לא הוגדרה פעולה")}
+                  </strong>
+                </div>
+                <footer>
+                  <span className={`lead-priority ${lead.priority}`}>{lead.priority}</span>
+                  <small>{lead.owner}{lead.location ? ` · ${lead.location}` : ""}</small>
+                  {lead.phone && (
+                    <a href={`tel:${lead.phone}`} aria-label={`חיוג אל ${lead.company}`}>
+                      <Phone size={16} />
+                    </a>
+                  )}
+                  <button
+                    className="quote-action"
+                    disabled={readOnly}
+                    onClick={() => setQuoteLead(lead)}
+                  >
+                    <FileText size={15} /> הצעה
+                  </button>
+                </footer>
+              </article>
+            );
+          })}
         </div>
         {!rows.length && <div className="sales-empty">לא נמצאו לידים לפי הסינון שנבחר.</div>}
       </section>
