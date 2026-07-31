@@ -139,6 +139,13 @@ const quoteFromLead = (lead?: Lead): Quote => ({
   id: id("quote"),
   leadId: lead?.id,
   clientName: lead?.company || "",
+  contactName: lead?.contactName || "",
+  contactRole: lead?.contactRole || "",
+  phone: lead?.phone || "",
+  email: lead?.email || "",
+  location: lead?.location || "",
+  supplier: lead?.supplier || "",
+  leadNotes: lead?.notes || "",
   versionName: "גרסה 1",
   clientRank: "רגיל",
   status: "טיוטה",
@@ -847,7 +854,7 @@ export function LeadsWorkspace({
                     disabled={readOnly}
                     onClick={() => setQuoteLead(lead)}
                   >
-                    <FileText size={15} /> הצעה
+                    <FileText size={15} /> מעבר להצעת מחיר
                   </button>
                 </footer>
               </article>
@@ -908,7 +915,7 @@ export function LeadsWorkspace({
                         disabled={readOnly}
                         onClick={() => setQuoteLead(lead)}
                       >
-                        הצעה
+                        מעבר להצעה
                       </button>
                     </div>
                   </td>
@@ -926,6 +933,11 @@ export function LeadsWorkspace({
           onClose={() => setEditing(null)}
           onSave={async (lead) => {
             if (await saveChecked(lead)) setEditing(null);
+          }}
+          onCreateQuote={async (lead) => {
+            if (!(await saveChecked(lead))) return;
+            setEditing(null);
+            setQuoteLead(lead);
           }}
           onDelete={async (lead) => {
             await onSaveLead({
@@ -1313,6 +1325,7 @@ function LeadModal({
   readOnly,
   onClose,
   onSave,
+  onCreateQuote,
   onDelete,
   onRestore,
 }: {
@@ -1320,6 +1333,7 @@ function LeadModal({
   readOnly: boolean;
   onClose: () => void;
   onSave: (lead: Lead) => Promise<void>;
+  onCreateQuote: (lead: Lead) => Promise<void>;
   onDelete: (lead: Lead) => Promise<void>;
   onRestore: (lead: Lead) => Promise<void>;
 }) {
@@ -1327,33 +1341,44 @@ function LeadModal({
   const [saving, setSaving] = useState(false);
   const update = <K extends keyof Lead>(key: K, value: Lead[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
+  const preparedDraft = () => {
+    const changed = draft.status !== lead.status;
+    return {
+      ...draft,
+      sheet:
+        draft.status === "לפנייה עתידית"
+          ? "לפנייה עתידית"
+          : draft.sheet === "לפנייה עתידית"
+            ? "ראשוני"
+            : draft.sheet,
+      statusChangedAt: changed ? now() : draft.statusChangedAt,
+      statusHistory: changed
+        ? [
+            ...(draft.statusHistory || []),
+            {
+              from: lead.status,
+              to: draft.status,
+              changedAt: now(),
+            },
+          ]
+        : draft.statusHistory || [],
+      lastUpdated: today(),
+      updatedAt: now(),
+    };
+  };
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
     try {
-      const changed = draft.status !== lead.status;
-      await onSave({
-        ...draft,
-        sheet:
-          draft.status === "לפנייה עתידית"
-            ? "לפנייה עתידית"
-            : draft.sheet === "לפנייה עתידית"
-              ? "ראשוני"
-              : draft.sheet,
-        statusChangedAt: changed ? now() : draft.statusChangedAt,
-        statusHistory: changed
-          ? [
-              ...(draft.statusHistory || []),
-              {
-                from: lead.status,
-                to: draft.status,
-                changedAt: now(),
-              },
-            ]
-          : draft.statusHistory || [],
-        lastUpdated: today(),
-        updatedAt: now(),
-      });
+      await onSave(preparedDraft());
+    } finally {
+      setSaving(false);
+    }
+  };
+  const createQuote = async () => {
+    setSaving(true);
+    try {
+      await onCreateQuote(preparedDraft());
     } finally {
       setSaving(false);
     }
@@ -1669,6 +1694,16 @@ function LeadModal({
               </button>
             )
           )}
+          {!lead.deleted && (
+            <button
+              type="button"
+              className="lead-to-quote-button"
+              disabled={readOnly || saving || !draft.company.trim()}
+              onClick={() => void createQuote()}
+            >
+              <FileText size={16} /> מעבר להצעת מחיר
+            </button>
+          )}
           <button type="button" onClick={onClose}>ביטול</button>
           <button className="sales-primary" disabled={readOnly || saving}>
             {saving ? "שומר…" : "שמירת ליד"}
@@ -1944,6 +1979,15 @@ function QuoteModal({
         <div className="quote-edit-main">
           {step === 0 && (
             <div className="sales-form-grid">
+              {draft.leadId && (
+                <div className="quote-lead-link full">
+                  <CheckCircle2 size={19} />
+                  <div>
+                    <strong>ההצעה מקושרת לליד</strong>
+                    <span>פרטי הלקוח הועברו אוטומטית וניתנים לעריכה לפני השמירה.</span>
+                  </div>
+                </div>
+              )}
               <label>
                 <span>שם הלקוח</span>
                 <input
@@ -1957,6 +2001,56 @@ function QuoteModal({
                 <input
                   value={draft.versionName}
                   onChange={(event) => update("versionName", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>איש קשר</span>
+                <input
+                  value={draft.contactName || ""}
+                  onChange={(event) => update("contactName", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>תפקיד</span>
+                <input
+                  value={draft.contactRole || ""}
+                  onChange={(event) => update("contactRole", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>טלפון</span>
+                <input
+                  value={draft.phone || ""}
+                  onChange={(event) => update("phone", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>דוא״ל</span>
+                <input
+                  type="email"
+                  value={draft.email || ""}
+                  onChange={(event) => update("email", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>מיקום</span>
+                <input
+                  value={draft.location || ""}
+                  onChange={(event) => update("location", event.target.value)}
+                />
+              </label>
+              <label>
+                <span>ספק קיים</span>
+                <input
+                  value={draft.supplier || ""}
+                  onChange={(event) => update("supplier", event.target.value)}
+                />
+              </label>
+              <label className="full">
+                <span>הערות שהועברו מהליד</span>
+                <textarea
+                  value={draft.leadNotes || ""}
+                  onChange={(event) => update("leadNotes", event.target.value)}
                 />
               </label>
               <label>

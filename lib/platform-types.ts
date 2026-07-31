@@ -221,6 +221,13 @@ export type Quote = {
   leadId?: string;
   accountId?: string;
   clientName: string;
+  contactName?: string;
+  contactRole?: string;
+  phone?: string;
+  email?: string;
+  location?: string;
+  supplier?: string;
+  leadNotes?: string;
   versionName: string;
   clientRank: string;
   status: QuoteStatus;
