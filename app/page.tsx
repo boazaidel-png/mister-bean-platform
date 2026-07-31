@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { createContext, FormEvent, useContext, useEffect, useState } from "react";
 import Image from "next/image";
 import {
   Activity,
@@ -31,6 +31,7 @@ import {
 } from "@/components/sales-workspace";
 import {
   convertApprovedQuoteToCustomer,
+  deleteQuote,
   getOrCreateUserProfile,
   importSalesWorkspace,
   observeAuth,
@@ -38,7 +39,6 @@ import {
   savePlatformStore,
   saveLead,
   saveQuote,
-  seedWorkspaceIfEmpty,
   signInWithEmail,
   signInWithGoogle,
   signOutUser,
@@ -126,7 +126,11 @@ const adminNav = [
   {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},{id:"access" as View,label:"ניהול והרשאות",icon:UserCog},
 ];
 
-const customerName = (id:string) => seedCustomers.find(c=>c.id===id)?.name || "—";
+const CustomerDirectoryContext = createContext<Customer[]>(seedCustomers);
+const useCustomerName = () => {
+  const directory = useContext(CustomerDirectoryContext);
+  return (id:string) => directory.find(customer=>customer.id===id)?.name || "—";
+};
 const formatDate = (v:string) => new Intl.DateTimeFormat("he-IL").format(new Date(v));
 const greetingForHour = (hour:number) => {
   if(hour<5)return "לילה טוב";
@@ -209,8 +213,6 @@ export default function Home() {
           setProfile(nextProfile);
           setSelectedCustomer(nextProfile.accountIds[0]||"c1");
           if(nextProfile.status==="active"){
-            await seedWorkspaceIfEmpty(nextProfile,seedCustomers,initialStore);
-            if(!active)return;
             unsubscribeStore=subscribeToPlatformStore(
               nextProfile,
               next=>{if(active){setStore(next);setStoreReady(true);setSyncError("");}},
@@ -270,6 +272,7 @@ export default function Home() {
   const scopedOrders = isStaff?store.orders:store.orders.filter(o=>o.accountId===clientId);
   const nav = isStaff?adminNav.filter(item=>item.id!=="access"||role==="admin"):customerNav;
   const firstName = (profile?.displayName||profile?.email||"משתמש").trim().split(/\s+/)[0];
+  const selectedCustomerName = customers.find(customer=>customer.id===selectedCustomer)?.name || "—";
 
   const navigate=(next:View)=>{setView(next);setMobileOpen(false);};
   const allowWrite=()=>{if(readOnly){setToast("מצב התצוגה הוא לקריאה בלבד");return false;}return true;};
@@ -289,8 +292,9 @@ export default function Home() {
   if(!role) return <LoadingScreen/>;
 
   return (
+    <CustomerDirectoryContext.Provider value={customers}>
     <div className={`app-shell ${preview?"previewing":""}`} dir="rtl">
-      {preview&&<div className="preview-banner"><Eye size={17}/><span>מצב תצוגה: <strong>{roleNames[preview.role]}</strong>{!isStaff&&<> · {customerName(selectedCustomer)}</>}</span><b>קריאה בלבד</b><button onClick={leavePreview}><X size={16}/> חזרה לניהול</button></div>}
+      {preview&&<div className="preview-banner"><Eye size={17}/><span>מצב תצוגה: <strong>{roleNames[preview.role]}</strong>{!isStaff&&<> · {selectedCustomerName}</>}</span><b>קריאה בלבד</b><button onClick={leavePreview}><X size={16}/> חזרה לניהול</button></div>}
       <aside className={`sidebar ${mobileOpen?"open":""}`}>
         <div className="brand"><BrandIcon/><div><strong>Mister Bean</strong><small>ניהול ושירות לקוחות</small></div></div>
         <span className="sidebar-label">{isStaff?"ניהול ותפעול":"אזור הלקוח"}</span>
@@ -314,8 +318,8 @@ export default function Home() {
         </header>
         <div className="content">
           {view==="dashboard"&&(isStaff?<AdminDashboard store={store} sales={salesWorkspace} customers={customers} go={navigate} openCustomer={openCustomer} greeting={greeting} firstName={firstName}/>:<CustomerDashboard customer={customers.find(c=>c.id===clientId)||seedCustomers[0]} store={store} go={navigate} openTicket={openTicket} greeting={greeting}/>)}
-          {view==="leads"&&isStaff&&<LeadsWorkspace workspace={salesWorkspace} readOnly={readOnly} onSaveLead={async(lead:Lead)=>{if(!allowWrite())return;await saveLead(lead);setToast("הליד נשמר");}} onSaveQuote={async(quote:Quote)=>{if(!allowWrite())return;await saveQuote(quote);setToast("הצעת המחיר נשמרה");}} onImport={async(next:SalesWorkspace)=>{if(!allowWrite())return;await importSalesWorkspace(next);setToast(`יובאו ${next.leads.length} לידים ו־${next.quotes.length} הצעות`);}} onOpenQuotes={()=>navigate("quotes")}/>}
-          {view==="quotes"&&isStaff&&<QuotesWorkspace workspace={salesWorkspace} readOnly={readOnly} onSaveQuote={async(quote:Quote)=>{if(!allowWrite())return;await saveQuote(quote);setToast("הצעת המחיר נשמרה");}} onConvert={async(quote:Quote,lead?:Lead)=>{if(!allowWrite())throw new Error("מצב תצוגה הוא לקריאה בלבד");const accountId=await convertApprovedQuoteToCustomer(quote,lead);setToast("חשבון הלקוח הוקם");return accountId;}} onOpenLeads={()=>navigate("leads")}/>}
+          {view==="leads"&&isStaff&&<LeadsWorkspace workspace={salesWorkspace} readOnly={readOnly} canMigrate={profile.role==="admin"&&!preview} onSaveLead={async(lead:Lead)=>{if(!allowWrite())return;await saveLead(lead);setToast("הליד נשמר");}} onSaveQuote={async(quote:Quote)=>{if(!allowWrite())return;await saveQuote(quote);setToast("הצעת המחיר נשמרה");}} onImport={async(next:SalesWorkspace)=>{if(!allowWrite())return;const result=await importSalesWorkspace(next);setToast(`הועברו ${result.importedLeads} לידים ו־${result.importedQuotes} הצעות. במאגר המאוחד: ${result.storedLeads} לידים ו־${result.storedQuotes} הצעות.`);}} onOpenQuotes={()=>navigate("quotes")}/>}
+          {view==="quotes"&&isStaff&&<QuotesWorkspace workspace={salesWorkspace} readOnly={readOnly} onSaveQuote={async(quote:Quote)=>{if(!allowWrite())return;await saveQuote(quote);setToast("הצעת המחיר נשמרה");}} onDeleteQuote={async(quoteId:string)=>{if(!allowWrite())return;await deleteQuote(quoteId);setToast("גרסת ההצעה נמחקה");}} onConvert={async(quote:Quote,lead?:Lead)=>{if(!allowWrite())throw new Error("מצב תצוגה הוא לקריאה בלבד");const accountId=await convertApprovedQuoteToCustomer(quote,lead);setToast("חשבון הלקוח הוקם");return accountId;}} onOpenLeads={()=>navigate("leads")}/>}
           {view==="customers"&&<Customers customers={customers} store={store} openCustomer={openCustomer} openTicket={openTicketForCustomer} openTask={openTaskForCustomer}/>}
           {view==="customer"&&<CustomerCard customer={customers.find(c=>c.id===selectedCustomer)||seedCustomers[0]} store={store} openTicket={openTicket} openTask={()=>{if(allowWrite())setModal("task");}}/>}
           {view==="tickets"&&<Tickets tickets={scopedTickets} machines={store.machines} isStaff={isStaff} onUpdate={(id,status)=>{if(!allowWrite())return;setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===id?{...t,status,updatedAt:new Date().toISOString()}:t)}));setToast("סטטוס הקריאה עודכן");}} onOpen={id=>{setSelectedTicket(id);setModal("detail");}} onClose={id=>{if(!allowWrite())return;setSelectedTicket(id);setModal("close");}} openTicket={openTicket}/>}
@@ -337,6 +341,7 @@ export default function Home() {
       {syncError&&<div className="sync-error"><LockKeyhole size={16}/><span>הסנכרון ממתין להגדרת Firebase: {syncError}</span></div>}
       {toast&&<div className="toast">✓ {toast}</div>}
     </div>
+    </CustomerDirectoryContext.Provider>
   );
 }
 
@@ -423,6 +428,7 @@ function SectionTitle({title,sub,action}:{title:string;sub?:string;action?:React
 function Kpi({label,value,meta,tone="default",onClick}:{label:string;value:string|number;meta:string;tone?:string;onClick?:()=>void}) {return <button className={`kpi ${tone}`} onClick={onClick}><span>{label}</span><strong>{value}</strong><small>{meta}</small></button>}
 
 function AdminDashboard({store,sales,customers,go,openCustomer,greeting,firstName}:{store:Store;sales:SalesWorkspace;customers:Customer[];go:(v:View)=>void;openCustomer:(id:string)=>void;greeting:string;firstName:string}) {
+  const customerName=useCustomerName();
   const open=store.tickets.filter(t=>!closed(t.status)), urgent=open.filter(t=>t.urgency==="דחופה");
   const pending=store.orders.filter(o=>o.status==="ממתין לאישור");
   const risks=customers.filter(c=>riskReasons(c,store).length>0);
@@ -489,6 +495,7 @@ function CustomerCard({customer,store,openTicket,openTask}:{customer:Customer;st
 }
 
 function Tickets({tickets,machines,isStaff,onUpdate,onOpen,onClose,openTicket}:{tickets:Ticket[];machines:Machine[];isStaff:boolean;onUpdate:(id:string,s:string)=>void;onOpen:(id:string)=>void;onClose:(id:string)=>void;openTicket:(m?:string)=>void}) {
+  const customerName=useCustomerName();
   const [status,setStatus]=useState("הכל"),[urgency,setUrgency]=useState("הכל"),[q,setQ]=useState("");
   const rows=tickets.filter(t=>(status==="הכל"||t.status===status)&&(urgency==="הכל"||t.urgency===urgency)&&(t.id+customerName(t.accountId)+t.type).toLowerCase().includes(q.toLowerCase()));
   return <><SectionTitle title="קריאות שירות" sub={`${tickets.filter(t=>!closed(t.status)).length} קריאות פתוחות`} action={<button className="primary" onClick={()=>openTicket()}>＋ פתיחת קריאה</button>}/>
@@ -499,6 +506,7 @@ function Tickets({tickets,machines,isStaff,onUpdate,onOpen,onClose,openTicket}:{
 }
 
 function Machines({machines,isStaff,openTicket,onStatus}:{machines:Machine[];isStaff:boolean;openTicket:(id?:string)=>void;onStatus:(id:string,s:string)=>void}) {
+  const customerName=useCustomerName();
   const [q,setQ]=useState(""),[status,setStatus]=useState("הכל"); const rows=machines.filter(m=>(status==="הכל"||m.status===status)&&(m.serial+m.model+customerName(m.accountId)).toLowerCase().includes(q.toLowerCase()));
   return <><SectionTitle title={isStaff?"מכונות":"המכונות שלי"} sub={`${machines.length} פריטי ציוד`}/><div className="filters"><label className="search">⌕<input placeholder="חיפוש לפי לקוח, דגם או מספר סידורי" value={q} onChange={e=>setQ(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option>הכל</option><option>פעילה</option><option>דורשת טיפול</option><option>מושבתת</option></select></div>
     <div className="table-wrap"><table><thead><tr>{isStaff&&<th>לקוח</th>}<th>דגם</th><th>מספר סידורי</th><th>סניף / מיקום</th><th>סטטוס</th>{isStaff&&<th>מודל מסחרי</th>}<th>טיפול אחרון</th><th>טיפול הבא</th><th></th></tr></thead><tbody>{rows.map(m=><tr key={m.id}>{isStaff&&<td><strong>{customerName(m.accountId)}</strong></td>}<td><strong>{m.model}</strong></td><td>{m.serial}</td><td><strong>{m.site}</strong><small>{m.location}</small></td><td>{isStaff?<select className="status-select" value={m.status} onChange={e=>onStatus(m.id,e.target.value)}><option>פעילה</option><option>דורשת טיפול</option><option>מושבתת</option><option>בהחלפה</option><option>הוחזרה</option></select>:<Badge>{m.status}</Badge>}</td>{isStaff&&<td>{m.commercial}</td>}<td>{formatDate(m.lastService)}</td><td>{new Date(m.nextService)<new Date("2026-07-30")?<Badge>טיפול באיחור</Badge>:formatDate(m.nextService)}</td><td><button className="row-action" onClick={()=>openTicket(m.id)}>פתיחת קריאה</button></td></tr>)}</tbody></table></div>
@@ -507,6 +515,7 @@ function Machines({machines,isStaff,openTicket,onStatus}:{machines:Machine[];isS
 }
 
 function Orders({orders,isStaff,onChange}:{orders:Order[];isStaff:boolean;onChange:(id:string,data:Partial<Order>)=>void}) {
+  const customerName=useCustomerName();
   const total=orders.reduce((s,o)=>s+(o.approvedKg||o.requestedKg),0);
   if(!isStaff){const o=orders[0];return <><SectionTitle title="הזמנת קפה" sub="ניהול הכמות והתערובת לחודש הבא"/><section className="order-hero"><div><span>ההזמנה הבאה</span><h2>{o.month}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{o.requestedKg}</strong><span>ק״ג</span></div></section><OrderEditor order={o} onSave={onChange}/><section className="panel"><h3>12 חודשים קדימה</h3><div className="month-row">{["אוג׳","ספט׳","אוק׳","נוב׳","דצמ׳","ינו׳","פבר׳","מרץ","אפר׳","מאי","יוני","יולי"].map((m,i)=><div className={i===0?"current":""} key={m}><span>{m}</span><strong>{i===0?o.requestedKg:o.defaultKg} ק״ג</strong><small>{i===0?"ניתן לעריכה":"נעול"}</small></div>)}</div></section></>}
   return <><SectionTitle title="הזמנות קפה" sub="הזמנות לחודש אוגוסט 2026" action={<button onClick={()=>{const csv="לקוח,כמות,תערובת,סטטוס\n"+orders.map(o=>`${customerName(o.accountId)},${o.requestedKg},${o.blend},${o.status}`).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv"}));a.download="coffee-orders.csv";a.click();}}>ייצוא CSV</button>}/><div className="kpi-grid"><Kpi label="סך ק״ג לחודש" value={total} meta="לפי הכמות המעודכנת"/><Kpi label="ממתינות לאישור" value={orders.filter(o=>o.status==="ממתין לאישור").length} meta="כולל הזמנות חריגות" tone="orange"/><Kpi label="לא עודכנו" value={orders.filter(o=>o.status==="ממתין לעדכון לקוח").length} meta="נדרשת תזכורת" tone="red"/></div><div className="table-wrap"><table><thead><tr><th>לקוח</th><th>ברירת מחדל</th><th>מבוקש</th><th>שינוי</th><th>מאושר</th><th>תערובת</th><th>סטטוס</th><th></th></tr></thead><tbody>{orders.map(o=>{const diff=Math.round((o.requestedKg-o.defaultKg)/o.defaultKg*100);return <tr key={o.id}><td><strong>{customerName(o.accountId)}</strong></td><td>{o.defaultKg} ק״ג</td><td>{o.requestedKg} ק״ג</td><td><Badge>{Math.abs(diff)>30?"חריג":`${diff>0?"+":""}${diff}%`}</Badge></td><td><input className="kg-input small" type="number" value={o.approvedKg||o.requestedKg} onChange={e=>onChange(o.id,{approvedKg:+e.target.value})}/></td><td>{o.blend}</td><td><Badge>{o.status}</Badge></td><td><button className="row-action" onClick={()=>onChange(o.id,{status:"אושר",approvedKg:o.approvedKg||o.requestedKg})}>אישור</button></td></tr>})}</tbody></table></div><div className="mobile-cards order-mobile-cards">{orders.map(o=>{const diff=Math.round((o.requestedKg-o.defaultKg)/o.defaultKg*100);return <article className="mobile-card order-mobile-card" key={o.id}><div className="mobile-card-head"><div><strong>{customerName(o.accountId)}</strong><small>{o.blend}</small></div><Badge>{o.status}</Badge></div><div className="mobile-order-metrics"><span><small>ברירת מחדל</small><strong>{o.defaultKg} ק״ג</strong></span><span><small>מבוקש</small><strong>{o.requestedKg} ק״ג</strong></span><span><small>שינוי</small><Badge>{Math.abs(diff)>30?"חריג":`${diff>0?"+":""}${diff}%`}</Badge></span></div><label className="mobile-order-approval"><span>כמות מאושרת</span><div className="input-suffix"><input type="number" value={o.approvedKg||o.requestedKg} onChange={e=>onChange(o.id,{approvedKg:+e.target.value})}/><b>ק״ג</b></div></label><button className="primary" onClick={()=>onChange(o.id,{status:"אושר",approvedKg:o.approvedKg||o.requestedKg})}>אישור הזמנה</button></article>})}</div></>;
@@ -519,6 +528,7 @@ function OrderEditor({order,onSave}:{order:Order;onSave:(id:string,d:Partial<Ord
 }
 
 function Tasks({tasks,onCreate,onStatus}:{tasks:Task[];onCreate:()=>void;onStatus:(id:string,s:string)=>void}) {
+  const customerName=useCustomerName();
   return <><SectionTitle title="משימות" action={<button className="primary" onClick={onCreate}>＋ משימה חדשה</button>}/><div className="kanban">{["פתוחה","בטיפול","בוצעה"].map(col=><section key={col}><header><h3>{col}</h3><span>{tasks.filter(t=>t.status===col).length}</span></header>{tasks.filter(t=>t.status===col).map(t=><div className="task-card" key={t.id}><div><Badge>{t.priority}</Badge><span>{t.type}</span></div><h4>{t.title}</h4><p>{customerName(t.accountId)}</p><footer><span>{t.assignedTo}</span><time>{formatDate(t.dueDate)}</time></footer><select value={t.status} onChange={e=>onStatus(t.id,e.target.value)}><option>פתוחה</option><option>בטיפול</option><option>בוצעה</option><option>בוטלה</option></select></div>)}</section>)}</div></>
 }
 
@@ -541,6 +551,7 @@ function TaskModal({customers,accountId,onClose,onSave}:{customers:Customer[];ac
 function CloseModal({onClose,onSave}:{onClose:()=>void;onSave:(s:string)=>void}) {const [reason,setReason]=useState("");return <Modal title="סגירת קריאה" onClose={onClose}><div className="modal-form"><p>כדי לסגור את הקריאה חובה לתעד את סיבת הסגירה.</p><label><span>סיבת סגירה</span><select value={reason} onChange={e=>setReason(e.target.value)}><option value="">בחירת סיבה</option><option>התקלה טופלה</option><option>הוחלף חלק</option><option>בוצעה הדרכה</option><option>לא נמצאה תקלה</option><option>בוטל על ידי הלקוח</option></select></label><footer><button onClick={onClose}>ביטול</button><button className="danger-btn" disabled={!reason} onClick={()=>onSave(reason)}>סגירת הקריאה</button></footer></div></Modal>}
 
 function TicketDetailModal({ticket,machine,onClose}:{ticket:Ticket;machine?:Machine;onClose:()=>void}) {
+  const customerName=useCustomerName();
   if(!ticket) return null;
   const steps=[
     {title:"הקריאה נפתחה",date:ticket.openedAt,done:true},

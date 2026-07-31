@@ -15,8 +15,10 @@ import {
   arrayUnion,
   collection,
   collectionGroup,
+  deleteDoc,
   doc,
   getDoc,
+  getDocs,
   onSnapshot,
   query,
   setDoc,
@@ -45,6 +47,16 @@ const BOOTSTRAP_ADMIN_EMAILS = new Set([
   "boaz@pacifictrade.co",
 ]);
 const entityKeys = ["tickets", "orders", "tasks", "machines"] as const;
+const legacyAddonKeys = new Set([
+  "fridge",
+  "filter",
+  "install",
+  "frother",
+  "osmosis",
+  "ypeper_fridge",
+  "ypeper_filter",
+  "ypeper_install",
+]);
 type EntityKey = (typeof entityKeys)[number];
 type Entity = Ticket | Order | Task | Machine;
 
@@ -52,6 +64,45 @@ let lastSyncedStore: PlatformStore | null = null;
 
 function emptyStore(): PlatformStore {
   return { tickets: [], orders: [], tasks: [], machines: [] };
+}
+
+function normalizeLeadRecord(value: Lead): Lead {
+  const timestamp = value.updatedAt || new Date().toISOString();
+  return {
+    ...value,
+    currentStatus: value.currentStatus || "",
+    nextAction: value.nextAction || "",
+    meetingTime: value.meetingTime || "09:00",
+    meetingGuest: value.meetingGuest || "",
+    sheet: value.sheet || "ראשוני",
+    deleted: value.deleted === true,
+    statusChangedAt: value.statusChangedAt || timestamp,
+    statusHistory: value.statusHistory || [],
+    tasks: value.tasks || [],
+    lastUpdated: value.lastUpdated || timestamp.slice(0, 10),
+    quoteIds: value.quoteIds || [],
+  };
+}
+
+function normalizeQuoteRecord(value: Quote): Quote {
+  return {
+    ...value,
+    equipmentCosts: value.equipmentCosts || {},
+    allocation: value.allocation || [],
+    supplierMonths: value.supplierMonths || 8,
+    leaseMonths: value.leaseMonths || 24,
+    manualLeasePerSet: value.manualLeasePerSet || 0,
+    saleMargin: value.saleMargin || 15,
+    clientCostMonths: value.clientCostMonths || 36,
+    clientPayTerm: value.clientPayTerm || 0,
+    importerPayTerm: value.importerPayTerm || 0,
+    coffeeSupplierPayTerm: value.coffeeSupplierPayTerm || 0,
+    cashflowMonths: value.cashflowMonths || 36,
+    financingMonths: value.financingMonths || 0,
+    financedAmount: value.financedAmount || 0,
+    annualInterest: value.annualInterest || 0,
+    applyVolumeDiscount: value.applyVolumeDiscount !== false,
+  };
 }
 
 function normalizeEmail(email?: string | null) {
@@ -353,7 +404,7 @@ export function subscribeToSalesWorkspace(
     query(collection(db, "leads")),
     (snapshot) => {
       leads = snapshot.docs
-        .map((item) => item.data() as Lead)
+        .map((item) => normalizeLeadRecord(item.data() as Lead))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       leadsReady = true;
       emit();
@@ -364,7 +415,7 @@ export function subscribeToSalesWorkspace(
     query(collection(db, "quotes")),
     (snapshot) => {
       quotes = snapshot.docs
-        .map((item) => item.data() as Quote)
+        .map((item) => normalizeQuoteRecord(item.data() as Quote))
         .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
       quotesReady = true;
       emit();
@@ -402,6 +453,11 @@ export async function saveQuote(quote: Quote) {
     );
   }
   await batch.commit();
+}
+
+export async function deleteQuote(quoteId: string) {
+  const { db } = getFirebaseServices();
+  await deleteDoc(doc(db, "quotes", quoteId));
 }
 
 function accountIdForQuote(quote: Quote) {
@@ -468,7 +524,11 @@ export async function convertApprovedQuoteToCustomer(
     );
   }
   quote.equipment
-    .filter((item) => item.quantity > 0)
+    .filter(
+      (item) =>
+        item.quantity > 0 &&
+        !legacyAddonKeys.has(item.key || item.model),
+    )
     .forEach((item, itemIndex) => {
       for (let index = 0; index < item.quantity; index += 1) {
         const machineId = `machine-${quote.id}-${itemIndex + 1}-${index + 1}`;
@@ -504,4 +564,14 @@ export async function importSalesWorkspace(workspace: SalesWorkspace) {
     }
     await batch.commit();
   }
+  const [leadsSnapshot, quotesSnapshot] = await Promise.all([
+    getDocs(query(collection(db, "leads"))),
+    getDocs(query(collection(db, "quotes"))),
+  ]);
+  return {
+    importedLeads: workspace.leads.length,
+    importedQuotes: workspace.quotes.length,
+    storedLeads: leadsSnapshot.size,
+    storedQuotes: quotesSnapshot.size,
+  };
 }

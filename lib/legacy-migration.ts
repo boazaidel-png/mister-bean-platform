@@ -2,10 +2,13 @@ import type {
   Lead,
   LeadPriority,
   LeadStatus,
+  LeadTask,
   Quote,
+  QuoteAllocation,
   QuoteStatus,
   SalesWorkspace,
 } from "./platform-types";
+import { addonCatalog, equipmentCatalog } from "./quote-engine";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -45,6 +48,31 @@ const timestamp = (value: unknown) => {
 };
 const bool = (value: unknown) =>
   value === true || ["כן", "true", "1"].includes(text(value).toLowerCase());
+const rows = (value: unknown): UnknownRecord[] =>
+  Array.isArray(value)
+    ? value.filter((item) => item && typeof item === "object") as UnknownRecord[]
+    : [];
+
+function legacyLeadTasks(value: unknown, source: UnknownRecord): LeadTask[] {
+  return rows(value).map((item, index) => ({
+    id: text(item.id) || `task-${index + 1}`,
+    title: text(item.title),
+    status: (["פתוחה", "בטיפול", "נדחתה", "בוצעה", "בוטלה"].includes(
+      text(item.status),
+    )
+      ? text(item.status)
+      : "פתוחה") as LeadTask["status"],
+    priority: (["נמוכה", "בינונית", "גבוהה"].includes(text(item.priority))
+      ? text(item.priority)
+      : text(source.priority) || "בינונית") as LeadPriority,
+    owner: text(item.owner) || text(source.owner) || "בועז",
+    dueDate: text(item.dueDate) || text(source.followUpDate),
+    dueTime: text(item.dueTime) || "09:00",
+    note: text(item.note),
+    createdAt: timestamp(item.createdAt || source.createdAt),
+    updatedAt: timestamp(item.updatedAt || item.createdAt || source.updatedAt),
+  }));
+}
 
 function legacyLead(id: string, source: UnknownRecord): Lead {
   const statusText = text(source.status);
@@ -78,9 +106,24 @@ function legacyLead(id: string, source: UnknownRecord): Lead {
     monthlyConsumption: number(source.monthlyConsumption),
     pricePerKg: number(source.pricePerKg),
     notes: text(source.notes),
+    currentStatus: text(source.currentStatus),
+    nextAction: text(source.nextAction),
     meetingDate: text(source.meetingDate),
     meetingTime: text(source.meetingTime),
     meetingLocation: text(source.meetingLocation),
+    meetingGuest: text(source.meetingGuest),
+    sheet: text(source.sheet) || "ראשוני",
+    deleted: bool(source.deleted),
+    deletedAt: text(source.deletedAt) || undefined,
+    statusChangedAt: timestamp(source.statusChangedAt || updatedAt),
+    statusHistory: rows(source.statusHistory).map((entry) => ({
+      from: text(entry.from || entry.oldStatus),
+      to: text(entry.to || entry.newStatus),
+      changedAt: timestamp(entry.changedAt || entry.at),
+      changedBy: text(entry.changedBy || entry.owner) || undefined,
+    })),
+    tasks: legacyLeadTasks(source.tasks, source),
+    lastUpdated: text(source.lastUpdated) || updatedAt.slice(0, 10),
     quoteIds: [],
     createdAt: timestamp(source.createdAt || updatedAt),
     updatedAt,
@@ -101,9 +144,39 @@ function legacyQuote(id: string, source: UnknownRecord): Quote {
   const allocation = Array.isArray(source.allocation)
     ? (source.allocation as UnknownRecord[])
     : [];
+  const equipmentRows = Object.entries(equipmentMap)
+    .filter(([, quantity]) => number(quantity) > 0)
+    .map(([model, quantity]) => {
+      const terms = allocation.find((row) => text(row.key) === model);
+      const catalogItem = equipmentCatalog.find((item) => item.key === model);
+      const addonItem = addonCatalog.find((item) => item.key === model);
+      const commercialModel =
+        number(terms?.sale) > 0
+          ? "מכירה"
+          : number(terms?.lease) > 0
+            ? "השכרה"
+            : "ללא עלות";
+      return {
+        key: model,
+        model: catalogItem?.label || addonItem?.label || model,
+        quantity: number(quantity),
+        unitCost:
+          number(costMap[model]) ||
+          catalogItem?.cost ||
+          addonItem?.cost ||
+          0,
+        importer: catalogItem?.importer || addonItem?.importer,
+        capacityPerDay: catalogItem?.capacityPerDay,
+        addonKeys: catalogItem?.addonKeys,
+        commercialModel,
+        monthlyPrice: number(source.manualLeasePerSet),
+      } as const;
+    });
   const updatedAt = timestamp(source.updatedAt || source.savedAt);
   return {
     id: `quote-${id}`,
+    legacyId: id,
+    clientKey: text(source.clientKey),
     clientName: text(source.clientName),
     versionName: text(source.versionName) || "גרסה מיובאת",
     clientRank: text(source.clientRank) || "רגיל",
@@ -125,29 +198,33 @@ function legacyQuote(id: string, source: UnknownRecord): Quote {
         pricePerKg: number(blend.price || blend.pricePerKg),
       };
     }),
-    equipment: Object.entries(equipmentMap)
-      .filter(([, quantity]) => number(quantity) > 0)
-      .map(([model, quantity]) => {
-        const terms = allocation.find((row) => text(row.key) === model);
-        const commercialModel =
-          number(terms?.sale) > 0
-            ? "מכירה"
-            : number(terms?.lease) > 0
-              ? "השכרה"
-              : "ללא עלות";
-        return {
-          model,
-          quantity: number(quantity),
-          unitCost: number(costMap[model]),
-          commercialModel,
-          monthlyPrice: 0,
-        };
-      }),
+    equipment: equipmentRows,
+    equipmentCosts: Object.fromEntries(
+      Object.entries(costMap).map(([key, value]) => [key, number(value)]),
+    ),
+    allocation: allocation.map((row) => ({
+      key: text(row.key),
+      free: number(row.free),
+      lease: number(row.lease),
+      sale: number(row.sale),
+    })) as QuoteAllocation[],
+    supplierMonths: number(source.supplierMonths) || 8,
     leaseMonths: number(source.leaseMonths) || 24,
+    manualLeasePerSet: number(source.manualLeasePerSet),
     saleMargin: number(source.saleMargin) || 15,
+    clientCostMonths: number(source.clientCostMonths) || 36,
     extraMonthlyCost: number(source.extraMonthlyCost),
+    clientPayTerm: number(source.clientPayTerm),
+    importerPayTerm: number(source.importerPayTerm),
+    coffeeSupplierPayTerm: number(source.coffeeSupplierPayTerm),
+    cashflowMonths: number(source.cashflowMonths) || 36,
+    financingMonths: number(source.financingMonths),
+    financedAmount: number(source.financedAmount),
+    annualInterest: number(source.annualInterest),
+    applyVolumeDiscount: source.applyVolumeDiscount !== false,
     owner: text(source.owner),
     notes: "יובא ממערכת הצעות המחיר הקודמת",
+    savedAt: text(source.savedAt),
     createdAt: timestamp(source.createdAt || updatedAt),
     updatedAt,
   };
@@ -173,7 +250,10 @@ export function parseLegacyWorkspace(
   return {
     leads: Object.entries(leadsSource)
       .filter(([, value]) => value && typeof value === "object")
-      .map(([id, value]) => legacyLead(id, value as UnknownRecord)),
+      .map(([id, value]) => {
+        const source = value as UnknownRecord;
+        return legacyLead(text(source.id) || id, source);
+      }),
     quotes: quoteRows
       .filter((value) => value && typeof value === "object")
       .map((value, index) => {
