@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import Image from "next/image";
 import {
   Activity,
   Building2,
@@ -138,6 +139,9 @@ const riskReasons = (customer: Customer, store: Store) => {
   return reasons;
 };
 function Badge({children}:{children:string}) { return <span className={`badge ${statusTone(children)}`}>{children}</span>; }
+function BrandIcon({large=false}:{large?:boolean}) {
+  return <span className={`brand-mark ${large?"large":""}`}><Image src="/mister-bean-platform/app-icon-192.png" width={192} height={192} alt="Mister Bean"/></span>;
+}
 
 export default function Home() {
   const [profile,setProfile] = useState<UserProfile|null>(null);
@@ -254,7 +258,7 @@ export default function Home() {
     <div className={`app-shell ${preview?"previewing":""}`} dir="rtl">
       {preview&&<div className="preview-banner"><Eye size={17}/><span>מצב תצוגה: <strong>{roleNames[preview.role]}</strong>{!isStaff&&<> · {customerName(selectedCustomer)}</>}</span><b>קריאה בלבד</b><button onClick={leavePreview}><X size={16}/> חזרה לניהול</button></div>}
       <aside className={`sidebar ${mobileOpen?"open":""}`}>
-        <div className="brand"><span className="brand-mark"><Coffee size={21}/></span><div><strong>Mister Bean</strong><small>ניהול ושירות לקוחות</small></div></div>
+        <div className="brand"><BrandIcon/><div><strong>Mister Bean</strong><small>ניהול ושירות לקוחות</small></div></div>
         <span className="sidebar-label">{isStaff?"ניהול ותפעול":"אזור הלקוח"}</span>
         <nav>{nav.map(n=>{const Icon=n.icon;return <button key={n.id} className={view===n.id?"active":""} onClick={()=>navigate(n.id)}><Icon size={18}/>{n.label}{n.id==="tickets"&&<b className="nav-count">{scopedTickets.filter(t=>!closed(t.status)).length}</b>}</button>})}</nav>
         <div className="sidebar-foot">
@@ -324,7 +328,7 @@ function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>
   const [password,setPassword]=useState("");
   const submit=(event:FormEvent)=>{event.preventDefault();void onEmail(email,password);};
   return <div className="login" dir="rtl"><CoffeeBotanical className="login-coffee-branch"/><div className="login-panel">
-    <div className="login-brand"><span className="brand-mark large"><Coffee size={26}/></span><div><h1>Mister Bean</h1><p>מערכת ניהול ושירות לקוחות</p></div></div>
+    <div className="login-brand"><BrandIcon large/><div><h1>Mister Bean</h1><p>מערכת ניהול ושירות לקוחות</p></div></div>
     <div className="login-copy auth-copy"><h2>כניסה למערכת</h2></div>
     <form className="auth-form" onSubmit={submit}>
       <label><span>כתובת דוא״ל</span><input type="email" value={email} onChange={event=>setEmail(event.target.value)} required autoComplete="email" placeholder="name@company.co.il"/></label>
@@ -338,7 +342,7 @@ function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>
   </div></div>;
 }
 
-function LoadingScreen(){return <div className="loading-screen" dir="rtl"><span className="brand-mark large"><Coffee size={26}/></span><h1>Mister Bean</h1><p>מחברים את סביבת העבודה המאובטחת…</p><i/></div>}
+function LoadingScreen(){return <div className="loading-screen" dir="rtl"><BrandIcon large/><h1>Mister Bean</h1><p>מחברים את סביבת העבודה המאובטחת…</p><i/></div>}
 
 function PendingAccess({profile,onLogout}:{profile:UserProfile;onLogout:()=>void}){return <div className="pending-screen" dir="rtl"><div className="pending-card"><span><LockKeyhole size={26}/></span><small>החשבון נוצר בהצלחה</small><h1>הגישה ממתינה לאישור</h1><p>החשבון של <strong>{profile.email}</strong> מחובר. מנהל המערכת צריך לשייך אותו ללקוח ולהגדיר הרשאה לפני הצגת מידע.</p><button onClick={onLogout}><LogOut size={17}/> יציאה</button></div></div>}
 
