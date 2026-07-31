@@ -66,6 +66,22 @@ function emptyStore(): PlatformStore {
   return { tickets: [], orders: [], tasks: [], machines: [] };
 }
 
+function withoutUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => withoutUndefined(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, withoutUndefined(item)]),
+    ) as T;
+  }
+  return value;
+}
+
 function normalizeLeadRecord(value: Lead): Lead {
   const timestamp = value.updatedAt || new Date().toISOString();
   return {
@@ -431,13 +447,17 @@ export function subscribeToSalesWorkspace(
 
 export async function saveLead(lead: Lead) {
   const { db } = getFirebaseServices();
-  await setDoc(doc(db, "leads", lead.id), lead, { merge: true });
+  await setDoc(doc(db, "leads", lead.id), withoutUndefined(lead), {
+    merge: true,
+  });
 }
 
 export async function saveQuote(quote: Quote) {
   const { db } = getFirebaseServices();
   const batch = writeBatch(db);
-  batch.set(doc(db, "quotes", quote.id), quote, { merge: true });
+  batch.set(doc(db, "quotes", quote.id), withoutUndefined(quote), {
+    merge: true,
+  });
   if (quote.leadId) {
     batch.set(
       doc(db, "leads", quote.leadId),
@@ -560,7 +580,9 @@ export async function importSalesWorkspace(workspace: SalesWorkspace) {
   for (let index = 0; index < entries.length; index += 400) {
     const batch = writeBatch(db);
     for (const [collectionName, id, entity] of entries.slice(index, index + 400)) {
-      batch.set(doc(db, collectionName, id), entity, { merge: true });
+      batch.set(doc(db, collectionName, id), withoutUndefined(entity), {
+        merge: true,
+      });
     }
     await batch.commit();
   }
