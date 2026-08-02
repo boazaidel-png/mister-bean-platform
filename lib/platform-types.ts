@@ -216,6 +216,8 @@ export type QuoteAllocation = {
   sale: number;
 };
 
+export type QuoteFinancingType = "none" | "loan" | "supplier";
+
 export type Quote = {
   id: string;
   leadId?: string;
@@ -254,6 +256,10 @@ export type Quote = {
   financingMonths: number;
   financedAmount: number;
   annualInterest: number;
+  financingType?: QuoteFinancingType;
+  combineFinancingAndSupplier?: boolean;
+  targetMonthlyProfit?: number;
+  earlyExitMonth?: number;
   applyVolumeDiscount: boolean;
   owner: string;
   notes: string;

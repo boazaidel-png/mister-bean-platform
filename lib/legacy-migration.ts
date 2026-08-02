@@ -222,6 +222,13 @@ function legacyQuote(id: string, source: UnknownRecord): Quote {
     financingMonths: number(source.financingMonths),
     financedAmount: number(source.financedAmount),
     annualInterest: number(source.annualInterest),
+    financingType:
+      number(source.financingMonths) > 0 && number(source.financedAmount) > 0
+        ? "loan"
+        : "supplier",
+    combineFinancingAndSupplier: false,
+    targetMonthlyProfit: 500,
+    earlyExitMonth: 12,
     applyVolumeDiscount: source.applyVolumeDiscount !== false,
     owner: text(source.owner),
     notes: "יובא ממערכת הצעות המחיר הקודמת",

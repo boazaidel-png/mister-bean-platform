@@ -50,6 +50,7 @@ import type {
   Quote,
   QuoteBlend,
   QuoteEquipment,
+  QuoteFinancingType,
   QuoteStatus,
   SalesWorkspace,
 } from "@/lib/platform-types";
@@ -89,13 +90,6 @@ const money = (value: number) =>
     style: "currency",
     currency: "ILS",
     maximumFractionDigits: 0,
-  }).format(value || 0);
-const cupMoney = (value: number) =>
-  new Intl.NumberFormat("he-IL", {
-    style: "currency",
-    currency: "ILS",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
   }).format(value || 0);
 const displayDate = (value: string) =>
   value
@@ -188,6 +182,10 @@ const quoteFromLead = (lead?: Lead): Quote => {
   financingMonths: 0,
   financedAmount: 0,
   annualInterest: 0,
+  financingType: "supplier",
+  combineFinancingAndSupplier: false,
+  targetMonthlyProfit: 500,
+  earlyExitMonth: 12,
   applyVolumeDiscount: true,
   owner: lead?.owner || "בועז",
   notes: "",
@@ -2551,18 +2549,7 @@ function QuoteModal({
                 </div>
               </div>
               <div className="sales-form-grid compact">
-                <label>
-                  <span>פריסת תשלום ליבואן</span>
-                  <input
-                    type="number"
-                    min="1"
-                    value={draft.supplierMonths}
-                    onChange={(event) =>
-                      update("supplierMonths", +event.target.value)
-                    }
-                  />
-                </label>
-                <label>
+                <label className="full">
                   <span>עלות תפעול חודשית נוספת</span>
                   <input
                     type="number"
@@ -2723,83 +2710,164 @@ function QuoteModal({
                   </select>
                 </label>
                 <label>
-                  <span>תקופת תזרים</span>
+                  <span>יעד רווח חודשי אמיתי</span>
                   <input
                     type="number"
-                    min="12"
-                    value={draft.cashflowMonths}
+                    min="0"
+                    value={draft.targetMonthlyProfit ?? 500}
                     onChange={(event) =>
-                      update("cashflowMonths", +event.target.value)
+                      update("targetMonthlyProfit", +event.target.value)
+                    }
+                  />
+                </label>
+                <label>
+                  <span>חודש נטישה לבדיקת סיכון</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max={draft.clientCostMonths}
+                    value={draft.earlyExitMonth ?? 12}
+                    onChange={(event) =>
+                      update("earlyExitMonth", +event.target.value)
                     }
                   />
                 </label>
               </div>
-              <details className="quote-financing" open={draft.financingMonths > 0}>
-                <summary>מימון העסקה</summary>
+              <details className="quote-financing" open>
+                <summary>אופן תשלום הציוד</summary>
                 <div className="sales-form-grid compact">
                   <label>
-                    <span>תקופת המימון</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={draft.financingMonths}
+                    <span>סוג מימון</span>
+                    <select
+                      value={draft.financingType || "supplier"}
                       onChange={(event) => {
-                        const months = +event.target.value;
+                        const financingType = event.target
+                          .value as QuoteFinancingType;
+                        if (financingType !== "loan") {
+                          setFinancedAmountManual(false);
+                        }
                         setDraft((current) => ({
                           ...current,
-                          financingMonths: months,
+                          financingType,
+                          financingMonths:
+                            financingType === "loan"
+                              ? current.financingMonths || 24
+                              : 0,
                           financedAmount:
-                            months > 0 && !financedAmountManual
+                            financingType === "loan"
                               ? equipmentTotalCost(current.equipment)
-                              : current.financedAmount,
+                              : 0,
+                          combineFinancingAndSupplier: false,
                         }));
                       }}
-                    />
+                    >
+                      <option value="none">ללא מימון — תשלום ברכישה</option>
+                      <option value="loan">הלוואה / מימון חיצוני</option>
+                      <option value="supplier">פריסה ליבואן</option>
+                    </select>
                   </label>
-                  <label>
-                    <span>סכום המימון</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={draft.financedAmount}
-                      onChange={(event) => {
-                        setFinancedAmountManual(true);
-                        update("financedAmount", +event.target.value);
-                      }}
-                    />
-                  </label>
-                  <label>
-                    <span>ריבית שנתית</span>
-                    <div className="input-suffix">
+                  {(draft.financingType || "supplier") === "supplier" && (
+                    <label>
+                      <span>מספר תשלומים ליבואן</span>
                       <input
                         type="number"
-                        min="0"
-                        step="0.01"
-                        value={draft.annualInterest}
+                        min="1"
+                        value={draft.supplierMonths}
                         onChange={(event) =>
-                          update("annualInterest", +event.target.value)
+                          update("supplierMonths", +event.target.value)
                         }
                       />
-                      <b>%</b>
+                    </label>
+                  )}
+                  {(draft.financingType || "supplier") === "loan" && (
+                    <>
+                      <label>
+                        <span>תקופת ההלוואה בחודשים</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={draft.financingMonths}
+                          onChange={(event) =>
+                            update("financingMonths", +event.target.value)
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>סכום ההלוואה</span>
+                        <input
+                          type="number"
+                          min="0"
+                          value={draft.financedAmount}
+                          onChange={(event) => {
+                            setFinancedAmountManual(true);
+                            update("financedAmount", +event.target.value);
+                          }}
+                        />
+                      </label>
+                      <label>
+                        <span>ריבית שנתית</span>
+                        <div className="input-suffix">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={draft.annualInterest}
+                            onChange={(event) =>
+                              update("annualInterest", +event.target.value)
+                            }
+                          />
+                          <b>%</b>
+                        </div>
+                      </label>
+                      <label className="quote-discount-toggle financing-combine">
+                        <input
+                          type="checkbox"
+                          checked={draft.combineFinancingAndSupplier === true}
+                          onChange={(event) =>
+                            update(
+                              "combineFinancingAndSupplier",
+                              event.target.checked,
+                            )
+                          }
+                        />
+                        <span>לשלב גם פריסה ליבואן על החלק שלא מומן</span>
+                      </label>
+                      {draft.combineFinancingAndSupplier && (
+                        <label>
+                          <span>מספר תשלומים ליבואן</span>
+                          <input
+                            type="number"
+                            min="1"
+                            value={draft.supplierMonths}
+                            onChange={(event) =>
+                              update("supplierMonths", +event.target.value)
+                            }
+                          />
+                        </label>
+                      )}
+                    </>
+                  )}
+                </div>
+                {metrics.financing.type === "loan" && (
+                  <div className="quote-summary-grid">
+                    <div>
+                      <small>קרן הלוואה</small>
+                      <strong>{money(metrics.financing.amount)}</strong>
                     </div>
-                  </label>
-                </div>
-                <div className="quote-summary-grid">
-                  <div>
-                    <small>החזר חודשי</small>
-                    <strong>{money(metrics.financing.payment)}</strong>
+                    <div>
+                      <small>החזר חודשי</small>
+                      <strong>{money(metrics.financing.payment)}</strong>
+                    </div>
+                    <div>
+                      <small>סך החזרים</small>
+                      <strong>{money(metrics.financing.totalPaid)}</strong>
+                    </div>
+                    <div>
+                      <small>עלות ריבית כוללת</small>
+                      <strong>{money(metrics.financing.interest)}</strong>
+                    </div>
                   </div>
-                  <div>
-                    <small>ציוד שלא מומן</small>
-                    <strong>
-                      {money(metrics.financing.unfinancedEquipment)}
-                    </strong>
-                  </div>
-                  <div>
-                    <small>עלות ריבית כוללת</small>
-                    <strong>{money(metrics.financing.interest)}</strong>
-                  </div>
-                </div>
+                )}
               </details>
             </div>
           )}
@@ -2810,66 +2878,110 @@ function QuoteModal({
                   <CircleDollarSign size={23} />
                 </span>
                 <div>
-                  <small>יתרה חודשית לאחר תשלומים</small>
-                  <strong>{money(metrics.profitability.monthlyBalance)}</strong>
+                  <small>רווח חודשי ממוצע אמיתי</small>
+                  <strong>
+                    {money(metrics.profitability.averageMonthlyProfit)}
+                  </strong>
                 </div>
                 <Status>{draft.status}</Status>
               </div>
+              <section className="quote-business-basics">
+                <h3>נתוני בסיס לעסקה</h3>
+                <div>
+                  <span><small>לקוח</small><b>{draft.clientName || "לקוח חדש"}</b></span>
+                  <span><small>תקופת חוזה</small><b>{draft.clientCostMonths} חודשים</b></span>
+                  <span><small>מספר מכונות</small><b>{draft.equipment.filter((item) => equipmentCatalog.some((catalog) => catalog.key === (item.key || item.model))).reduce((sum, item) => sum + item.quantity, 0)}</b></span>
+                  <span><small>עלות ציוד כוללת</small><b>{money(metrics.equipment.total)}</b></span>
+                  <span><small>צריכת קפה חודשית</small><b>{metrics.beans.totalKg} ק״ג</b></span>
+                  <span><small>מחיר מכירה ממוצע לק״ג</small><b>{money(metrics.beans.averageSalePrice)}</b></span>
+                  <span><small>עלות ממוצעת לק״ג</small><b>{money(metrics.beans.averageCostPerKg)}</b></span>
+                  <span><small>רווח גולמי לק״ג</small><b>{money(metrics.beans.grossProfitPerKg)}</b></span>
+                  <span><small>תפעול חודשי נוסף</small><b>{money(draft.extraMonthlyCost)}</b></span>
+                  <span><small>תשלום לקוח</small><b>{draft.clientPayTerm ? `שוטף + ${draft.clientPayTerm * 30}` : "מיידי"}</b></span>
+                  <span><small>תשלום ספק פולים</small><b>{draft.coffeeSupplierPayTerm ? `שוטף + ${draft.coffeeSupplierPayTerm * 30}` : "מיידי"}</b></span>
+                  <span><small>אופן תשלום ציוד</small><b>{metrics.financing.type === "loan" ? "הלוואה" : metrics.financing.type === "supplier" ? "פריסה ליבואן" : "ללא מימון"}</b></span>
+                  <span><small>תקופת מימון</small><b>{metrics.financing.type === "loan" ? `${metrics.financing.months} חודשים` : metrics.financing.type === "supplier" ? `${draft.supplierMonths} תשלומים` : "—"}</b></span>
+                  <span><small>ריבית שנתית</small><b>{metrics.financing.type === "loan" ? `${draft.annualInterest}%` : "—"}</b></span>
+                </div>
+              </section>
               <div className="quote-summary-grid">
-                <div>
-                  <small>צריכה חודשית</small>
-                  <strong>{metrics.consumption.consumptionKg} ק״ג</strong>
-                </div>
-                <div>
-                  <small>הכנסה מפולים</small>
-                  <strong>{money(metrics.beans.income)}</strong>
-                </div>
-                <div>
-                  <small>עלות ציוד</small>
-                  <strong>{money(metrics.equipment.total)}</strong>
-                </div>
                 <div
                   className={
-                    metrics.profitability.monthlyBalance < 0
+                    metrics.profitability.averageMonthlyProfit < 0
                       ? "negative"
                       : "positive"
                   }
                 >
-                  <small>רווח תפעולי חודשי</small>
-                  <strong>{money(metrics.profitability.operatingProfit)}</strong>
+                  <small>רווח חודשי ממוצע אמיתי</small>
+                  <strong>{money(metrics.profitability.averageMonthlyProfit)}</strong>
+                </div>
+                <div className={metrics.profitability.totalContractProfit < 0 ? "negative" : "positive"}>
+                  <small>רווח מצטבר לאורך החוזה</small>
+                  <strong>{money(metrics.profitability.totalContractProfit)}</strong>
+                </div>
+                <div className={metrics.cashflow.duringRepaymentCashflow < 0 ? "negative" : "positive"}>
+                  <small>תזרים חודשי בתקופת ההחזר</small>
+                  <strong>{money(metrics.cashflow.duringRepaymentCashflow)}</strong>
+                </div>
+                <div className={metrics.cashflow.afterRepaymentCashflow === null ? "" : metrics.cashflow.afterRepaymentCashflow < 0 ? "negative" : "positive"}>
+                  <small>תזרים חודשי לאחר ההחזר</small>
+                  <strong>{metrics.cashflow.afterRepaymentCashflow === null ? "לא במהלך החוזה" : money(metrics.cashflow.afterRepaymentCashflow)}</strong>
+                </div>
+                <div className={metrics.cashflow.contractEndingBalance < 0 ? "negative" : "positive"}>
+                  <small>קופה בסוף החוזה</small>
+                  <strong>{money(metrics.cashflow.contractEndingBalance)}</strong>
+                </div>
+                <div className={metrics.cashflow.totalOpenLiabilities > 0 ? "negative" : "positive"}>
+                  <small>התחייבויות פתוחות בסוף החוזה</small>
+                  <strong>{money(metrics.cashflow.totalOpenLiabilities)}</strong>
+                </div>
+                <div className={metrics.cashflow.finalBalanceAfterLiabilities < 0 ? "negative" : "positive"}>
+                  <small>קופה לאחר סגירת התחייבויות</small>
+                  <strong>{money(metrics.cashflow.finalBalanceAfterLiabilities)}</strong>
                 </div>
                 <div>
-                  <small>שיא חשיפה תזרימית</small>
-                  <strong>{money(metrics.cashflow.exposure)}</strong>
+                  <small>נקודת איזון בצריכה</small>
+                  <strong>{metrics.profitability.minimumKgToBreakEven} ק״ג</strong>
                 </div>
                 <div>
-                  <small>חודש איזון</small>
-                  <strong>
-                    {metrics.cashflow.breakEvenMonth || "לא בתקופה"}
-                  </strong>
+                  <small>מחיר ממוצע נדרש ליעד</small>
+                  <strong>{money(metrics.profitability.minimumTargetBeanPrice)} לק״ג</strong>
+                  {metrics.profitability.minimumTargetServiceFee > 0 && <small>או דמי שירות של {money(metrics.profitability.minimumTargetServiceFee)} לסט</small>}
                 </div>
-                <div>
-                  <small>מינימום ק״ג לאיזון</small>
-                  <strong>
-                    {metrics.profitability.minimumKgToBreakEven} ק״ג
-                  </strong>
-                </div>
-                <div>
-                  <small>עלות לכוס ללקוח</small>
-                  <strong>{cupMoney(metrics.beans.costPerCup)}</strong>
-                </div>
-                <div>
-                  <small>רווח לתקופת החוזה</small>
-                  <strong>
-                    {money(metrics.profitability.totalContractProfit)}
-                  </strong>
+                <div className={metrics.profitability.earlyExitExposure > 0 ? "negative" : "positive"}>
+                  <small>סיכון בנטישה בחודש {metrics.profitability.earlyExitMonth}</small>
+                  <strong>{money(metrics.profitability.earlyExitExposure)}</strong>
                 </div>
               </div>
+              <section className="true-profit-panel">
+                <header>
+                  <div><h3>רווחיות אמיתית</h3><p>מימון אינו נכלל כהכנסה או כרווח</p></div>
+                  <strong className={metrics.profitability.totalContractProfit < 0 ? "negative-text" : "positive-text"}>{money(metrics.profitability.totalContractProfit)}</strong>
+                </header>
+                <div className="profit-equation">
+                  <span><small>הכנסות לקוח</small><b>{money(metrics.profitability.totalClientRevenue)}</b></span>
+                  <i>−</i>
+                  <span><small>עלות פולים</small><b>{money(metrics.profitability.totalBeanCost)}</b></span>
+                  <i>−</i>
+                  <span><small>תפעול</small><b>{money(metrics.profitability.totalOperatingCost)}</b></span>
+                  <i>−</i>
+                  <span><small>ציוד וריבית</small><b>{money(metrics.profitability.totalEquipmentEconomicCost)}</b></span>
+                </div>
+              </section>
+              {metrics.alerts.length > 0 && (
+                <section className="quote-business-alerts">
+                  <h3>התראות עסקיות</h3>
+                  {metrics.alerts.map((alert) => (
+                    <p className={alert.severity} key={alert.code}>{alert.message}</p>
+                  ))}
+                </section>
+              )}
               <section className="quote-improvement">
                 <h3>המלצה לשיפור העסקה</h3>
-                {metrics.profitability.monthlyBalance >= 500 ? (
+                {metrics.profitability.averageMonthlyProfit >=
+                metrics.profitability.targetMonthlyProfit ? (
                   <p className="positive">
-                    העסקה עומדת ביעד של יתרה חודשית הגבוהה מ־500 ₪.
+                    העסקה עומדת ביעד הרווח החודשי האמיתי שהוגדר.
                   </p>
                 ) : (
                   <div className="quote-summary-grid">
@@ -2915,26 +3027,30 @@ function QuoteModal({
                     <thead>
                       <tr>
                         <th>חודש</th>
-                        <th>הכנסות</th>
-                        <th>יבואן</th>
-                        <th>פולים</th>
-                        <th>נוספות</th>
-                        <th>מימון</th>
+                        <th>הכנסה מלקוח</th>
+                        <th>כניסת מימון</th>
+                        <th>תשלום ציוד</th>
+                        <th>תשלום פולים</th>
+                        <th>תפעול</th>
+                        <th>החזר הלוואה</th>
                         <th>תזרים</th>
-                        <th>מצטבר</th>
+                        <th>קופה מצטברת</th>
+                        <th>התחייבות פולים</th>
                       </tr>
                     </thead>
                     <tbody>
                       {metrics.cashflow.rows.map((row) => (
-                        <tr key={row.month}>
+                        <tr className={row.net < 0 ? "cashflow-row-negative" : "cashflow-row-positive"} key={row.month}>
                           <td>{row.month}{row.isTail ? " *" : ""}</td>
                           <td>{money(row.income)}</td>
-                          <td>{money(row.importer)}</td>
-                          <td>{money(row.coffee)}</td>
-                          <td>{money(row.extra)}</td>
-                          <td>{money(row.financing)}</td>
-                          <td>{money(row.net)}</td>
-                          <td>{money(row.cumulative)}</td>
+                          <td>{money(row.financingIn)}</td>
+                          <td>{money(row.equipmentPayment)}</td>
+                          <td>{money(row.coffeePayment)}</td>
+                          <td>{money(row.operatingCost)}</td>
+                          <td>{money(row.loanPayment)}</td>
+                          <td className={row.net < 0 ? "cashflow-negative" : "cashflow-positive"}>{money(row.net)}</td>
+                          <td className={row.cumulative < 0 ? "cashflow-negative" : "cashflow-positive"}>{money(row.cumulative)}</td>
+                          <td className={row.openCoffeeLiability > 0 ? "cashflow-liability" : ""}>{money(row.openCoffeeLiability)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2967,15 +3083,15 @@ function QuoteModal({
             </div>
             <div>
               <dt>מכונות</dt>
-              <dd>{draft.equipment.reduce((sum, item) => sum + item.quantity, 0)}</dd>
+              <dd>{draft.equipment.filter((item) => equipmentCatalog.some((catalog) => catalog.key === (item.key || item.model))).reduce((sum, item) => sum + item.quantity, 0)}</dd>
             </div>
             <div>
               <dt>הכנסה מפולים</dt>
               <dd>{money(metrics.beans.income)}</dd>
             </div>
             <div>
-              <dt>יתרה חודשית</dt>
-              <dd>{money(metrics.profitability.monthlyBalance)}</dd>
+              <dt>רווח חודשי אמיתי</dt>
+              <dd>{money(metrics.profitability.averageMonthlyProfit)}</dd>
             </div>
           </dl>
         </aside>

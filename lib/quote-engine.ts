@@ -264,107 +264,288 @@ export function calculateQuote(quote: Quote) {
     saleProfit += allocation.sale * (salePrice - packageCost);
   }
 
+  const contractMonths = Math.max(1, positive(quote.clientCostMonths) || 36);
   const supplierMonths = Math.max(1, positive(quote.supplierMonths) || 8);
-  const financingMonths = positive(quote.financingMonths);
-  const financedAmount = Math.min(
-    positive(quote.financedAmount),
-    uncoveredCost || equipmentTotal,
-  );
-  const financePayment = monthlyPayment(
-    financedAmount,
-    financingMonths,
-    quote.annualInterest,
-  );
-  const unfinancedEquipment = Math.max(0, uncoveredCost - financedAmount);
-  const supplierPayment = unfinancedEquipment / supplierMonths;
-  const cashflowImporterPayment = uncoveredCost / supplierMonths;
-  const operatingProfit =
-    beanProfit + leaseIncome - positive(quote.extraMonthlyCost);
-  const monthlyBalance = operatingProfit - supplierPayment - financePayment;
+  const financingType =
+    quote.financingType ||
+    (positive(quote.financingMonths) && positive(quote.financedAmount)
+      ? "loan"
+      : "supplier");
+  const financingMonths =
+    financingType === "loan" ? positive(quote.financingMonths) : 0;
+  const financedAmount =
+    financingType === "loan"
+      ? Math.min(positive(quote.financedAmount), equipmentTotal)
+      : 0;
+  const loanActive = financingMonths > 0 && financedAmount > 0;
+  const financePayment = loanActive
+    ? monthlyPayment(financedAmount, financingMonths, quote.annualInterest)
+    : 0;
   const totalFinancePaid = financePayment * financingMonths;
   const financingInterest = Math.max(0, totalFinancePaid - financedAmount);
+  const unfinancedEquipment = Math.max(0, equipmentTotal - financedAmount);
+  const supplierActive =
+    financingType === "supplier" ||
+    (financingType === "loan" && quote.combineFinancingAndSupplier === true);
+  const supplierPayment = supplierActive
+    ? (financingType === "supplier" ? equipmentTotal : unfinancedEquipment) /
+      supplierMonths
+    : 0;
+  const operatingProfit =
+    beanProfit + leaseIncome - positive(quote.extraMonthlyCost);
 
-  const activeMonths = Math.max(12, positive(quote.cashflowMonths) || 36);
-  const tail = Math.max(
-    positive(quote.clientPayTerm),
-    positive(quote.importerPayTerm),
-    positive(quote.coffeeSupplierPayTerm),
+  const totalClientRevenue =
+    (beanIncome + leaseIncome) * contractMonths + saleIncome;
+  const totalBeanCost = beanCost * contractMonths;
+  const totalOperatingCost = positive(quote.extraMonthlyCost) * contractMonths;
+  const totalEquipmentEconomicCost = equipmentTotal + financingInterest;
+  const totalContractProfit =
+    totalClientRevenue -
+    totalBeanCost -
+    totalOperatingCost -
+    totalEquipmentEconomicCost;
+  const averageMonthlyProfit = totalContractProfit / contractMonths;
+  const targetMonthlyProfit = positive(quote.targetMonthlyProfit ?? 500);
+  const neededForTarget = Math.max(
+    0,
+    targetMonthlyProfit - averageMonthlyProfit,
   );
-  const displayMonths = activeMonths + tail;
+  const monthlyFixedForBreakEven = Math.max(
+    0,
+    positive(quote.extraMonthlyCost) +
+      totalEquipmentEconomicCost / contractMonths -
+      leaseIncome -
+      saleIncome / contractMonths,
+  );
+  const minimumKgToBreakEven =
+    averageBeanProfit > 0
+      ? Math.ceil(monthlyFixedForBreakEven / averageBeanProfit)
+      : 0;
+
+  const clientDelay = positive(quote.clientPayTerm);
+  const importerDelay = positive(quote.importerPayTerm);
+  const coffeeDelay = positive(quote.coffeeSupplierPayTerm);
+  const equipmentPaymentEnd =
+    financingType === "supplier"
+      ? importerDelay + supplierMonths
+      : financingType === "loan" && quote.combineFinancingAndSupplier
+        ? Math.max(1 + importerDelay, importerDelay + supplierMonths)
+        : 1 + importerDelay;
+  const displayMonths = Math.max(
+    contractMonths + Math.max(clientDelay, coffeeDelay),
+    equipmentPaymentEnd,
+    financingMonths,
+    contractMonths,
+  );
   const clientIncome = Array(displayMonths + 1).fill(0);
-  const importerPayments = Array(displayMonths + 1).fill(0);
+  const equipmentPayments = Array(displayMonths + 1).fill(0);
   const coffeePayments = Array(displayMonths + 1).fill(0);
   const extraCosts = Array(displayMonths + 1).fill(0);
   const financeIn = Array(displayMonths + 1).fill(0);
-  const financeOut = Array(displayMonths + 1).fill(0);
-  for (let month = 1; month <= activeMonths; month += 1) {
-    addFlow(
-      clientIncome,
-      month + positive(quote.clientPayTerm),
-      beanIncome + leaseIncome,
-    );
-    addFlow(
-      coffeePayments,
-      month + positive(quote.coffeeSupplierPayTerm),
-      beanCost,
-    );
+  const loanPayments = Array(displayMonths + 1).fill(0);
+
+  for (let month = 1; month <= contractMonths; month += 1) {
+    addFlow(clientIncome, month + clientDelay, beanIncome + leaseIncome);
+    addFlow(coffeePayments, month + coffeeDelay, beanCost);
     addFlow(extraCosts, month, positive(quote.extraMonthlyCost));
-    if (month <= supplierMonths) {
+  }
+  if (saleIncome) addFlow(clientIncome, 1 + clientDelay, saleIncome);
+
+  if (financingType === "supplier") {
+    for (let month = 1; month <= supplierMonths; month += 1) {
       addFlow(
-        importerPayments,
-        month + positive(quote.importerPayTerm),
-        cashflowImporterPayment,
+        equipmentPayments,
+        month + importerDelay,
+        equipmentTotal / supplierMonths,
       );
     }
-    if (month <= financingMonths) addFlow(financeOut, month, financePayment);
+  } else if (financingType === "loan") {
+    if (financedAmount) addFlow(financeIn, 1, financedAmount);
+    if (quote.combineFinancingAndSupplier) {
+      addFlow(equipmentPayments, 1 + importerDelay, financedAmount);
+      for (let month = 1; month <= supplierMonths; month += 1) {
+        addFlow(
+          equipmentPayments,
+          month + importerDelay,
+          unfinancedEquipment / supplierMonths,
+        );
+      }
+    } else {
+      addFlow(equipmentPayments, 1 + importerDelay, equipmentTotal);
+    }
+    for (let month = 1; month <= financingMonths; month += 1) {
+      addFlow(loanPayments, month, financePayment);
+    }
+  } else {
+    addFlow(equipmentPayments, 1 + importerDelay, equipmentTotal);
   }
-  if (saleIncome) {
-    addFlow(clientIncome, 1 + positive(quote.clientPayTerm), saleIncome);
-  }
-  if (financedAmount) addFlow(financeIn, 1, financedAmount);
 
   let cumulative = 0;
   let minimumCumulative = 0;
   let breakEvenMonth: number | null = null;
+  let openCoffeeLiability = 0;
   const cashflow = Array.from({ length: displayMonths }, (_, index) => {
     const month = index + 1;
-    const financing = financeIn[month] - financeOut[month];
+    if (month <= contractMonths) openCoffeeLiability += beanCost;
+    openCoffeeLiability = Math.max(
+      0,
+      openCoffeeLiability - coffeePayments[month],
+    );
     const net =
       clientIncome[month] +
-      financing -
-      importerPayments[month] -
+      financeIn[month] -
+      equipmentPayments[month] -
       coffeePayments[month] -
-      extraCosts[month];
+      extraCosts[month] -
+      loanPayments[month];
     cumulative += net;
     minimumCumulative = Math.min(minimumCumulative, cumulative);
     if (breakEvenMonth === null && cumulative >= 0) breakEvenMonth = month;
     return {
       month,
       income: clientIncome[month],
-      importer: importerPayments[month],
-      coffee: coffeePayments[month],
-      extra: extraCosts[month],
-      financing,
+      financingIn: financeIn[month],
+      equipmentPayment: equipmentPayments[month],
+      coffeePayment: coffeePayments[month],
+      operatingCost: extraCosts[month],
+      loanPayment: loanPayments[month],
+      openCoffeeLiability,
       net,
       cumulative,
-      isTail: month > activeMonths,
+      recurringNet:
+        clientIncome[month] -
+        equipmentPayments[month] -
+        coffeePayments[month] -
+        extraCosts[month] -
+        loanPayments[month],
+      isTail: month > contractMonths,
+      // Compatibility aliases for saved views created before the split.
+      importer: equipmentPayments[month],
+      coffee: coffeePayments[month],
+      extra: extraCosts[month],
+      financing: financeIn[month] - loanPayments[month],
     };
   });
 
-  const contractMonths = Math.max(1, positive(quote.clientCostMonths) || 36);
-  const totalContractProfit =
-    operatingProfit * contractMonths +
-    saleProfit -
-    uncoveredCost -
-    financingInterest;
-  const minimumKgToBreakEven =
-    averageBeanProfit > 0
-      ? Math.ceil(
-          (positive(quote.extraMonthlyCost) + supplierPayment + financePayment) /
-            averageBeanProfit,
-        )
+  const contractRow = cashflow[Math.min(contractMonths, cashflow.length) - 1];
+  const contractEndingBalance = contractRow?.cumulative || 0;
+  const openCoffeeAtContract = contractRow?.openCoffeeLiability || 0;
+  const openEquipmentAtContract = cashflow
+    .filter((row) => row.month > contractMonths)
+    .reduce(
+      (sum, row) => sum + row.equipmentPayment + row.loanPayment,
+      0,
+    );
+  const totalOpenLiabilities = openCoffeeAtContract + openEquipmentAtContract;
+  const finalBalanceAfterLiabilities = cashflow.at(-1)?.cumulative || 0;
+  const repaymentRows = cashflow.filter(
+    (row) =>
+      row.month <= contractMonths &&
+      (row.equipmentPayment > 0 || row.loanPayment > 0),
+  );
+  const lastRepaymentMonth = Math.max(
+    0,
+    ...cashflow
+      .filter((row) => row.equipmentPayment > 0 || row.loanPayment > 0)
+      .map((row) => row.month),
+  );
+  const afterRepaymentRows = cashflow.filter(
+    (row) =>
+      row.month <= contractMonths && row.month > lastRepaymentMonth,
+  );
+  const averageRecurring = (rows: typeof cashflow) =>
+    rows.length
+      ? rows.reduce((sum, row) => sum + row.recurringNet, 0) / rows.length
       : 0;
-  const neededForTarget = Math.max(0, 500 - monthlyBalance);
+  const duringRepaymentCashflow = averageRecurring(repaymentRows);
+  const afterRepaymentCashflow = afterRepaymentRows.length
+    ? averageRecurring(afterRepaymentRows)
+    : null;
+
+  const earlyExitMonth = Math.min(
+    contractMonths,
+    Math.max(1, positive(quote.earlyExitMonth) || 12),
+  );
+  const remainingPaymentObligation = cashflow
+    .filter((row) => row.month > earlyExitMonth)
+    .reduce(
+      (sum, row) => sum + row.equipmentPayment + row.loanPayment,
+      0,
+    );
+  const contributionUntilExit =
+    operatingProfit * earlyExitMonth + saleProfit;
+  const unrecoveredEquipment = Math.max(
+    0,
+    totalEquipmentEconomicCost - contributionUntilExit,
+  );
+  const earlyExitExposure = Math.max(
+    remainingPaymentObligation,
+    unrecoveredEquipment,
+  );
+
+  const leasedSetCount = allocations.reduce(
+    (sum, row) => sum + row.allocation.lease,
+    0,
+  );
+  const targetBeanPriceIncrease =
+    totalKg > 0 ? neededForTarget / totalKg : 0;
+  const targetLeaseIncrease =
+    leasedSetCount > 0 ? neededForTarget / leasedSetCount : 0;
+  const averageLeasePerSet = leasedSetCount
+    ? leaseIncome / leasedSetCount
+    : 0;
+
+  const alerts: Array<{
+    code: string;
+    severity: "danger" | "warning" | "info";
+    message: string;
+  }> = [];
+  if (
+    totalContractProfit < 0 &&
+    contractEndingBalance > 0 &&
+    totalOpenLiabilities > 0
+  ) {
+    alerts.push({
+      code: "deferred-liability-profit",
+      severity: "danger",
+      message:
+        "הקופה חיובית בסוף החוזה רק לפני סגירת התחייבויות פתוחות, אך העסקה אינה רווחית באמת.",
+    });
+  }
+  if (
+    financedAmount > 0 &&
+    (cashflow[0]?.financingIn || 0) > (cashflow[0]?.equipmentPayment || 0)
+  ) {
+    alerts.push({
+      code: "unmatched-financing",
+      severity: "warning",
+      message:
+        "כספי המימון נכנסו לקופה לפני שמלוא תשלום הציוד יצא. היתרה הזמנית אינה רווח.",
+    });
+  }
+  const cashProfitGap = finalBalanceAfterLiabilities - totalContractProfit;
+  if (Math.abs(cashProfitGap) > Math.max(100, Math.abs(totalContractProfit) * 0.05)) {
+    alerts.push({
+      code: "cash-profit-gap",
+      severity: "warning",
+      message:
+        "קיים פער מהותי בין הקופה הסופית לרווח האמיתי. מומלץ לבדוק מועדי תשלום והתחייבויות.",
+    });
+  }
+  if (averageMonthlyProfit < targetMonthlyProfit) {
+    alerts.push({
+      code: "profit-target",
+      severity: averageMonthlyProfit < 0 ? "danger" : "warning",
+      message: `הרווח החודשי הממוצע נמוך מיעד העסקה שהוגדר (${Math.round(targetMonthlyProfit).toLocaleString("he-IL")} ₪).`,
+    });
+  }
+  if (earlyExitExposure > 0) {
+    alerts.push({
+      code: "early-exit",
+      severity: "warning",
+      message: `בסיום התקשרות בחודש ${earlyExitMonth} נותרת חשיפה משוערת של ${Math.round(earlyExitExposure).toLocaleString("he-IL")} ₪.`,
+    });
+  }
 
   return {
     consumption: {
@@ -379,6 +560,9 @@ export function calculateQuote(quote: Quote) {
       income: beanIncome,
       cost: beanCost,
       profit: beanProfit,
+      averageSalePrice: totalKg ? beanIncome / totalKg : 0,
+      averageCostPerKg: totalKg ? beanCost / totalKg : 0,
+      grossProfitPerKg: averageBeanProfit,
       averageProfitPerKg: averageBeanProfit,
       costPerCup: totalKg ? beanIncome / (totalKg * (1000 / grams)) : 0,
     },
@@ -391,31 +575,49 @@ export function calculateQuote(quote: Quote) {
       saleProfit,
     },
     financing: {
+      type: financingType,
       amount: financedAmount,
       months: financingMonths,
       payment: financePayment,
       interest: financingInterest,
       unfinancedEquipment,
+      totalPaid: totalFinancePaid,
     },
     cashflow: {
       rows: cashflow,
       firstMonth: cashflow[0]?.net || 0,
       exposure: Math.abs(minimumCumulative),
       breakEvenMonth,
-      endingBalance: cumulative,
+      endingBalance: finalBalanceAfterLiabilities,
+      contractEndingBalance,
+      openCoffeeLiability: openCoffeeAtContract,
+      openEquipmentLiability: openEquipmentAtContract,
+      totalOpenLiabilities,
+      finalBalanceAfterLiabilities,
+      duringRepaymentCashflow,
+      afterRepaymentCashflow,
     },
     profitability: {
       operatingProfit,
-      monthlyBalance,
+      monthlyBalance: averageMonthlyProfit,
+      averageMonthlyProfit,
       totalContractProfit,
+      totalClientRevenue,
+      totalBeanCost,
+      totalOperatingCost,
+      totalEquipmentEconomicCost,
       minimumKgToBreakEven,
-      targetBeanPriceIncrease:
-        totalKg > 0 ? neededForTarget / totalKg : 0,
-      targetLeaseIncrease:
-        allocations.reduce((sum, row) => sum + row.allocation.lease, 0) > 0
-          ? neededForTarget /
-            allocations.reduce((sum, row) => sum + row.allocation.lease, 0)
-          : 0,
+      targetMonthlyProfit,
+      targetBeanPriceIncrease,
+      minimumTargetBeanPrice:
+        (totalKg ? beanIncome / totalKg : 0) + targetBeanPriceIncrease,
+      targetLeaseIncrease,
+      minimumTargetServiceFee:
+        leasedSetCount > 0 ? averageLeasePerSet + targetLeaseIncrease : 0,
+      earlyExitMonth,
+      earlyExitExposure,
+      cashProfitGap,
     },
+    alerts,
   };
 }
