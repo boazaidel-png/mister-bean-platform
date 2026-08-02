@@ -277,6 +277,7 @@ export function calculateQuote(quote: Quote) {
   );
   const unfinancedEquipment = Math.max(0, uncoveredCost - financedAmount);
   const supplierPayment = unfinancedEquipment / supplierMonths;
+  const cashflowImporterPayment = uncoveredCost / supplierMonths;
   const operatingProfit =
     beanProfit + leaseIncome - positive(quote.extraMonthlyCost);
   const monthlyBalance = operatingProfit - supplierPayment - financePayment;
@@ -312,7 +313,7 @@ export function calculateQuote(quote: Quote) {
       addFlow(
         importerPayments,
         month + positive(quote.importerPayTerm),
-        supplierPayment,
+        cashflowImporterPayment,
       );
     }
     if (month <= financingMonths) addFlow(financeOut, month, financePayment);

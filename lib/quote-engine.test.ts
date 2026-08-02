@@ -118,3 +118,20 @@ test("quote totals include the machine and its synchronized package", () => {
   assert.equal(result.equipment.supplierPayment, 5331 / 8);
   assert.ok(Math.abs(result.beans.costPerCup - 1.2) < 0.000001);
 });
+
+test("financing does not hide importer installments from monthly cashflow", () => {
+  const equipment = syncAutomaticAddons([machine(1)]);
+  const quote = {
+    ...baseQuote(equipment),
+    financingMonths: 24,
+    financedAmount: 5331,
+  };
+  const result = calculateQuote(quote);
+
+  assert.equal(result.financing.unfinancedEquipment, 0);
+  assert.equal(result.equipment.supplierPayment, 0);
+  assert.equal(result.cashflow.rows[0].importer, 5331 / 8);
+  assert.equal(result.cashflow.rows[7].importer, 5331 / 8);
+  assert.equal(result.cashflow.rows[8].importer, 0);
+  assert.equal(result.cashflow.rows[0].financing, 5331 - 5331 / 24);
+});
