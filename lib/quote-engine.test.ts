@@ -50,6 +50,10 @@ const baseQuote = (equipment: QuoteEquipment[]): Quote => ({
   financingMonths: 0,
   financedAmount: 0,
   annualInterest: 0,
+  financingType: "supplier",
+  combineFinancingAndSupplier: false,
+  targetMonthlyProfit: 500,
+  earlyExitMonth: 12,
   applyVolumeDiscount: true,
   owner: "בועז",
   notes: "",
@@ -119,10 +123,11 @@ test("quote totals include the machine and its synchronized package", () => {
   assert.ok(Math.abs(result.beans.costPerCup - 1.2) < 0.000001);
 });
 
-test("financing does not hide importer installments from monthly cashflow", () => {
+test("a loan is cashflow, not profit, and equipment is paid at purchase", () => {
   const equipment = syncAutomaticAddons([machine(1)]);
   const quote = {
     ...baseQuote(equipment),
+    financingType: "loan" as const,
     financingMonths: 24,
     financedAmount: 5331,
   };
@@ -130,8 +135,106 @@ test("financing does not hide importer installments from monthly cashflow", () =
 
   assert.equal(result.financing.unfinancedEquipment, 0);
   assert.equal(result.equipment.supplierPayment, 0);
-  assert.equal(result.cashflow.rows[0].importer, 5331 / 8);
-  assert.equal(result.cashflow.rows[7].importer, 5331 / 8);
-  assert.equal(result.cashflow.rows[8].importer, 0);
-  assert.equal(result.cashflow.rows[0].financing, 5331 - 5331 / 24);
+  assert.equal(result.cashflow.rows[0].financingIn, 5331);
+  assert.equal(result.cashflow.rows[0].equipmentPayment, 5331);
+  assert.equal(result.cashflow.rows[1].equipmentPayment, 0);
+  assert.equal(result.cashflow.rows[0].loanPayment, 5331 / 24);
+  assert.equal(result.profitability.totalEquipmentEconomicCost, 5331);
+  assert.ok(
+    Math.abs(
+      result.cashflow.finalBalanceAfterLiabilities -
+        result.profitability.totalContractProfit,
+    ) < 0.000001,
+  );
+});
+
+test("supplier installments and loan repayments are not counted together by default", () => {
+  const equipment = syncAutomaticAddons([machine(1)]);
+  const result = calculateQuote({
+    ...baseQuote(equipment),
+    financingType: "loan",
+    financingMonths: 24,
+    financedAmount: 3000,
+    supplierMonths: 8,
+    combineFinancingAndSupplier: false,
+  });
+
+  assert.equal(result.cashflow.rows[0].equipmentPayment, 5331);
+  assert.equal(result.cashflow.rows[1].equipmentPayment, 0);
+  assert.ok(result.cashflow.rows[0].loanPayment > 0);
+});
+
+test("loan interest reduces true profit and final cash by the same amount", () => {
+  const equipment = syncAutomaticAddons([machine(1)]);
+  const withoutInterest = calculateQuote({
+    ...baseQuote(equipment),
+    financingType: "loan",
+    financingMonths: 12,
+    financedAmount: 5331,
+    annualInterest: 0,
+  });
+  const withInterest = calculateQuote({
+    ...baseQuote(equipment),
+    financingType: "loan",
+    financingMonths: 12,
+    financedAmount: 5331,
+    annualInterest: 12,
+  });
+
+  assert.ok(withInterest.financing.interest > 0);
+  assert.ok(
+    Math.abs(
+      withoutInterest.profitability.totalContractProfit -
+        withInterest.profitability.totalContractProfit -
+        withInterest.financing.interest,
+    ) < 0.000001,
+  );
+  assert.ok(
+    Math.abs(
+      withInterest.cashflow.finalBalanceAfterLiabilities -
+        withInterest.profitability.totalContractProfit,
+    ) < 0.000001,
+  );
+});
+
+test("an explicit combined structure spreads only the unfinanced equipment", () => {
+  const equipment = syncAutomaticAddons([machine(1)]);
+  const result = calculateQuote({
+    ...baseQuote(equipment),
+    financingType: "loan",
+    financingMonths: 24,
+    financedAmount: 3000,
+    supplierMonths: 8,
+    combineFinancingAndSupplier: true,
+  });
+
+  assert.equal(result.cashflow.rows[0].equipmentPayment, 3000 + 2331 / 8);
+  assert.equal(result.cashflow.rows[1].equipmentPayment, 2331 / 8);
+  assert.equal(result.cashflow.rows[7].equipmentPayment, 2331 / 8);
+  assert.equal(result.cashflow.rows[8].equipmentPayment, 0);
+});
+
+test("net 60 delays coffee cash payments and exposes the contract-end liability", () => {
+  const equipment = syncAutomaticAddons([machine(1)]);
+  const result = calculateQuote({
+    ...baseQuote(equipment),
+    clientCostMonths: 3,
+    financingType: "none",
+    coffeeSupplierPayTerm: 2,
+  });
+
+  const monthlyCoffeeCost = 38 * 60;
+  assert.equal(result.cashflow.rows[0].coffeePayment, 0);
+  assert.equal(result.cashflow.rows[1].coffeePayment, 0);
+  assert.equal(result.cashflow.rows[2].coffeePayment, monthlyCoffeeCost);
+  assert.equal(result.cashflow.rows[0].openCoffeeLiability, monthlyCoffeeCost);
+  assert.equal(result.cashflow.rows[1].openCoffeeLiability, monthlyCoffeeCost * 2);
+  assert.equal(result.cashflow.openCoffeeLiability, monthlyCoffeeCost * 2);
+  assert.equal(result.cashflow.rows[4].openCoffeeLiability, 0);
+  assert.ok(
+    Math.abs(
+      result.cashflow.finalBalanceAfterLiabilities -
+        result.profitability.totalContractProfit,
+    ) < 0.000001,
+  );
 });

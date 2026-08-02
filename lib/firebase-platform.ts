@@ -119,6 +119,14 @@ function normalizeQuoteRecord(value: Quote): Quote {
     financingMonths: value.financingMonths || 0,
     financedAmount: value.financedAmount || 0,
     annualInterest: value.annualInterest || 0,
+    financingType:
+      value.financingType ||
+      (value.financingMonths > 0 && value.financedAmount > 0
+        ? "loan"
+        : "supplier"),
+    combineFinancingAndSupplier: value.combineFinancingAndSupplier === true,
+    targetMonthlyProfit: value.targetMonthlyProfit ?? 500,
+    earlyExitMonth: value.earlyExitMonth || 12,
     applyVolumeDiscount: value.applyVolumeDiscount !== false,
   };
 }
