@@ -2,8 +2,10 @@
 
 import type { User } from "firebase/auth";
 import {
+  EmailAuthProvider,
   GoogleAuthProvider,
   browserLocalPersistence,
+  linkWithCredential,
   onAuthStateChanged,
   sendPasswordResetEmail,
   setPersistence,
@@ -146,6 +148,24 @@ export async function signInWithEmail(email: string, password: string) {
   const { auth } = getFirebaseServices();
   await setPersistence(auth, browserLocalPersistence);
   return signInWithEmailAndPassword(auth, email.trim(), password);
+}
+
+export async function linkPasswordToCurrentUser(password: string) {
+  const { auth } = getFirebaseServices();
+  const user = auth.currentUser;
+  if (!user?.email) {
+    throw new Error("auth/missing-email");
+  }
+  if (
+    user.providerData.some(
+      (provider) => provider.providerId === EmailAuthProvider.PROVIDER_ID,
+    )
+  ) {
+    throw new Error("auth/provider-already-linked");
+  }
+
+  const credential = EmailAuthProvider.credential(user.email, password);
+  return linkWithCredential(user, credential);
 }
 
 export async function resetPassword(email: string) {
