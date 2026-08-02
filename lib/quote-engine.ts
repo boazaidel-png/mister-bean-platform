@@ -46,7 +46,7 @@ export const addonCatalog: AddonCatalogItem[] = [
 ];
 
 const roundUp = (value: number) => Math.ceil(Number(value) || 0);
-const positive = (value: number) => Math.max(0, Number(value) || 0);
+const positive = (value?: number) => Math.max(0, Number(value) || 0);
 
 export function recommendedConsumptionKg(
   quote: Pick<
