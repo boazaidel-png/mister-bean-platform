@@ -48,6 +48,108 @@ export const addonCatalog: AddonCatalogItem[] = [
 const roundUp = (value: number) => Math.ceil(Number(value) || 0);
 const positive = (value: number) => Math.max(0, Number(value) || 0);
 
+export function recommendedConsumptionKg(
+  quote: Pick<
+    Quote,
+    "employees" | "knownKg" | "cupsPerEmployee" | "gramsPerCup" | "workDaysMonth"
+  >,
+) {
+  if (positive(quote.knownKg)) return positive(quote.knownKg);
+  return roundUp(
+    positive(quote.employees) *
+      (positive(quote.cupsPerEmployee) || 1.5) *
+      (positive(quote.workDaysMonth) || 21) *
+      (positive(quote.gramsPerCup) || 12) /
+      1000,
+  );
+}
+
+export function equipmentTotalCost(equipment: QuoteEquipment[]) {
+  return equipment.reduce(
+    (sum, item) => sum + positive(item.quantity) * positive(item.unitCost),
+    0,
+  );
+}
+
+export function syncAutomaticAddons(equipment: QuoteEquipment[]) {
+  const required = new Map<string, number>();
+  const automaticKeys = new Set(
+    equipmentCatalog.flatMap((item) => item.addonKeys),
+  );
+
+  for (const machine of equipmentCatalog) {
+    const selected = equipment.find(
+      (item) => (item.key || item.model) === machine.key,
+    );
+    const quantity = positive(selected?.quantity || 0);
+    for (const addonKey of machine.addonKeys) {
+      required.set(addonKey, (required.get(addonKey) || 0) + quantity);
+    }
+  }
+
+  const next = equipment.map((item) => ({ ...item }));
+  for (const addonKey of automaticKeys) {
+    const addon = addonCatalog.find((item) => item.key === addonKey);
+    if (!addon) continue;
+    const quantity = required.get(addonKey) || 0;
+    const index = next.findIndex(
+      (item) => (item.key || item.model) === addonKey,
+    );
+    if (index >= 0) {
+      next[index] = { ...next[index], quantity };
+    } else if (quantity > 0) {
+      next.push({
+        key: addon.key,
+        model: addon.label,
+        quantity,
+        unitCost: addon.cost,
+        importer: addon.importer,
+        commercialModel: "ללא עלות",
+        monthlyPrice: 0,
+      });
+    }
+  }
+  return next;
+}
+
+export function normalizeAllocationForQuantity(
+  allocation: QuoteAllocation | undefined,
+  oldQuantity: number,
+  newQuantity: number,
+): QuoteAllocation {
+  const quantity = positive(newQuantity);
+  if (!allocation) {
+    return { key: "", free: quantity, lease: 0, sale: 0 };
+  }
+
+  let free = positive(allocation.free);
+  let lease = positive(allocation.lease);
+  let sale = positive(allocation.sale);
+  const total = free + lease + sale;
+  const previous = positive(oldQuantity);
+
+  if (!total) return { ...allocation, free: quantity, lease: 0, sale: 0 };
+  if (total !== previous) return { ...allocation, free, lease, sale };
+  if (free === previous) return { ...allocation, free: quantity, lease: 0, sale: 0 };
+  if (lease === previous) return { ...allocation, free: 0, lease: quantity, sale: 0 };
+  if (sale === previous) return { ...allocation, free: 0, lease: 0, sale: quantity };
+
+  const difference = quantity - previous;
+  if (difference >= 0) {
+    free += difference;
+  } else {
+    let reduction = Math.abs(difference);
+    const fromFree = Math.min(free, reduction);
+    free -= fromFree;
+    reduction -= fromFree;
+    const fromLease = Math.min(lease, reduction);
+    lease -= fromLease;
+    reduction -= fromLease;
+    sale = Math.max(0, sale - reduction);
+  }
+  return { ...allocation, free, lease, sale };
+}
+
 export function recommendedEquipment(dailyCups: number) {
   let best:
     | { f15: number; c12: number; emilio: number; capacity: number; cost: number; score: number }
@@ -107,7 +209,7 @@ export function calculateQuote(quote: Quote) {
   const recommendedKg = roundUp(
     positive(quote.employees) * cupsPerEmployee * workDays * grams / 1000,
   );
-  const consumptionKg = positive(quote.knownKg) || recommendedKg;
+  const consumptionKg = recommendedConsumptionKg(quote);
   const monthlyCups = consumptionKg * (1000 / grams);
   const dailyCups = monthlyCups / workDays;
 
@@ -131,10 +233,7 @@ export function calculateQuote(quote: Quote) {
   const beanProfit = beanIncome - beanCost;
   const averageBeanProfit = totalKg ? beanProfit / totalKg : 0;
 
-  const equipmentTotal = quote.equipment.reduce(
-    (sum, item) => sum + positive(item.quantity) * positive(item.unitCost),
-    0,
-  );
+  const equipmentTotal = equipmentTotalCost(quote.equipment);
   const allocations = quote.equipment
     .filter((item) => equipmentCatalog.some((catalog) => catalog.key === (item.key || item.model)))
     .map((item) => ({ item, allocation: allocationFor(quote, item) }));
@@ -280,7 +379,7 @@ export function calculateQuote(quote: Quote) {
       cost: beanCost,
       profit: beanProfit,
       averageProfitPerKg: averageBeanProfit,
-      costPerCup: monthlyCups ? beanIncome / monthlyCups : 0,
+      costPerCup: totalKg ? beanIncome / (totalKg * (1000 / grams)) : 0,
     },
     equipment: {
       total: equipmentTotal,

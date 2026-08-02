@@ -30,9 +30,13 @@ import {
 import {
   addonCatalog,
   calculateQuote,
+  equipmentTotalCost,
   equipmentCatalog,
   importers,
+  normalizeAllocationForQuantity,
+  recommendedConsumptionKg,
   recommendedEquipment,
+  syncAutomaticAddons,
 } from "@/lib/quote-engine";
 import {
   fetchLegacyWorkspace,
@@ -136,7 +140,11 @@ const emptyLead = (): Lead => ({
   updatedAt: now(),
 });
 
-const quoteFromLead = (lead?: Lead): Quote => ({
+const quoteFromLead = (lead?: Lead): Quote => {
+  const consumption =
+    lead?.monthlyConsumption ||
+    Math.ceil(((lead?.employees || 100) * 1.5 * 21 * 12) / 1000);
+  return {
   id: id("quote"),
   leadId: lead?.id,
   clientName: lead?.company || "",
@@ -159,9 +167,9 @@ const quoteFromLead = (lead?: Lead): Quote => ({
   blends: [
     {
       name: "DX",
-      quantityKg: lead?.monthlyConsumption || 0,
-      costPerKg: 42,
-      pricePerKg: 82,
+      quantityKg: consumption,
+      costPerKg: 60,
+      pricePerKg: 100,
     },
   ],
   equipment: [],
@@ -185,7 +193,8 @@ const quoteFromLead = (lead?: Lead): Quote => ({
   notes: "",
   createdAt: now(),
   updatedAt: now(),
-});
+  };
+};
 
 function tone(status: string) {
   if (status.includes("אושר") || status === "נסגר") return "green";
@@ -1868,9 +1877,16 @@ function QuoteModal({
   onClose: () => void;
   onSave: (quote: Quote) => Promise<void>;
 }) {
-  const [draft, setDraft] = useState(quote);
+  const [draft, setDraft] = useState(() => ({
+    ...quote,
+    equipment: syncAutomaticAddons(quote.equipment),
+  }));
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [autoSyncAccessories, setAutoSyncAccessories] = useState(true);
+  const [financedAmountManual, setFinancedAmountManual] = useState(
+    quote.financedAmount > 0,
+  );
   const [recommendationBaseline, setRecommendationBaseline] =
     useState<Quote | null>(null);
   const metrics = useMemo(() => quoteMetrics(draft), [draft]);
@@ -1883,13 +1899,22 @@ function QuoteModal({
         blendIndex === index ? { ...blend, ...data } : blend,
       ),
     );
-  const updateEquipment = (index: number, data: Partial<QuoteEquipment>) =>
-    update(
-      "equipment",
-      draft.equipment.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...data } : item,
-      ),
-    );
+  const updateConsumption = (
+    key: "employees" | "knownKg" | "cupsPerEmployee" | "gramsPerCup" | "workDaysMonth",
+    value: number,
+  ) =>
+    setDraft((current) => {
+      const next = { ...current, [key]: value };
+      if (next.blends.length === 1) {
+        next.blends = [
+          {
+            ...next.blends[0],
+            quantityKg: recommendedConsumptionKg(next),
+          },
+        ];
+      }
+      return next;
+    });
   const setCatalogQuantity = (
     key: string,
     quantity: number,
@@ -1900,34 +1925,68 @@ function QuoteModal({
       capacityPerDay?: number;
       addonKeys?: string[];
     },
+    synchronizeAccessories = false,
   ) => {
-    const existingIndex = draft.equipment.findIndex(
-      (item) => (item.key || item.model) === key,
-    );
-    if (existingIndex >= 0) {
-      updateEquipment(existingIndex, {
-        quantity,
-        unitCost: options.cost,
-        importer: options.importer,
-        capacityPerDay: options.capacityPerDay,
-        addonKeys: options.addonKeys,
-      });
-      return;
-    }
-    update("equipment", [
-      ...draft.equipment,
-      {
-        key,
-        model: options.label,
-        quantity,
-        unitCost: options.cost,
-        importer: options.importer,
-        capacityPerDay: options.capacityPerDay,
-        addonKeys: options.addonKeys,
-        commercialModel: "ללא עלות",
-        monthlyPrice: 0,
-      },
-    ]);
+    setDraft((current) => {
+      const existingIndex = current.equipment.findIndex(
+        (item) => (item.key || item.model) === key,
+      );
+      const oldQuantity =
+        existingIndex >= 0 ? current.equipment[existingIndex].quantity : 0;
+      let equipment = current.equipment.map((item) => ({ ...item }));
+      if (existingIndex >= 0) {
+        equipment[existingIndex] = {
+          ...equipment[existingIndex],
+          quantity: Math.max(0, quantity),
+          unitCost: options.cost,
+          importer: options.importer,
+          capacityPerDay: options.capacityPerDay,
+          addonKeys: options.addonKeys,
+        };
+      } else {
+        equipment.push({
+          key,
+          model: options.label,
+          quantity: Math.max(0, quantity),
+          unitCost: options.cost,
+          importer: options.importer,
+          capacityPerDay: options.capacityPerDay,
+          addonKeys: options.addonKeys,
+          commercialModel: "ללא עלות",
+          monthlyPrice: 0,
+        });
+      }
+
+      let allocation = current.allocation;
+      if (options.addonKeys) {
+        const existingAllocation = current.allocation.find(
+          (row) => row.key === key,
+        );
+        allocation = [
+          ...current.allocation.filter((row) => row.key !== key),
+          {
+            ...normalizeAllocationForQuantity(
+              existingAllocation,
+              oldQuantity,
+              quantity,
+            ),
+            key,
+          },
+        ];
+      }
+      if (synchronizeAccessories && autoSyncAccessories) {
+        equipment = syncAutomaticAddons(equipment);
+      }
+      return {
+        ...current,
+        equipment,
+        allocation,
+        financedAmount:
+          current.financingMonths > 0 && !financedAmountManual
+            ? equipmentTotalCost(equipment)
+            : current.financedAmount,
+      };
+    });
   };
   const quantityFor = (key: string) =>
     draft.equipment.find((item) => (item.key || item.model) === key)?.quantity ||
@@ -1939,13 +1998,6 @@ function QuoteModal({
       c12: recommendation.c12,
       emax: recommendation.emilio,
     };
-    const addonQuantities: Record<string, number> = {};
-    for (const item of equipmentCatalog) {
-      const quantity = quantities[item.key] || 0;
-      for (const addonKey of item.addonKeys) {
-        addonQuantities[addonKey] = (addonQuantities[addonKey] || 0) + quantity;
-      }
-    }
     const machineItems = equipmentCatalog
       .filter((item) => (quantities[item.key] || 0) > 0)
       .map((item) => ({
@@ -1959,18 +2011,31 @@ function QuoteModal({
         commercialModel: "ללא עלות" as const,
         monthlyPrice: 0,
       }));
-    const addonItems = addonCatalog
-      .filter((item) => (addonQuantities[item.key] || 0) > 0)
-      .map((item) => ({
-        key: item.key,
-        model: item.label,
-        quantity: addonQuantities[item.key],
-        unitCost: item.cost,
-        importer: item.importer,
-        commercialModel: "ללא עלות" as const,
-        monthlyPrice: 0,
-      }));
-    update("equipment", [...machineItems, ...addonItems]);
+    setDraft((current) => {
+      const equipment = syncAutomaticAddons(machineItems);
+      const allocation = machineItems.map((item) => {
+        const previousItem = current.equipment.find(
+          (row) => (row.key || row.model) === item.key,
+        );
+        return {
+          ...normalizeAllocationForQuantity(
+            current.allocation.find((row) => row.key === item.key),
+            previousItem?.quantity || 0,
+            item.quantity,
+          ),
+          key: item.key,
+        };
+      });
+      return {
+        ...current,
+        equipment,
+        allocation,
+        financedAmount:
+          current.financingMonths > 0 && !financedAmountManual
+            ? equipmentTotalCost(equipment)
+            : current.financedAmount,
+      };
+    });
   };
   const allocationFor = (item: QuoteEquipment) => {
     const key = item.key || item.model;
@@ -2161,7 +2226,9 @@ function QuoteModal({
                   type="number"
                   min="0"
                   value={draft.employees}
-                  onChange={(event) => update("employees", +event.target.value)}
+                  onChange={(event) =>
+                    updateConsumption("employees", +event.target.value)
+                  }
                 />
               </label>
               <label>
@@ -2171,7 +2238,9 @@ function QuoteModal({
                   min="0"
                   step="0.1"
                   value={draft.knownKg}
-                  onChange={(event) => update("knownKg", +event.target.value)}
+                  onChange={(event) =>
+                    updateConsumption("knownKg", +event.target.value)
+                  }
                 />
               </label>
               <label>
@@ -2181,7 +2250,9 @@ function QuoteModal({
                   min="0"
                   step="0.1"
                   value={draft.cupsPerEmployee}
-                  onChange={(event) => update("cupsPerEmployee", +event.target.value)}
+                  onChange={(event) =>
+                    updateConsumption("cupsPerEmployee", +event.target.value)
+                  }
                 />
               </label>
               <label>
@@ -2190,7 +2261,9 @@ function QuoteModal({
                   type="number"
                   min="1"
                   value={draft.gramsPerCup}
-                  onChange={(event) => update("gramsPerCup", +event.target.value)}
+                  onChange={(event) =>
+                    updateConsumption("gramsPerCup", +event.target.value)
+                  }
                 />
               </label>
               <label>
@@ -2199,7 +2272,9 @@ function QuoteModal({
                   type="number"
                   min="1"
                   value={draft.workDaysMonth}
-                  onChange={(event) => update("workDaysMonth", +event.target.value)}
+                  onChange={(event) =>
+                    updateConsumption("workDaysMonth", +event.target.value)
+                  }
                 />
               </label>
               <label>
@@ -2233,7 +2308,7 @@ function QuoteModal({
                   onClick={() =>
                     update("blends", [
                       ...draft.blends,
-                      { name: "DX", quantityKg: 0, costPerKg: 42, pricePerKg: 82 },
+                      { name: "DX", quantityKg: 0, costPerKg: 60, pricePerKg: 100 },
                     ])
                   }
                 >
@@ -2333,6 +2408,33 @@ function QuoteModal({
                   <Sparkles size={15} /> מלא לפי המלצת המערכת
                 </button>
               </div>
+              <label className="quote-discount-toggle equipment-sync-toggle">
+                <input
+                  type="checkbox"
+                  checked={autoSyncAccessories}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setAutoSyncAccessories(checked);
+                    if (checked) {
+                      setDraft((current) => {
+                        const equipment = syncAutomaticAddons(current.equipment);
+                        return {
+                          ...current,
+                          equipment,
+                          financedAmount:
+                            current.financingMonths > 0 && !financedAmountManual
+                              ? equipmentTotalCost(equipment)
+                              : current.financedAmount,
+                        };
+                      });
+                    }
+                  }}
+                />
+                <span>
+                  סנכרון אוטומטי של מקררים, מסננים, התקנות ומקציפים לפי
+                  כמות ודגם המכונות
+                </span>
+              </label>
               <div className="equipment-importer-grid">
                 {(Object.keys(importers) as Array<keyof typeof importers>).map(
                   (importerKey) => (
@@ -2365,7 +2467,7 @@ function QuoteModal({
                                       importer: item.importer,
                                       capacityPerDay: item.capacityPerDay,
                                       addonKeys: item.addonKeys,
-                                    })
+                                    }, true)
                                   }
                                 />
                               </label>
@@ -2641,9 +2743,17 @@ function QuoteModal({
                       type="number"
                       min="0"
                       value={draft.financingMonths}
-                      onChange={(event) =>
-                        update("financingMonths", +event.target.value)
-                      }
+                      onChange={(event) => {
+                        const months = +event.target.value;
+                        setDraft((current) => ({
+                          ...current,
+                          financingMonths: months,
+                          financedAmount:
+                            months > 0 && !financedAmountManual
+                              ? equipmentTotalCost(current.equipment)
+                              : current.financedAmount,
+                        }));
+                      }}
                     />
                   </label>
                   <label>
@@ -2652,9 +2762,10 @@ function QuoteModal({
                       type="number"
                       min="0"
                       value={draft.financedAmount}
-                      onChange={(event) =>
-                        update("financedAmount", +event.target.value)
-                      }
+                      onChange={(event) => {
+                        setFinancedAmountManual(true);
+                        update("financedAmount", +event.target.value);
+                      }}
                     />
                   </label>
                   <label>
