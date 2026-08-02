@@ -14,6 +14,7 @@ import {
   FileSignature,
   Headphones,
   LayoutDashboard,
+  KeyRound,
   ListTodo,
   LockKeyhole,
   LogOut,
@@ -31,6 +32,7 @@ import {
   deleteQuote,
   getOrCreateUserProfile,
   importSalesWorkspace,
+  linkPasswordToCurrentUser,
   observeAuth,
   resetPassword,
   savePlatformStore,
@@ -190,7 +192,7 @@ export default function Home() {
   const [syncError,setSyncError] = useState("");
   const [users,setUsers] = useState<UserProfile[]>([]);
   const [selectedCustomer,setSelectedCustomer] = useState("c1");
-  const [modal,setModal] = useState<null|"ticket"|"task"|"close"|"detail">(null);
+  const [modal,setModal] = useState<null|"ticket"|"task"|"close"|"detail"|"password">(null);
   const [selectedTicket,setSelectedTicket] = useState<string>("");
   const [toast,setToast] = useState("");
   const [mobileOpen,setMobileOpen] = useState(false);
@@ -321,6 +323,7 @@ export default function Home() {
         <div className="sidebar-foot">
           <div className="avatar">{roleNames[role].slice(0,2)}</div>
           <div><strong>{preview?roleNames[role]:profile.displayName}</strong><small>{preview?"מצב תצוגה":profile.email}</small></div>
+          {!preview&&<button className="account-password" onClick={()=>setModal("password")}><KeyRound size={17}/><span>הגדרת כניסה עם סיסמה</span></button>}
           <button className="logout" onClick={()=>void signOutUser()} aria-label="התנתקות"><LogOut size={17}/><span>התנתקות</span></button>
         </div>
       </aside>
@@ -356,6 +359,7 @@ export default function Home() {
       {modal==="task"&&<TaskModal customers={customers} accountId={selectedCustomer} onClose={()=>setModal(null)} onSave={task=>{setStore(s=>({...s,tasks:[task,...s.tasks]}));setModal(null);setToast("המשימה נוצרה בהצלחה");}}/>}
       {modal==="close"&&<CloseModal onClose={()=>setModal(null)} onSave={reason=>{setStore(s=>({...s,tickets:s.tickets.map(t=>t.id===selectedTicket?{...t,status:"נסגרה",closedAt:new Date().toISOString(),updatedAt:new Date().toISOString(),closeReason:reason}:t)}));setModal(null);setToast("הקריאה נסגרה");}}/>}
       {modal==="detail"&&<TicketDetailModal ticket={store.tickets.find(t=>t.id===selectedTicket)!} machine={store.machines.find(m=>m.id===store.tickets.find(t=>t.id===selectedTicket)?.machineId)} onClose={()=>setModal(null)}/>}
+      {modal==="password"&&<PasswordSetupModal email={profile.email} onClose={()=>setModal(null)} onSave={async password=>{await linkPasswordToCurrentUser(password);setModal(null);setToast("הכניסה עם סיסמה הופעלה בהצלחה");}}/>}
       {previewOpen&&<PreviewModal customers={customers} currentAccount={selectedCustomer} onClose={()=>setPreviewOpen(false)} onEnter={enterPreview}/>}
       {syncError&&<div className="sync-error"><LockKeyhole size={16}/><span>הסנכרון ממתין להגדרת Firebase: {syncError}</span></div>}
       {toast&&<div className="toast">✓ {toast}</div>}
@@ -441,6 +445,11 @@ function firebaseMessage(error:unknown){
   if(message.includes("auth/popup-blocked"))return "הדפדפן חסם את חלון הכניסה. יש לאפשר חלונות קופצים ולנסות שוב.";
   if(message.includes("auth/cancelled-popup-request"))return "בקשת הכניסה הקודמת בוטלה. אפשר לנסות שוב.";
   if(message.includes("auth/unauthorized-domain"))return "כתובת האתר עדיין לא אושרה להתחברות ב־Firebase.";
+  if(message.includes("auth/weak-password"))return "יש לבחור סיסמה חזקה יותר, באורך 8 תווים לפחות.";
+  if(message.includes("auth/provider-already-linked"))return "כניסה עם סיסמה כבר מוגדרת לחשבון הזה.";
+  if(message.includes("auth/credential-already-in-use")||message.includes("auth/email-already-in-use"))return "כתובת המייל כבר משויכת לחשבון אחר. יש לפנות למנהל המערכת.";
+  if(message.includes("auth/requires-recent-login"))return "מטעמי אבטחה יש להתנתק, להתחבר שוב עם Google ולנסות שנית.";
+  if(message.includes("auth/missing-email"))return "לא נמצאה כתובת מייל בחשבון המחובר.";
   if(message.includes("auth/operation-not-allowed"))return "שיטת הכניסה עדיין לא הופעלה ב־Firebase.";
   if(message.includes("permission-denied")||message.includes("Missing or insufficient permissions"))return "כללי הגישה למסד הנתונים עדיין לא פורסמו.";
   return message.replace("Firebase: ","");
@@ -563,6 +572,27 @@ function Contract({customer,machines}:{customer:Customer;machines:Machine[]}) {r
 function Contact(){return <><SectionTitle title="יצירת קשר"/><div className="contact-grid"><a className="contact-card whatsapp" href="https://wa.me/97235555555?text=שלום%2C%20אני%20צריך%20עזרה%20בנושא%20שירות%20לקוחות%20%2F%20קפה%20%2F%20מכונה." target="_blank"><span>◌</span><h3>WhatsApp לשירות</h3><p>בשעות הפעילות</p><b>פתיחת שיחה ←</b></a><a className="contact-card" href="tel:035555555"><span>☎</span><h3>טלפון שירות</h3><p>א׳–ה׳, 08:00–17:00</p><b>03-555-5555</b></a><a className="contact-card" href="mailto:service@misterbean.co.il"><span>＠</span><h3>דוא״ל</h3><b>service@misterbean.co.il</b></a></div><section className="panel hours"><h3>שעות פעילות</h3><div><span>ימים א׳–ה׳</span><strong>08:00–17:00</strong></div><div><span>יום ו׳ וערבי חג</span><strong>08:00–12:00</strong></div><p>לתקלה דחופה מחוץ לשעות הפעילות יש לפתוח קריאה במערכת.</p></section></>}
 
 function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><div className="modal"><header><h2>{title}</h2><button onClick={onClose}>×</button></header>{children}</div></div>}
+function PasswordSetupModal({email,onClose,onSave}:{email:string;onClose:()=>void;onSave:(password:string)=>Promise<void>}) {
+  const [password,setPassword]=useState("");
+  const [confirmation,setConfirmation]=useState("");
+  const [error,setError]=useState("");
+  const [busy,setBusy]=useState(false);
+  const submit=async(event:FormEvent<HTMLFormElement>)=>{
+    event.preventDefault();
+    if(password.length<8){setError("יש לבחור סיסמה באורך 8 תווים לפחות.");return;}
+    if(password!==confirmation){setError("הסיסמאות אינן זהות.");return;}
+    setBusy(true);setError("");
+    try{await onSave(password);}catch(nextError){setError(firebaseMessage(nextError));setBusy(false);}
+  };
+  return <Modal title="הגדרת כניסה עם סיסמה" onClose={onClose}><form className="modal-form password-setup" onSubmit={submit}>
+    <div className="password-setup-note"><KeyRound size={20}/><div><strong>אפשרות כניסה נוספת</strong><p>לאחר ההגדרה יהיה אפשר להתחבר לאותו חשבון גם באמצעות Google וגם באמצעות מייל וסיסמה.</p></div></div>
+    <label><span>כתובת המייל</span><input type="email" value={email} disabled/></label>
+    <label><span>סיסמה חדשה</span><input type="password" value={password} onChange={event=>setPassword(event.target.value)} minLength={8} required autoComplete="new-password" placeholder="8 תווים לפחות"/></label>
+    <label><span>אימות הסיסמה</span><input type="password" value={confirmation} onChange={event=>setConfirmation(event.target.value)} minLength={8} required autoComplete="new-password" placeholder="הקלדה חוזרת"/></label>
+    {error&&<div className="auth-error">{error}</div>}
+    <footer><button type="button" onClick={onClose} disabled={busy}>ביטול</button><button className="primary" type="submit" disabled={busy}>{busy?"מגדיר…":"הפעלת כניסה עם סיסמה"}</button></footer>
+  </form></Modal>;
+}
 function TicketModal({customers,accountId,allowAccountChange,preselectedMachine,machines,onClose,onSave}:{customers:Customer[];accountId:string;allowAccountChange:boolean;preselectedMachine:string;machines:Machine[];onClose:()=>void;onSave:(t:Ticket)=>void}) {
   const [activeAccount,setActiveAccount]=useState(accountId);
   const customer=customers.find(c=>c.id===activeAccount)||customers[0]; const available=machines.filter(m=>m.accountId===customer.id);
