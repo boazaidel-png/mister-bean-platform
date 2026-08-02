@@ -438,6 +438,9 @@ function firebaseMessage(error:unknown){
   const message=error instanceof Error?error.message:String(error);
   if(message.includes("auth/invalid-credential"))return "פרטי הכניסה אינם נכונים.";
   if(message.includes("auth/popup-closed-by-user"))return "חלון הכניסה נסגר לפני השלמת התהליך.";
+  if(message.includes("auth/popup-blocked"))return "הדפדפן חסם את חלון הכניסה. יש לאפשר חלונות קופצים ולנסות שוב.";
+  if(message.includes("auth/cancelled-popup-request"))return "בקשת הכניסה הקודמת בוטלה. אפשר לנסות שוב.";
+  if(message.includes("auth/unauthorized-domain"))return "כתובת האתר עדיין לא אושרה להתחברות ב־Firebase.";
   if(message.includes("auth/operation-not-allowed"))return "שיטת הכניסה עדיין לא הופעלה ב־Firebase.";
   if(message.includes("permission-denied")||message.includes("Missing or insufficient permissions"))return "כללי הגישה למסד הנתונים עדיין לא פורסמו.";
   return message.replace("Firebase: ","");
