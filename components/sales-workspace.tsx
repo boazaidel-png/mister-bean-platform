@@ -1882,9 +1882,7 @@ function QuoteModal({
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [autoSyncAccessories, setAutoSyncAccessories] = useState(true);
-  const [financedAmountManual, setFinancedAmountManual] = useState(
-    quote.financedAmount > 0,
-  );
+  const [financedAmountManual, setFinancedAmountManual] = useState(false);
   const [recommendationBaseline, setRecommendationBaseline] =
     useState<Quote | null>(null);
   const metrics = useMemo(() => quoteMetrics(draft), [draft]);
@@ -1980,7 +1978,7 @@ function QuoteModal({
         equipment,
         allocation,
         financedAmount:
-          current.financingMonths > 0 && !financedAmountManual
+          current.financingType === "loan" && !financedAmountManual
             ? equipmentTotalCost(equipment)
             : current.financedAmount,
       };
@@ -2029,7 +2027,7 @@ function QuoteModal({
         equipment,
         allocation,
         financedAmount:
-          current.financingMonths > 0 && !financedAmountManual
+          current.financingType === "loan" && !financedAmountManual
             ? equipmentTotalCost(equipment)
             : current.financedAmount,
       };
@@ -2098,6 +2096,19 @@ function QuoteModal({
       setSaving(false);
     }
   };
+  const openStep = (nextStep: number) => {
+    if (nextStep === 3 && !financedAmountManual) {
+      setDraft((current) =>
+        current.financingType === "loan"
+          ? {
+              ...current,
+              financedAmount: equipmentTotalCost(current.equipment),
+            }
+          : current,
+      );
+    }
+    setStep(nextStep);
+  };
   const steps = ["לקוח וצריכה", "פולים", "ציוד", "מתווה ומימון", "סיכום"];
 
   return (
@@ -2111,7 +2122,7 @@ function QuoteModal({
           <button
             key={label}
             className={step === index ? "active" : ""}
-            onClick={() => setStep(index)}
+            onClick={() => openStep(index)}
           >
             <b>{index + 1}</b>
             <span>{label}</span>
@@ -2420,7 +2431,7 @@ function QuoteModal({
                           ...current,
                           equipment,
                           financedAmount:
-                            current.financingMonths > 0 && !financedAmountManual
+                            current.financingType === "loan" && !financedAmountManual
                               ? equipmentTotalCost(equipment)
                               : current.financedAmount,
                         };
@@ -2534,6 +2545,19 @@ function QuoteModal({
                   ),
                 )}
               </div>
+              <section className="equipment-total-card" aria-live="polite">
+                <div>
+                  <small>סה״כ עלות הציוד שנבחר</small>
+                  <strong>{money(metrics.equipment.total)}</strong>
+                </div>
+                <span>
+                  {draft.equipment.reduce(
+                    (sum, item) => sum + Math.max(0, item.quantity),
+                    0,
+                  )}{" "}
+                  פריטים
+                </span>
+              </section>
               <div className="quote-recommendation">
                 <Sparkles size={19} />
                 <div>
@@ -2743,9 +2767,7 @@ function QuoteModal({
                       onChange={(event) => {
                         const financingType = event.target
                           .value as QuoteFinancingType;
-                        if (financingType !== "loan") {
-                          setFinancedAmountManual(false);
-                        }
+                        setFinancedAmountManual(false);
                         setDraft((current) => ({
                           ...current,
                           financingType,
@@ -3020,13 +3042,14 @@ function QuoteModal({
                   </button>
                 )}
               </section>
-              <details className="cashflow-details">
+              <details className="cashflow-details" open>
                 <summary>תזרים חודשי מלא</summary>
                 <div className="cashflow-table-wrap">
                   <table>
                     <thead>
                       <tr>
                         <th>חודש</th>
+                        <th>קופה מצטברת</th>
                         <th>הכנסה מלקוח</th>
                         <th>כניסת מימון</th>
                         <th>תשלום ציוד</th>
@@ -3034,7 +3057,6 @@ function QuoteModal({
                         <th>תפעול</th>
                         <th>החזר הלוואה</th>
                         <th>תזרים</th>
-                        <th>קופה מצטברת</th>
                         <th>התחייבות פולים</th>
                       </tr>
                     </thead>
@@ -3042,6 +3064,7 @@ function QuoteModal({
                       {metrics.cashflow.rows.map((row) => (
                         <tr className={row.net < 0 ? "cashflow-row-negative" : "cashflow-row-positive"} key={row.month}>
                           <td>{row.month}{row.isTail ? " *" : ""}</td>
+                          <td className={row.cumulative < 0 ? "cashflow-negative" : "cashflow-positive"}>{money(row.cumulative)}</td>
                           <td>{money(row.income)}</td>
                           <td>{money(row.financingIn)}</td>
                           <td>{money(row.equipmentPayment)}</td>
@@ -3049,7 +3072,6 @@ function QuoteModal({
                           <td>{money(row.operatingCost)}</td>
                           <td>{money(row.loanPayment)}</td>
                           <td className={row.net < 0 ? "cashflow-negative" : "cashflow-positive"}>{money(row.net)}</td>
-                          <td className={row.cumulative < 0 ? "cashflow-negative" : "cashflow-positive"}>{money(row.cumulative)}</td>
                           <td className={row.openCoffeeLiability > 0 ? "cashflow-liability" : ""}>{money(row.openCoffeeLiability)}</td>
                         </tr>
                       ))}
@@ -3086,6 +3108,10 @@ function QuoteModal({
               <dd>{draft.equipment.filter((item) => equipmentCatalog.some((catalog) => catalog.key === (item.key || item.model))).reduce((sum, item) => sum + item.quantity, 0)}</dd>
             </div>
             <div>
+              <dt>עלות ציוד כוללת</dt>
+              <dd>{money(metrics.equipment.total)}</dd>
+            </div>
+            <div>
               <dt>הכנסה מפולים</dt>
               <dd>{money(metrics.beans.income)}</dd>
             </div>
@@ -3093,15 +3119,21 @@ function QuoteModal({
               <dt>רווח חודשי אמיתי</dt>
               <dd>{money(metrics.profitability.averageMonthlyProfit)}</dd>
             </div>
+            <div>
+              <dt>קופה מצטברת בסוף החוזה</dt>
+              <dd className={metrics.cashflow.contractEndingBalance < 0 ? "negative-text" : "positive-text"}>
+                {money(metrics.cashflow.contractEndingBalance)}
+              </dd>
+            </div>
           </dl>
         </aside>
       </div>
       <footer className="quote-modal-footer">
         <button onClick={onClose}>ביטול</button>
         <div>
-          {step > 0 && <button onClick={() => setStep((value) => value - 1)}>הקודם</button>}
+          {step > 0 && <button onClick={() => openStep(step - 1)}>הקודם</button>}
           {step < steps.length - 1 ? (
-            <button className="sales-primary" onClick={() => setStep((value) => value + 1)}>
+            <button className="sales-primary" onClick={() => openStep(step + 1)}>
               המשך
             </button>
           ) : (
