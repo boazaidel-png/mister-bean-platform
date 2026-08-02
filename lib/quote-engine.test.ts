@@ -238,3 +238,22 @@ test("net 60 delays coffee cash payments and exposes the contract-end liability"
     ) < 0.000001,
   );
 });
+
+test("every cashflow row exposes the running cumulative balance", () => {
+  const result = calculateQuote({
+    ...baseQuote(syncAutomaticAddons([machine(1)])),
+    financingType: "loan",
+    financingMonths: 12,
+    financedAmount: 5331,
+  });
+
+  let runningBalance = 0;
+  for (const row of result.cashflow.rows) {
+    runningBalance += row.net;
+    assert.ok(Math.abs(row.cumulative - runningBalance) < 0.000001);
+  }
+  assert.equal(
+    result.cashflow.contractEndingBalance,
+    result.cashflow.rows[35].cumulative,
+  );
+});
