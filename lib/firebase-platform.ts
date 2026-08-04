@@ -11,6 +11,7 @@ import {
   setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
 } from "firebase/auth";
 import {
@@ -32,6 +33,7 @@ import {
 } from "firebase/firestore";
 import { getFirebaseServices } from "./firebase-client";
 import type {
+  Activity,
   Customer,
   Machine,
   Order,
@@ -48,7 +50,7 @@ const BOOTSTRAP_ADMIN_EMAILS = new Set([
   "boazaidel@gmail.com",
   "boaz@pacifictrade.co",
 ]);
-const entityKeys = ["tickets", "orders", "tasks", "machines"] as const;
+const entityKeys = ["tickets", "orders", "tasks", "machines", "activities"] as const;
 const legacyAddonKeys = new Set([
   "fridge",
   "filter",
@@ -60,12 +62,12 @@ const legacyAddonKeys = new Set([
   "ypeper_install",
 ]);
 type EntityKey = (typeof entityKeys)[number];
-type Entity = Ticket | Order | Task | Machine;
+type Entity = Ticket | Order | Task | Machine | Activity;
 
 let lastSyncedStore: PlatformStore | null = null;
 
 function emptyStore(): PlatformStore {
-  return { tickets: [], orders: [], tasks: [], machines: [] };
+  return { tickets: [], orders: [], tasks: [], machines: [], activities: [] };
 }
 
 function withoutUndefined<T>(value: T): T {
@@ -150,6 +152,14 @@ export async function signInWithGoogle() {
   // cannot reliably restore state when the app is hosted on GitHub Pages.
   // Firebase Auth already uses local persistence by default in web browsers.
   return signInWithPopup(auth, provider);
+}
+
+export async function signInWithGoogleRedirect() {
+  const { auth } = getFirebaseServices();
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  await setPersistence(auth, browserLocalPersistence);
+  return signInWithRedirect(auth, provider);
 }
 
 export async function signInWithEmail(email: string, password: string) {
@@ -251,12 +261,15 @@ export function subscribeToPlatformStore(
     orders: new Map(),
     tasks: new Map(),
     machines: new Map(),
+    activities: new Map(),
   };
   const unsubscribers: Unsubscribe[] = [];
   const accountIds =
     profile.role === "admin" || profile.role === "service"
       ? [undefined]
       : profile.accountIds;
+  const readySubscriptions = new Set<string>();
+  const expectedSubscriptions = entityKeys.length * accountIds.length;
 
   if (!accountIds.length) {
     lastSyncedStore = emptyStore();
@@ -265,11 +278,13 @@ export function subscribeToPlatformStore(
   }
 
   const emit = () => {
+    if (readySubscriptions.size < expectedSubscriptions) return;
     const next: PlatformStore = {
       tickets: [...buckets.tickets.values()] as Ticket[],
       orders: [...buckets.orders.values()] as Order[],
       tasks: [...buckets.tasks.values()] as Task[],
       machines: [...buckets.machines.values()] as Machine[],
+      activities: [...buckets.activities.values()] as Activity[],
     };
     lastSyncedStore = next;
     onStore(next);
@@ -288,6 +303,7 @@ export function subscribeToPlatformStore(
               buckets[key].set(mapKey, change.doc.data() as Entity);
             }
           }
+          readySubscriptions.add(`${key}:${accountId || "all"}`);
           emit();
         },
         (error) => onError(error),
@@ -354,9 +370,15 @@ export async function updateUserAccess(
   role: UserProfile["role"],
   accountIds: string[],
   status: UserProfile["status"],
+  serviceDetails?: Pick<UserProfile, "phone" | "serviceRegion" | "skills">,
 ) {
   const { db } = getFirebaseServices();
-  await updateDoc(doc(db, "users", uid), { role, accountIds, status });
+  await updateDoc(doc(db, "users", uid), withoutUndefined({
+    role,
+    accountIds,
+    status,
+    ...(role === "service" ? serviceDetails : {}),
+  }));
 }
 
 const legacyDemoAccountIds = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"];
@@ -375,31 +397,67 @@ export async function removeLegacyDemoCustomerData() {
 }
 
 function changedEntities(next: PlatformStore, previous: PlatformStore | null) {
-  const changes: Array<{ key: EntityKey; entity: Entity }> = [];
+  const changes: Array<{
+    key: Exclude<EntityKey, "activities">;
+    entity: Exclude<Entity, Activity>;
+    action: "created" | "updated" | "deleted";
+  }> = [];
   for (const key of entityKeys) {
+    if (key === "activities") continue;
     const before = new Map(
-      (previous?.[key] || []).map((entity) => [entity.id, JSON.stringify(entity)]),
+      (previous?.[key] || []).map((entity) => [entity.id, entity]),
     );
     for (const entity of next[key]) {
-      if (before.get(entity.id) !== JSON.stringify(entity)) {
-        changes.push({ key, entity });
+      const previousEntity = before.get(entity.id);
+      if (JSON.stringify(previousEntity) !== JSON.stringify(entity)) {
+        changes.push({
+          key,
+          entity,
+          action: previousEntity ? "updated" : "created",
+        });
       }
+      before.delete(entity.id);
+    }
+    for (const entity of before.values()) {
+      changes.push({ key, entity, action: "deleted" });
     }
   }
   return changes;
 }
 
-export async function savePlatformStore(next: PlatformStore) {
+const activityEntityNames = {
+  tickets: "קריאת שירות",
+  orders: "הזמנה",
+  tasks: "משימה",
+  machines: "מכונה",
+} as const;
+
+export async function savePlatformStore(next: PlatformStore, actor?: UserProfile) {
   const changes = changedEntities(next, lastSyncedStore);
   if (!changes.length) return;
 
   const { db } = getFirebaseServices();
   const batch = writeBatch(db);
-  for (const { key, entity } of changes) {
-    batch.set(
-      doc(db, "accounts", entity.accountId, key, entity.id),
-      entity,
-    );
+  for (const { key, entity, action } of changes) {
+    const entityRef = doc(db, "accounts", entity.accountId, key, entity.id);
+    if (action === "deleted") batch.delete(entityRef);
+    else batch.set(entityRef, withoutUndefined(entity));
+
+    if (actor && (actor.role === "admin" || actor.role === "service")) {
+      const activityRef = doc(collection(db, "accounts", entity.accountId, "activities"));
+      const actionLabel = action === "created" ? "נוצרה" : action === "deleted" ? "נמחקה" : "עודכנה";
+      batch.set(activityRef, {
+        id: activityRef.id,
+        accountId: entity.accountId,
+        entityType: key.slice(0, -1),
+        entityId: entity.id,
+        action,
+        summary: `${activityEntityNames[key]} ${actionLabel}`,
+        actorUid: actor.uid,
+        actorName: actor.displayName || actor.email,
+        createdAt: new Date().toISOString(),
+      });
+    }
   }
   await batch.commit();
   lastSyncedStore = next;
@@ -412,7 +470,7 @@ export function subscribeToSalesWorkspace(
 ): Unsubscribe {
   if (
     profile.status !== "active" ||
-    (profile.role !== "admin" && profile.role !== "service")
+    profile.role !== "admin"
   ) {
     onWorkspace({ leads: [], quotes: [] });
     return () => undefined;
@@ -453,6 +511,37 @@ export function subscribeToSalesWorkspace(
   return () => {
     unsubscribeLeads();
     unsubscribeQuotes();
+  };
+}
+
+export async function saveCustomer(customer: Customer) {
+  const { db } = getFirebaseServices();
+  await setDoc(doc(db, "accounts", customer.id), withoutUndefined(customer), {
+    merge: true,
+  });
+}
+
+export async function uploadTicketAttachment(
+  accountId: string,
+  ticketId: string,
+  file: File,
+) {
+  const { app } = getFirebaseServices();
+  const { getDownloadURL, getStorage, ref, uploadBytes } = await import(
+    "firebase/storage"
+  );
+  const storage = getStorage(app);
+  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_֐-׿]/g, "-");
+  const attachmentRef = ref(
+    storage,
+    `accounts/${accountId}/tickets/${ticketId}/${Date.now()}-${safeName}`,
+  );
+  await uploadBytes(attachmentRef, file, { contentType: file.type });
+  return {
+    name: file.name,
+    url: await getDownloadURL(attachmentRef),
+    type: file.type,
+    uploadedAt: new Date().toISOString(),
   };
 }
 
@@ -532,6 +621,10 @@ export async function convertQuoteToCustomer(
       monthlyKg: quote.knownKg || mainBlend?.quantityKg || 0,
       contractEnd: "",
       serviceLevel: "רגיל",
+      slaResponseHours: 4,
+      slaResolutionHours: 24,
+      onboardingStatus: "בהקמה",
+      notes: [],
       branches: [lead?.location || "סניף ראשי"],
       sourceLeadId: quote.leadId || "",
       sourceQuoteId: quote.id,
@@ -580,9 +673,40 @@ export async function convertQuoteToCustomer(
           location: "",
           lastService: "",
           nextService: "",
+          updatedAt: now,
         });
       }
     });
+
+  const monthlyKg = quote.knownKg || mainBlend?.quantityKg || 0;
+  const orderId = `order-${accountId}-${now.slice(0, 7)}`;
+  batch.set(doc(db, "accounts", accountId, "orders", orderId), {
+    id: orderId,
+    accountId,
+    month: now.slice(0, 7),
+    defaultKg: monthlyKg,
+    requestedKg: monthlyKg,
+    approvedKg: monthlyKg,
+    status: "ממתין לעדכון לקוח",
+    blend: mainBlend?.name || "טרם הוגדרה תערובת",
+    note: "",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const onboardingTaskId = `task-onboarding-${accountId}`;
+  batch.set(doc(db, "accounts", accountId, "tasks", onboardingTaskId), {
+    id: onboardingTaskId,
+    accountId,
+    title: "השלמת קליטת לקוח חדש",
+    type: "הקמת לקוח",
+    dueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+    priority: "גבוהה",
+    status: "פתוחה",
+    assignedTo: lead?.owner || quote.owner || "מנהל המערכת",
+    createdAt: now,
+    updatedAt: now,
+  });
 
   await batch.commit();
   return accountId;

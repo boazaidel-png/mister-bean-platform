@@ -1378,7 +1378,7 @@ export function QuotesWorkspace({
                           </div>
                           <div className="quote-version-actions">
                             <button onClick={() => setEditing(quote)}>
-                              <Pencil size={15} /> פתיחה
+                              <Pencil size={15} /> {!["טיוטה","בבדיקה"].includes(quote.status) ? "צפייה / גרסה חדשה" : "פתיחה"}
                             </button>
                             {quote.status !== "אושרה" && (
                               <button
@@ -1409,21 +1409,17 @@ export function QuotesWorkspace({
                                 {busyId === quote.id ? "מעדכן…" : "סימון כנדחתה"}
                               </button>
                             )}
-                            <button
-                              className="sales-danger"
-                              disabled={readOnly}
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `למחוק את "${quote.versionName}" עבור ${quote.clientName}?`,
-                                  )
-                                ) {
-                                  void onDeleteQuote(quote.id);
-                                }
-                              }}
-                            >
-                              <Trash2 size={15} />
-                            </button>
+                            {["טיוטה","בבדיקה"].includes(quote.status) && <button
+                                className="sales-danger"
+                                disabled={readOnly}
+                                onClick={() => {
+                                  if (window.confirm(`למחוק את "${quote.versionName}" עבור ${quote.clientName}?`)) {
+                                    void onDeleteQuote(quote.id);
+                                  }
+                                }}
+                              >
+                                <Trash2 size={15} />
+                              </button>}
                             {!quote.accountId && (
                               <button
                                 className="convert-button"
@@ -1972,6 +1968,7 @@ function QuoteModal({
   const [financedAmountManual, setFinancedAmountManual] = useState(false);
   const [recommendationBaseline, setRecommendationBaseline] =
     useState<Quote | null>(null);
+  const historical = ["נשלחה", "אושרה", "נדחתה"].includes(quote.status);
   const metrics = useMemo(() => quoteMetrics(draft), [draft]);
   const update = <K extends keyof Quote>(key: K, value: Quote[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
@@ -2174,7 +2171,9 @@ function QuoteModal({
         versionName: asCopy
           ? `${draft.versionName || "הצעה"} · עותק`
           : draft.versionName,
-        approvedAt,
+        status: asCopy && historical ? "טיוטה" : draft.status,
+        approvedAt: asCopy && historical ? undefined : approvedAt,
+        createdAt: asCopy ? now() : draft.createdAt,
         updatedAt: now(),
         savedAt: now(),
       });
@@ -2204,6 +2203,7 @@ function QuoteModal({
       onClose={onClose}
       wide
     >
+      {historical && <div className="quote-history-lock">הגרסה הזו נשמרה בהיסטוריה ולא תידרס. כל שינוי יישמר כגרסה חדשה.</div>}
       <div className="quote-stepper">
         {steps.map((label, index) => (
           <button
@@ -3229,15 +3229,15 @@ function QuoteModal({
                 disabled={readOnly || saving || !draft.clientName}
                 onClick={() => void submit(true)}
               >
-                שמור כגרסה חדשה
+                {historical ? "יצירת גרסה חדשה" : "שמור כגרסה חדשה"}
               </button>
-              <button
+              {!historical && <button
                 className="sales-primary"
                 disabled={readOnly || saving || !draft.clientName}
                 onClick={() => void submit(false)}
               >
                 {saving ? "שומר…" : "שמירת הצעה"}
-              </button>
+              </button>}
             </>
           )}
         </div>

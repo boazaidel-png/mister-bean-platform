@@ -1,0 +1,28 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function profile() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function activeUser() {
+      return request.auth != null && profile().status == 'active';
+    }
+
+    function isStaff() {
+      return activeUser() && profile().role in ['service', 'admin'];
+    }
+
+    function belongsToAccount(accountId) {
+      return activeUser() && accountId in profile().accountIds;
+    }
+
+    match /accounts/{accountId}/tickets/{ticketId}/{fileName} {
+      allow read: if isStaff() || belongsToAccount(accountId);
+      allow write: if (isStaff() || belongsToAccount(accountId))
+        && request.resource.size < 15 * 1024 * 1024
+        && request.resource.contentType.matches('(image|video)/.*');
+    }
+  }
+}

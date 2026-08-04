@@ -1,7 +1,12 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -13,6 +18,7 @@ const firebaseConfig = {
 };
 
 export const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
+let persistentDb: Firestore | null = null;
 
 export function getFirebaseServices() {
   if (!isFirebaseConfigured) {
@@ -20,11 +26,21 @@ export function getFirebaseServices() {
   }
 
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  if (!persistentDb) {
+    try {
+      persistentDb = initializeFirestore(app, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+    } catch {
+      persistentDb = getFirestore(app);
+    }
+  }
 
   return {
     app,
     auth: getAuth(app),
-    db: getFirestore(app),
-    storage: getStorage(app),
+    db: persistentDb,
   };
 }
