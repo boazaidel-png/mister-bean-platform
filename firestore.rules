@@ -71,11 +71,11 @@ service cloud.firestore {
     // The commercial workspace is internal. Leads and quotes share the same
     // authenticated staff identity as the service platform.
     match /leads/{leadId} {
-      allow read, create, update, delete: if isStaff();
+      allow read, create, update, delete: if isAdmin();
     }
 
     match /quotes/{quoteId} {
-      allow read, create, update, delete: if isStaff();
+      allow read, create, update, delete: if isAdmin();
     }
 
     // Staff dashboards use collection-group queries across every customer
@@ -96,13 +96,21 @@ service cloud.firestore {
       allow read: if isStaff();
     }
 
+    match /{path=**}/activities/{documentId} {
+      allow read: if isStaff();
+    }
+
     match /accounts/{accountId} {
       allow read: if isStaff() || belongsToAccount(accountId);
-      allow write: if isStaff();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (isStaff()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']));
 
       match /machines/{documentId} {
         allow read: if isStaff() || belongsToAccount(accountId);
-        allow write: if isStaff();
+        allow create, delete: if isAdmin();
+        allow update: if isStaff();
       }
 
       match /tickets/{documentId} {
@@ -119,6 +127,12 @@ service cloud.firestore {
 
       match /tasks/{documentId} {
         allow read, write: if isStaff();
+      }
+
+      match /activities/{documentId} {
+        allow read: if isStaff() || belongsToAccount(accountId);
+        allow create: if isStaff();
+        allow update, delete: if false;
       }
     }
   }

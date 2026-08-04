@@ -8,6 +8,9 @@ export type UserProfile = {
   accountIds: string[];
   status: "active" | "pending";
   createdAt: string;
+  phone?: string;
+  serviceRegion?: string;
+  skills?: string[];
 };
 
 export type PreviewContext = {
@@ -49,6 +52,18 @@ export type Customer = {
   sourceQuoteId?: string;
   conversionType?: "manual" | "approved-quote";
   createdAt?: string;
+  contractStart?: string;
+  onboardingStatus?: "טרם התחיל" | "בהקמה" | "מוכן להפעלה" | "הושלם";
+  slaResponseHours?: number;
+  slaResolutionHours?: number;
+  notes?: CustomerNote[];
+};
+
+export type CustomerNote = {
+  id: string;
+  text: string;
+  createdAt: string;
+  createdBy: string;
 };
 
 export type Machine = {
@@ -62,6 +77,18 @@ export type Machine = {
   location: string;
   lastService: string;
   nextService: string;
+  installedAt?: string;
+  warrantyEnd?: string;
+  updatedAt?: string;
+};
+
+export type TicketEvent = {
+  id: string;
+  type: "created" | "status" | "assignment" | "visit" | "note" | "closed";
+  label: string;
+  createdAt: string;
+  createdBy: string;
+  visibleToCustomer?: boolean;
 };
 
 export type Ticket = {
@@ -80,6 +107,24 @@ export type Ticket = {
   updatedAt: string;
   closedAt?: string;
   closeReason?: string;
+  assignedUid?: string;
+  responseDueAt?: string;
+  resolutionDueAt?: string;
+  firstResponseAt?: string;
+  scheduledAt?: string;
+  arrivedAt?: string;
+  workStartedAt?: string;
+  workSummary?: string;
+  partsUsed?: string[];
+  customerConfirmedBy?: string;
+  customerConfirmedAt?: string;
+  events?: TicketEvent[];
+  attachments?: Array<{
+    name: string;
+    url: string;
+    type: string;
+    uploadedAt: string;
+  }>;
 };
 
 export type Order = {
@@ -92,6 +137,8 @@ export type Order = {
   status: string;
   blend: string;
   note: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type Task = {
@@ -103,6 +150,22 @@ export type Task = {
   priority: string;
   status: string;
   assignedTo: string;
+  assignedUid?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  completedAt?: string;
+};
+
+export type Activity = {
+  id: string;
+  accountId: string;
+  entityType: "ticket" | "order" | "task" | "machine" | "customer";
+  entityId: string;
+  action: "created" | "updated" | "deleted";
+  summary: string;
+  actorUid: string;
+  actorName: string;
+  createdAt: string;
 };
 
 export type PlatformStore = {
@@ -110,6 +173,7 @@ export type PlatformStore = {
   orders: Order[];
   tasks: Task[];
   machines: Machine[];
+  activities: Activity[];
 };
 
 export type LeadPriority = "נמוכה" | "בינונית" | "גבוהה";
