@@ -45,6 +45,10 @@ export type Customer = {
   contractEnd: string;
   serviceLevel: string;
   branches: string[];
+  sourceLeadId?: string;
+  sourceQuoteId?: string;
+  conversionType?: "manual" | "approved-quote";
+  createdAt?: string;
 };
 
 export type Machine = {

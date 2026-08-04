@@ -45,6 +45,7 @@ import {
 import { parseLegacyWorkspace } from "@/lib/legacy-migration";
 import type {
   Lead,
+  Customer,
   LeadPriority,
   LeadStatus,
   Quote,
@@ -209,9 +210,11 @@ function Status({ children }: { children: string }) {
 function FlowStrip({
   leads,
   quotes,
+  customerCount,
 }: {
   leads: Lead[];
   quotes: Quote[];
+  customerCount?: number;
 }) {
   const won = quotes.filter((quote) => quote.status === "אושרה").length;
   return (
@@ -236,8 +239,8 @@ function FlowStrip({
         <span className="flow-icon">
           <Building2 size={18} />
         </span>
-        <b>{won}</b>
-        <small>עסקאות שאושרו</small>
+        <b>{customerCount ?? won}</b>
+        <small>{customerCount === undefined ? "עסקאות שאושרו" : "לקוחות פעילים"}</small>
       </div>
     </div>
   );
@@ -1080,6 +1083,10 @@ export function QuotesWorkspace({
   onDeleteQuote,
   onConvert,
   onOpenLeads,
+  initialQuote,
+  initialCustomer,
+  customerCount,
+  onInitialRequestConsumed,
 }: {
   workspace: SalesWorkspace;
   readOnly: boolean;
@@ -1087,10 +1094,30 @@ export function QuotesWorkspace({
   onDeleteQuote: (quoteId: string) => Promise<void>;
   onConvert: (quote: Quote, lead?: Lead) => Promise<string>;
   onOpenLeads: () => void;
+  initialQuote?: Quote | null;
+  initialCustomer?: Customer | null;
+  customerCount?: number;
+  onInitialRequestConsumed?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("הכל");
-  const [editing, setEditing] = useState<Quote | null>(null);
+  const [editing, setEditing] = useState<Quote | null>(() => {
+    if (initialQuote) return initialQuote;
+    if (!initialCustomer) return null;
+    return {
+      ...quoteFromLead(),
+      accountId: initialCustomer.id,
+      clientKey: initialCustomer.id,
+      clientName: initialCustomer.name,
+      contactName: initialCustomer.contactName,
+      phone: initialCustomer.phone,
+      email: initialCustomer.email,
+      location: initialCustomer.city,
+      clientRank: initialCustomer.rank,
+      knownKg: initialCustomer.monthlyKg,
+      owner: initialCustomer.owner,
+    };
+  });
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
   const [expandedClients, setExpandedClients] = useState<Set<string>>(
@@ -1179,7 +1206,7 @@ export function QuotesWorkspace({
           </button>
         </div>
       </div>
-      <FlowStrip leads={workspace.leads} quotes={workspace.quotes} />
+      <FlowStrip leads={workspace.leads} quotes={workspace.quotes} customerCount={customerCount} />
       <div className="sales-kpis">
         <SalesKpi
           label="טיוטות"
@@ -1347,14 +1374,23 @@ export function QuotesWorkspace({
                             >
                               <Trash2 size={15} />
                             </button>
-                            {quote.status === "אושרה" && !quote.accountId && (
+                            {!quote.accountId && (
                               <button
                                 className="convert-button"
                                 disabled={readOnly || busyId === quote.id}
-                                onClick={() => void convert(quote)}
+                                onClick={() => {
+                                  if (
+                                    quote.status === "אושרה" ||
+                                    window.confirm(
+                                      "ההצעה עדיין לא אושרה. להקים ללקוח כרטיס באופן ידני? סטטוס ההצעה ההיסטורית לא ישתנה.",
+                                    )
+                                  ) {
+                                    void convert(quote);
+                                  }
+                                }}
                               >
                                 <CheckCircle2 size={15} />
-                                {busyId === quote.id ? "מקים…" : "הקמת לקוח"}
+                                {busyId === quote.id ? "מקים…" : quote.status === "אושרה" ? "הקמת לקוח" : "הקמה ידנית"}
                               </button>
                             )}
                             {quote.accountId && (
@@ -1376,10 +1412,11 @@ export function QuotesWorkspace({
         <QuoteModal
           quote={editing}
           readOnly={readOnly}
-          onClose={() => setEditing(null)}
+          onClose={() => {setEditing(null);onInitialRequestConsumed?.();}}
           onSave={async (quote) => {
             await onSaveQuote(quote);
             setEditing(null);
+            onInitialRequestConsumed?.();
           }}
         />
       )}

@@ -967,3 +967,12 @@ body{background:
   .quote-version-row{grid-template-columns:1fr}
   .quote-version-row>.sales-status{justify-self:start}
 }
+
+.process-cycle{display:flex;align-items:center;gap:14px;padding:14px 18px;margin:0 0 18px;border:1px solid #d9e8e1;border-radius:16px;background:linear-gradient(135deg,#f4fbf7,#fff)}
+.process-cycle>div{display:grid;grid-template-columns:auto auto;align-items:center;gap:2px 8px;min-width:110px;padding:8px 12px;border-radius:12px;color:#557268}
+.process-cycle>div svg{grid-row:1/3;color:#278363}.process-cycle>div strong{font-size:18px;color:#193b2f}.process-cycle>div span{font-size:11px;font-weight:800}.process-cycle>div.active{background:#e4f4ec}.process-cycle>b{color:#8daf9f}.process-cycle>small{font-weight:700;color:#557268}
+.empty-customer-state{text-align:center;display:grid;justify-items:center;gap:8px;padding:46px 20px;color:#547066}.empty-customer-state svg{color:#278363}.empty-customer-state h2{margin:0;color:#1d382e}.empty-customer-state p{margin:0;max-width:480px}
+.inline-empty{padding:28px;text-align:center;color:#6c7e77}
+.customer-history-panel>header{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}.customer-history-panel>header h3,.customer-history-panel>header p{margin:0}.customer-history-panel>header p{margin-top:4px;color:#77857f;font-size:13px}
+.customer-history-list{display:grid;gap:8px}.customer-history-list>button,.customer-history-list>.history-static{width:100%;display:grid;grid-template-columns:minmax(180px,1fr) auto minmax(90px,.3fr) auto;align-items:center;gap:14px;padding:13px 14px;border:1px solid #e0e9e5;border-radius:12px;background:#fbfdfc;text-align:right;color:#25483b}.customer-history-list>button:hover{border-color:#9ecbb8;background:#f3faf6}.customer-history-list>button>div,.customer-history-list>.history-static>div{display:grid;gap:3px}.customer-history-list small{color:#7b8983}.customer-history-list b{color:#147154}
+@media(max-width:720px){.process-cycle{overflow-x:auto;gap:8px}.process-cycle>div{min-width:92px}.process-cycle>small{min-width:150px}.customer-history-panel>header{align-items:flex-start;flex-direction:column}.customer-history-list>button,.customer-history-list>.history-static{grid-template-columns:1fr auto}.customer-history-list>button>span,.customer-history-list>.history-static>span{grid-column:1}.customer-history-list>button>b{grid-column:2;grid-row:2}}

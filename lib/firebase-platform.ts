@@ -226,42 +226,6 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
   return profile;
 }
 
-export async function seedWorkspaceIfEmpty(
-  profile: UserProfile,
-  customers: Customer[],
-  seed: PlatformStore,
-) {
-  if (profile.role !== "admin" || profile.status !== "active") return;
-
-  const { db } = getFirebaseServices();
-  const firstAccount = await getDoc(doc(db, "accounts", customers[0].id));
-  if (firstAccount.exists()) return;
-
-  const batch = writeBatch(db);
-  for (const customer of customers) {
-    batch.set(doc(db, "accounts", customer.id), {
-      ...customer,
-      seededAt: new Date().toISOString(),
-    });
-  }
-
-  const subscribedKeys =
-    profile.role === "admin" || profile.role === "service"
-      ? entityKeys
-      : entityKeys.filter((key) => key !== "tasks");
-
-  for (const key of subscribedKeys) {
-    for (const entity of seed[key]) {
-      batch.set(
-        doc(db, "accounts", entity.accountId, key, entity.id),
-        entity,
-      );
-    }
-  }
-
-  await batch.commit();
-}
-
 function queryFor(
   key: EntityKey,
   profile: UserProfile,
@@ -395,6 +359,21 @@ export async function updateUserAccess(
   await updateDoc(doc(db, "users", uid), { role, accountIds, status });
 }
 
+const legacyDemoAccountIds = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"];
+
+export async function removeLegacyDemoCustomerData() {
+  const { db } = getFirebaseServices();
+  const batch = writeBatch(db);
+  for (const accountId of legacyDemoAccountIds) {
+    for (const key of entityKeys) {
+      const snapshot = await getDocs(collection(db, "accounts", accountId, key));
+      snapshot.docs.forEach((item) => batch.delete(item.ref));
+    }
+    batch.delete(doc(db, "accounts", accountId));
+  }
+  await batch.commit();
+}
+
 function changedEntities(next: PlatformStore, previous: PlatformStore | null) {
   const changes: Array<{ key: EntityKey; entity: Entity }> = [];
   for (const key of entityKeys) {
@@ -522,12 +501,13 @@ function accountIdForQuote(quote: Quote) {
   return `${readable || "customer"}-${quote.id.slice(-6).toLowerCase()}`;
 }
 
-export async function convertApprovedQuoteToCustomer(
+export async function convertQuoteToCustomer(
   quote: Quote,
   lead?: Lead,
+  options: { manual?: boolean } = {},
 ) {
-  if (quote.status !== "אושרה") {
-    throw new Error("אפשר להקים לקוח רק מהצעה שאושרה.");
+  if (quote.status !== "אושרה" && !options.manual) {
+    throw new Error("הקמה אוטומטית מתבצעת רק לאחר אישור הצעה.");
   }
 
   const { db } = getFirebaseServices();
@@ -555,13 +535,18 @@ export async function convertApprovedQuoteToCustomer(
       branches: [lead?.location || "סניף ראשי"],
       sourceLeadId: quote.leadId || "",
       sourceQuoteId: quote.id,
+      conversionType: options.manual ? "manual" : "approved-quote",
       createdAt: now,
     },
     { merge: true },
   );
   batch.set(
     doc(db, "quotes", quote.id),
-    { accountId, approvedAt: quote.approvedAt || now, updatedAt: now },
+    {
+      accountId,
+      ...(quote.status === "אושרה" ? { approvedAt: quote.approvedAt || now } : {}),
+      updatedAt: now,
+    },
     { merge: true },
   );
   if (lead) {
