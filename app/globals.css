@@ -866,6 +866,9 @@ body{background:
   cursor:pointer;
 }
 .quote-version-actions .convert-button{background:#176f53;border-color:#176f53;color:#fff}
+.quote-version-actions .quote-decision.approve{background:#e8f6ef;border-color:#b9dfcd;color:#176f53}
+.quote-version-actions .quote-decision.reject{background:#fff1ef;border-color:#efcbc7;color:#aa423c}
+.quote-version-actions button:disabled{opacity:.55;cursor:not-allowed}
 .sales-form>footer .lead-to-quote-button{
   margin-left:auto;
   background:#176f53!important;

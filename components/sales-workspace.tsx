@@ -1186,6 +1186,27 @@ export function QuotesWorkspace({
     }
   };
 
+  const decideQuote = async (quote: Quote, nextStatus: "אושרה" | "נדחתה") => {
+    setBusyId(quote.id);
+    setMessage("");
+    try {
+      const changedAt = now();
+      await onSaveQuote({
+        ...quote,
+        status: nextStatus,
+        updatedAt: changedAt,
+        ...(nextStatus === "אושרה" ? { approvedAt: quote.approvedAt || changedAt } : {}),
+      });
+      setMessage(
+        nextStatus === "אושרה"
+          ? "ההצעה סומנה כאושרה. כרטיס הלקוח הוקם או עודכן אוטומטית."
+          : "ההצעה סומנה כנדחתה.",
+      );
+    } finally {
+      setBusyId("");
+    }
+  };
+
   return (
     <div className="sales-workspace">
       <div className="sales-page-head">
@@ -1359,6 +1380,35 @@ export function QuotesWorkspace({
                             <button onClick={() => setEditing(quote)}>
                               <Pencil size={15} /> פתיחה
                             </button>
+                            {quote.status !== "אושרה" && (
+                              <button
+                                className="quote-decision approve"
+                                disabled={readOnly || busyId === quote.id}
+                                onClick={() => void decideQuote(quote, "אושרה")}
+                              >
+                                <CheckCircle2 size={15} />
+                                {busyId === quote.id ? "מעדכן…" : "סימון כאושרה"}
+                              </button>
+                            )}
+                            {quote.status !== "נדחתה" && (
+                              <button
+                                className="quote-decision reject"
+                                disabled={readOnly || busyId === quote.id}
+                                onClick={() => {
+                                  if (
+                                    !quote.accountId ||
+                                    window.confirm(
+                                      "כבר קיים כרטיס לקוח משויך. סימון ההצעה כנדחתה לא ימחק את כרטיס הלקוח. להמשיך?",
+                                    )
+                                  ) {
+                                    void decideQuote(quote, "נדחתה");
+                                  }
+                                }}
+                              >
+                                <X size={15} />
+                                {busyId === quote.id ? "מעדכן…" : "סימון כנדחתה"}
+                              </button>
+                            )}
                             <button
                               className="sales-danger"
                               disabled={readOnly}
