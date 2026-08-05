@@ -6,48 +6,73 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function hasProfile() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function userProfile() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
     function isStaff() {
-      return signedIn()
+      return hasProfile()
         && userProfile().status == 'active'
         && userProfile().role in ['service', 'admin'];
     }
 
     function isAdmin() {
-      return signedIn()
+      return hasProfile()
         && userProfile().status == 'active'
         && userProfile().role == 'admin';
     }
 
     function belongsToAccount(accountId) {
-      return signedIn()
+      return hasProfile()
         && userProfile().status == 'active'
         && accountId in userProfile().accountIds;
+    }
+
+    function shortString(value, maxLength) {
+      return value is string && value.size() <= maxLength;
+    }
+
+    function validUserProfile(data, userId) {
+      return data.keys().hasOnly([
+          'uid', 'email', 'displayName', 'role', 'accountIds', 'status',
+          'createdAt', 'phone', 'serviceRegion', 'skills'
+        ])
+        && data.uid == userId
+        && shortString(data.email, 320)
+        && shortString(data.displayName, 160)
+        && data.role in ['customer', 'multi', 'service', 'admin']
+        && data.status in ['active', 'pending']
+        && data.accountIds is list
+        && data.accountIds.size() <= 50
+        && shortString(data.createdAt, 40)
+        && shortString(data.get('phone', ''), 40)
+        && shortString(data.get('serviceRegion', ''), 120)
+        && data.get('skills', []) is list
+        && data.get('skills', []).size() <= 30;
+    }
+
+    function isBootstrapAdminEmail() {
+      return request.auth.token.email in [
+        'boazaidel@gmail.com',
+        'boaz@pacifictrade.co'
+      ];
     }
 
     function validSelfRegistration(userId) {
       return signedIn()
         && request.auth.uid == userId
-        && request.resource.data.uid == userId
+        && request.auth.token.email != null
         && request.resource.data.email == request.auth.token.email
-        && request.resource.data.keys().hasOnly([
-          'uid',
-          'email',
-          'displayName',
-          'role',
-          'accountIds',
-          'status',
-          'createdAt'
-        ])
+        && validUserProfile(request.resource.data, userId)
         && (
           (
-            request.auth.token.email in [
-              'boazaidel@gmail.com',
-              'boaz@pacifictrade.co'
-            ]
+            isBootstrapAdminEmail()
+            && request.auth.token.email_verified == true
             && request.resource.data.role == 'admin'
             && request.resource.data.status == 'active'
             && request.resource.data.accountIds.size() == 0
@@ -61,9 +86,23 @@ service cloud.firestore {
         );
     }
 
+    function validBootstrapAdminUpdate(userId) {
+      return signedIn()
+        && request.auth.uid == userId
+        && isBootstrapAdminEmail()
+        && request.auth.token.email_verified == true
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role == 'admin'
+        && request.resource.data.status == 'active'
+        && request.resource.data.accountIds.size() == 0
+        && request.resource.data.createdAt == resource.data.createdAt
+        && validUserProfile(request.resource.data, userId);
+    }
+
     function hasReadyInvite() {
       return signedIn()
         && request.auth.token.email != null
+        && request.auth.token.email_verified == true
         && exists(/databases/$(database)/documents/accessInvites/$(request.auth.token.email))
         && get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.status == 'ready'
         && get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.email == request.auth.token.email;
@@ -72,128 +111,226 @@ service cloud.firestore {
     function validInvitedProfile(userId) {
       return hasReadyInvite()
         && request.auth.uid == userId
-        && request.resource.data.uid == userId
         && request.resource.data.email == request.auth.token.email
-        && request.resource.data.keys().hasOnly([
-          'uid',
-          'email',
-          'displayName',
-          'role',
-          'accountIds',
-          'status',
-          'createdAt'
-        ])
         && request.resource.data.role == get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.role
         && request.resource.data.status == 'active'
         && request.resource.data.accountIds.size() == 1
-        && request.resource.data.accountIds[0] == get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.accountId;
+        && request.resource.data.accountIds[0] == get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.accountId
+        && validUserProfile(request.resource.data, userId);
     }
 
-    function validInviteAcceptance() {
+    function validInviteDocument(data, inviteEmail) {
+      return data.keys().hasOnly([
+          'email', 'accountId', 'customerName', 'role', 'status', 'createdAt',
+          'updatedAt', 'createdBy', 'sourceQuoteId', 'acceptedAt', 'acceptedByUid'
+        ])
+        && data.email == inviteEmail
+        && shortString(data.email, 320)
+        && shortString(data.accountId, 160)
+        && shortString(data.customerName, 300)
+        && data.role in ['customer', 'multi']
+        && data.status in ['ready', 'accepted', 'revoked']
+        && shortString(data.createdAt, 40)
+        && shortString(data.updatedAt, 40)
+        && shortString(data.createdBy, 160)
+        && shortString(data.get('sourceQuoteId', ''), 160)
+        && shortString(data.get('acceptedAt', ''), 40)
+        && shortString(data.get('acceptedByUid', ''), 160)
+        && existsAfter(/databases/$(database)/documents/accounts/$(data.accountId));
+    }
+
+    function validInviteAcceptance(inviteEmail) {
       return signedIn()
-        && request.auth.token.email != null
-        && resource.data.email == request.auth.token.email
+        && request.auth.token.email == inviteEmail
+        && request.auth.token.email_verified == true
         && resource.data.status == 'ready'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status',
-          'updatedAt',
-          'acceptedAt',
-          'acceptedByUid'
+          'status', 'updatedAt', 'acceptedAt', 'acceptedByUid'
         ])
         && request.resource.data.status == 'accepted'
-        && request.resource.data.acceptedByUid == request.auth.uid;
+        && request.resource.data.acceptedByUid == request.auth.uid
+        && validInviteDocument(request.resource.data, inviteEmail);
+    }
+
+    function validAccount(data, accountId) {
+      return data.id == accountId
+        && shortString(data.name, 300)
+        && shortString(data.get('email', ''), 320)
+        && data.get('branches', []) is list
+        && data.get('branches', []).size() <= 100
+        && data.get('notes', []) is list
+        && data.get('notes', []).size() <= 250;
+    }
+
+    function validMachine(data, documentId, accountId) {
+      return data.id == documentId
+        && data.accountId == accountId
+        && shortString(data.model, 300)
+        && shortString(data.serial, 160)
+        && shortString(data.status, 80);
+    }
+
+    function validTicket(data, documentId, accountId) {
+      return data.id == documentId
+        && data.accountId == accountId
+        && shortString(data.site, 300)
+        && shortString(data.get('machineId', ''), 160)
+        && shortString(data.type, 160)
+        && shortString(data.urgency, 40)
+        && shortString(data.status, 80)
+        && shortString(data.description, 5000)
+        && shortString(data.get('contact', ''), 160)
+        && shortString(data.get('phone', ''), 40)
+        && data.get('attachments', []) is list
+        && data.get('attachments', []).size() <= 4
+        && data.get('events', []) is list
+        && data.get('events', []).size() <= 200;
+    }
+
+    function validCustomerTicketCreate(data, documentId, accountId) {
+      return validTicket(data, documentId, accountId)
+        && data.status == 'התקבלה'
+        && data.get('assignedUid', '') == ''
+        && data.get('assignedTo', '') == 'טרם הוקצה'
+        && data.get('events', []).size() <= 5;
+    }
+
+    function validOrder(data, documentId, accountId) {
+      return data.id == documentId
+        && data.accountId == accountId
+        && data.defaultKg is number
+        && data.requestedKg is number
+        && data.approvedKg is number
+        && data.defaultKg >= 0 && data.defaultKg <= 10000
+        && data.requestedKg >= 0 && data.requestedKg <= 10000
+        && data.approvedKg >= 0 && data.approvedKg <= 10000
+        && shortString(data.blend, 160)
+        && shortString(data.note, 2000)
+        && shortString(data.status, 80);
+    }
+
+    function validCustomerOrderUpdate(documentId, accountId) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'requestedKg', 'blend', 'note', 'status', 'updatedAt'
+        ])
+        && request.resource.data.status == 'ממתין לאישור'
+        && validOrder(request.resource.data, documentId, accountId);
+    }
+
+    function validTask(data, documentId, accountId) {
+      return data.id == documentId
+        && data.accountId == accountId
+        && shortString(data.title, 500)
+        && shortString(data.status, 80);
+    }
+
+    function validActivity(data, documentId, accountId) {
+      return data.id == documentId
+        && data.accountId == accountId
+        && data.actorUid == request.auth.uid
+        && shortString(data.summary, 500)
+        && data.action in ['created', 'updated', 'deleted'];
     }
 
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isStaff());
       allow create: if validSelfRegistration(userId) || validInvitedProfile(userId);
-      allow update: if isAdmin()
-        || validSelfRegistration(userId)
+      allow update: if (
+          isAdmin()
+          && request.resource.data.email == resource.data.email
+          && request.resource.data.createdAt == resource.data.createdAt
+          && validUserProfile(request.resource.data, userId)
+        )
+        || validBootstrapAdminUpdate(userId)
         || (
           resource.data.status == 'pending'
           && resource.data.role == 'customer'
           && resource.data.accountIds.size() == 0
           && validInvitedProfile(userId)
         );
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() && request.auth.uid != userId;
     }
 
     match /accessInvites/{inviteEmail} {
       allow read: if isAdmin()
-        || (
-          signedIn()
-          && request.auth.token.email != null
-          && inviteEmail == request.auth.token.email
-          && resource.data.email == request.auth.token.email
-        );
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin() || validInviteAcceptance();
+        || (signedIn() && request.auth.token.email == inviteEmail);
+      allow create, update: if isAdmin()
+        && validInviteDocument(request.resource.data, inviteEmail);
+      allow update: if validInviteAcceptance(inviteEmail);
+      allow delete: if isAdmin();
     }
 
-    // The commercial workspace is internal. Leads and quotes share the same
-    // authenticated staff identity as the service platform.
     match /leads/{leadId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.id == leadId
+        && shortString(request.resource.data.company, 300)
+        && shortString(request.resource.data.get('notes', ''), 10000);
     }
 
     match /quotes/{quoteId} {
-      allow read, create, update, delete: if isAdmin();
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && request.resource.data.id == quoteId
+        && shortString(request.resource.data.clientName, 300)
+        && shortString(request.resource.data.get('notes', ''), 10000);
     }
 
-    // Staff dashboards use collection-group queries across every customer
-    // account. These explicit rules keep that access limited to active staff.
-    match /{path=**}/machines/{documentId} {
-      allow read: if isStaff();
-    }
-
-    match /{path=**}/tickets/{documentId} {
-      allow read: if isStaff();
-    }
-
-    match /{path=**}/orders/{documentId} {
-      allow read: if isStaff();
-    }
-
-    match /{path=**}/tasks/{documentId} {
-      allow read: if isStaff();
-    }
-
-    match /{path=**}/activities/{documentId} {
-      allow read: if isStaff();
-    }
+    match /{path=**}/machines/{documentId} { allow read: if isStaff(); }
+    match /{path=**}/tickets/{documentId} { allow read: if isStaff(); }
+    match /{path=**}/orders/{documentId} { allow read: if isStaff(); }
+    match /{path=**}/tasks/{documentId} { allow read: if isStaff(); }
+    match /{path=**}/activities/{documentId} { allow read: if isStaff(); }
 
     match /accounts/{accountId} {
       allow read: if isStaff() || belongsToAccount(accountId);
-      allow create, delete: if isAdmin();
-      allow update: if isAdmin()
-        || (isStaff()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']));
+      allow create: if isAdmin() && validAccount(request.resource.data, accountId);
+      allow update: if (
+          isAdmin()
+          || (isStaff()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes']))
+        )
+        && validAccount(request.resource.data, accountId);
+      allow delete: if isAdmin();
 
       match /machines/{documentId} {
         allow read: if isStaff() || belongsToAccount(accountId);
-        allow create, delete: if isAdmin();
-        allow update: if isStaff();
+        allow create, update: if isStaff()
+          && validMachine(request.resource.data, documentId, accountId);
+        allow delete: if isAdmin();
       }
 
       match /tickets/{documentId} {
         allow read: if isStaff() || belongsToAccount(accountId);
-        allow create: if isStaff() || belongsToAccount(accountId);
-        allow update, delete: if isStaff();
+        allow create: if isStaff()
+          && validTicket(request.resource.data, documentId, accountId);
+        allow create: if belongsToAccount(accountId)
+          && validCustomerTicketCreate(request.resource.data, documentId, accountId);
+        allow update: if isStaff()
+          && validTicket(request.resource.data, documentId, accountId);
+        allow delete: if isAdmin();
       }
 
       match /orders/{documentId} {
         allow read: if isStaff() || belongsToAccount(accountId);
-        allow create, update: if isStaff() || belongsToAccount(accountId);
-        allow delete: if isStaff();
+        allow create, update: if isStaff()
+          && validOrder(request.resource.data, documentId, accountId);
+        allow update: if belongsToAccount(accountId)
+          && validCustomerOrderUpdate(documentId, accountId);
+        allow delete: if isAdmin();
       }
 
       match /tasks/{documentId} {
-        allow read, write: if isStaff();
+        allow read: if isStaff();
+        allow create, update: if isStaff()
+          && validTask(request.resource.data, documentId, accountId);
+        allow delete: if isAdmin();
       }
 
       match /activities/{documentId} {
         allow read: if isStaff() || belongsToAccount(accountId);
-        allow create: if isStaff();
+        allow create: if isStaff()
+          && validActivity(request.resource.data, documentId, accountId);
         allow update, delete: if false;
       }
     }

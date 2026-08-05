@@ -33,6 +33,7 @@ import {
   getOrCreateUserProfile,
   importSalesWorkspace,
   linkPasswordToCurrentUser,
+  loadTicketAttachment,
   observeAuth,
   resetPassword,
   savePlatformStore,
@@ -70,6 +71,7 @@ import {
   isTicketSlaBreached,
   nextTechnicianStatus,
 } from "@/lib/service-engine";
+import { passwordSecurityError, validateTicketFiles } from "@/lib/security";
 
 const SalesWorkspaceLoading = () => (
   <div className="workspace-loading" role="status" aria-live="polite">
@@ -244,6 +246,22 @@ export default function Home() {
     if(!storeReady||!profile||profile.status!=="active"||preview)return;
     void savePlatformStore(store,profile).catch(error=>setSyncError(firebaseMessage(error)));
   },[store,storeReady,profile,preview]);
+  useEffect(()=>{
+    if(!profile||profile.status!=="active")return;
+    const timeoutMs=["admin","service"].includes(profile.role)?2*60*60*1000:12*60*60*1000;
+    let timer=0;
+    const reset=()=>{
+      window.clearTimeout(timer);
+      timer=window.setTimeout(()=>{
+        setAuthError("החיבור נותק לאחר זמן ממושך ללא פעילות. יש להתחבר מחדש.");
+        void signOutUser();
+      },timeoutMs);
+    };
+    const events=["pointerdown","keydown","touchstart"] as const;
+    events.forEach(event=>window.addEventListener(event,reset));
+    reset();
+    return()=>{window.clearTimeout(timer);events.forEach(event=>window.removeEventListener(event,reset));};
+  },[profile]);
   useEffect(()=>{ if(toast){ const t=setTimeout(()=>setToast(""),2800); return()=>clearTimeout(t); } },[toast]);
   useEffect(()=>{
     if(!mobileOpen)return;
@@ -477,7 +495,7 @@ function firebaseMessage(error:unknown){
   if(message.includes("auth/web-storage-unsupported"))return "הדפדפן חוסם שמירת התחברות. יש לפתוח את המערכת ב־Safari או Chrome רגיל ולא מתוך דפדפן פנימי.";
   if(message.includes("auth/operation-not-supported-in-this-environment"))return "הדפדפן הנוכחי אינו תומך בכניסה מאובטחת. יש לפתוח את הקישור ישירות ב־Safari או Chrome.";
   if(message.includes("auth/unauthorized-domain"))return "כתובת האתר עדיין לא אושרה להתחברות ב־Firebase.";
-  if(message.includes("auth/weak-password"))return "יש לבחור סיסמה חזקה יותר, באורך 8 תווים לפחות.";
+  if(message.includes("auth/weak-password"))return "יש לבחור סיסמה חזקה יותר, באורך 12 תווים לפחות וכוללת אות ומספר.";
   if(message.includes("auth/provider-already-linked"))return "כניסה עם סיסמה כבר מוגדרת לחשבון הזה.";
   if(message.includes("auth/credential-already-in-use")||message.includes("auth/email-already-in-use"))return "כתובת המייל כבר משויכת לחשבון אחר. יש לפנות למנהל המערכת.";
   if(message.includes("auth/requires-recent-login"))return "מטעמי אבטחה יש להתנתק, להתחבר שוב עם Google ולנסות שנית.";
@@ -651,7 +669,8 @@ function PasswordSetupModal({email,onClose,onSave}:{email:string;onClose:()=>voi
   const [busy,setBusy]=useState(false);
   const submit=async(event:FormEvent<HTMLFormElement>)=>{
     event.preventDefault();
-    if(password.length<8){setError("יש לבחור סיסמה באורך 8 תווים לפחות.");return;}
+    const securityError=passwordSecurityError(password);
+    if(securityError){setError(securityError);return;}
     if(password!==confirmation){setError("הסיסמאות אינן זהות.");return;}
     setBusy(true);setError("");
     try{await onSave(password);}catch(nextError){setError(firebaseMessage(nextError));setBusy(false);}
@@ -659,8 +678,8 @@ function PasswordSetupModal({email,onClose,onSave}:{email:string;onClose:()=>voi
   return <Modal title="הגדרת כניסה עם סיסמה" onClose={onClose}><form className="modal-form password-setup" onSubmit={submit}>
     <div className="password-setup-note"><KeyRound size={20}/><div><strong>אפשרות כניסה נוספת</strong><p>לאחר ההגדרה יהיה אפשר להתחבר לאותו חשבון גם באמצעות Google וגם באמצעות מייל וסיסמה.</p></div></div>
     <label><span>כתובת המייל</span><input type="email" value={email} disabled/></label>
-    <label><span>סיסמה חדשה</span><input type="password" value={password} onChange={event=>setPassword(event.target.value)} minLength={8} required autoComplete="new-password" placeholder="8 תווים לפחות"/></label>
-    <label><span>אימות הסיסמה</span><input type="password" value={confirmation} onChange={event=>setConfirmation(event.target.value)} minLength={8} required autoComplete="new-password" placeholder="הקלדה חוזרת"/></label>
+    <label><span>סיסמה חדשה</span><input type="password" value={password} onChange={event=>setPassword(event.target.value)} minLength={12} required autoComplete="new-password" placeholder="12 תווים, כולל אות ומספר"/></label>
+    <label><span>אימות הסיסמה</span><input type="password" value={confirmation} onChange={event=>setConfirmation(event.target.value)} minLength={12} required autoComplete="new-password" placeholder="הקלדה חוזרת"/></label>
     {error&&<div className="auth-error">{error}</div>}
     <footer><button type="button" onClick={onClose} disabled={busy}>ביטול</button><button className="primary" type="submit" disabled={busy}>{busy?"מגדיר…":"הפעלת כניסה עם סיסמה"}</button></footer>
   </form></Modal>;
@@ -680,7 +699,30 @@ function TicketModal({customers,accountId,allowAccountChange,preselectedMachine,
     const deadlines=calculateTicketDeadlines(customer,urgency,openedAt);
     onSave({id:ticketId,accountId:customer.id,site:String(f.get("site")),machineId,type:String(f.get("type")),urgency,status:"התקבלה",description:String(f.get("description")),contact:String(f.get("contact")),phone:String(f.get("phone")),assignedTo:"טרם הוקצה",assignedUid:"",openedAt:openedAt.toISOString(),updatedAt:openedAt.toISOString(),...deadlines,attachments,events:[{id:createId("event"),type:"created",label:"קריאת השירות נפתחה",createdAt:openedAt.toISOString(),createdBy:String(f.get("contact"))||"לקוח",visibleToCustomer:true}]});
   };
-  return <Modal title="פתיחת קריאת שירות" onClose={onClose}><form onSubmit={event=>void submit(event)} className="modal-form">{allowAccountChange?<label className="account-picker"><span>לקוח</span><select value={activeAccount} onChange={e=>setActiveAccount(e.target.value)}>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>:<div className="customer-context"><span className="customer-avatar">{customer.name.slice(0,2)}</span><div><small>עבור</small><strong>{customer.name}</strong></div></div>}<div className="form-grid"><label><span>סניף</span><select name="site" required key={`site-${activeAccount}`}>{customer.branches.map(b=><option key={b}>{b}</option>)}</select></label><label><span>מכונה</span><select name="machine" defaultValue={preselectedMachine} key={`machine-${activeAccount}`}><option value="">בעיה כללית</option>{available.map(m=><option key={m.id} value={m.id}>{m.model} · {m.serial}</option>)}</select></label><label><span>סוג תקלה</span><select name="type">{["נזילה","המכונה לא נדלקת","קפה יוצא חלש","אין חימום","בעיית טחינה","בעיית חלב / מקציף","דרוש ניקוי","תקלה חוזרת","בקשת הדרכה"].map(x=><option key={x}>{x}</option>)}</select></label><label><span>השפעה על הפעילות</span><select name="urgency"><option>רגילה</option><option>גבוהה</option><option>דחופה</option></select></label><label className="full"><span>תיאור הבעיה</span><textarea name="description" required placeholder="מה קרה, מתי התחילה הבעיה וכיצד היא משפיעה על העבודה?"/></label><label className="full ticket-files"><span>תמונות או סרטון קצר</span><input type="file" accept="image/*,video/*" multiple onChange={event=>setFiles(Array.from(event.target.files||[]).slice(0,4))}/><small>{files.length?`${files.length} קבצים מוכנים להעלאה`:"עד 4 קבצים, לצורך אבחון מהיר"}</small></label><label><span>איש קשר</span><input name="contact" key={`contact-${activeAccount}`} defaultValue={customer.contactName}/></label><label><span>טלפון לחזרה</span><input name="phone" key={`phone-${activeAccount}`} defaultValue={customer.phone}/></label></div>{uploadError&&<div className="auth-error">{uploadError}<button type="button" onClick={()=>{setFiles([]);setUploadError("");}}>פתיחת הקריאה ללא קבצים</button></div>}<footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" type="submit" disabled={uploading}>{uploading?"מעלה ופותח…":"פתיחת הקריאה"}</button></footer></form></Modal>
+  const selectFiles=(event:React.ChangeEvent<HTMLInputElement>)=>{
+    const selected=Array.from(event.target.files||[]);
+    const error=validateTicketFiles(selected);
+    setUploadError(error);
+    setFiles(error?[]:selected);
+    if(error)event.target.value="";
+  };
+  return <Modal title="פתיחת קריאת שירות" onClose={onClose}>
+    <form onSubmit={event=>void submit(event)} className="modal-form">
+      {allowAccountChange?<label className="account-picker"><span>לקוח</span><select value={activeAccount} onChange={e=>setActiveAccount(e.target.value)}>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>:<div className="customer-context"><span className="customer-avatar">{customer.name.slice(0,2)}</span><div><small>עבור</small><strong>{customer.name}</strong></div></div>}
+      <div className="form-grid">
+        <label><span>סניף</span><select name="site" required key={`site-${activeAccount}`}>{customer.branches.map(b=><option key={b}>{b}</option>)}</select></label>
+        <label><span>מכונה</span><select name="machine" defaultValue={preselectedMachine} key={`machine-${activeAccount}`}><option value="">בעיה כללית</option>{available.map(m=><option key={m.id} value={m.id}>{m.model} · {m.serial}</option>)}</select></label>
+        <label><span>סוג תקלה</span><select name="type">{["נזילה","המכונה לא נדלקת","קפה יוצא חלש","אין חימום","בעיית טחינה","בעיית חלב / מקציף","דרוש ניקוי","תקלה חוזרת","בקשת הדרכה"].map(x=><option key={x}>{x}</option>)}</select></label>
+        <label><span>השפעה על הפעילות</span><select name="urgency"><option>רגילה</option><option>גבוהה</option><option>דחופה</option></select></label>
+        <label className="full"><span>תיאור הבעיה</span><textarea name="description" required maxLength={5000} placeholder="מה קרה, מתי התחילה הבעיה וכיצד היא משפיעה על העבודה?"/></label>
+        <label className="full ticket-files"><span>תמונות או סרטון קצר</span><input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,video/mp4,video/quicktime,video/webm" multiple onChange={selectFiles}/><small>{files.length?`${files.length} קבצים מוכנים להעלאה`:"עד 4 קבצים; תמונה עד 8MB, סרטון עד 15MB"}</small></label>
+        <label><span>איש קשר</span><input name="contact" maxLength={160} key={`contact-${activeAccount}`} defaultValue={customer.contactName}/></label>
+        <label><span>טלפון לחזרה</span><input name="phone" maxLength={40} key={`phone-${activeAccount}`} defaultValue={customer.phone}/></label>
+      </div>
+      {uploadError&&<div className="auth-error">{uploadError}<button type="button" onClick={()=>{setFiles([]);setUploadError("");}}>פתיחת הקריאה ללא קבצים</button></div>}
+      <footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" type="submit" disabled={uploading}>{uploading?"מעלה ופותח…":"פתיחת הקריאה"}</button></footer>
+    </form>
+  </Modal>
 }
 function TaskModal({customers,staffUsers,accountId,onClose,onSave}:{customers:Customer[];staffUsers:UserProfile[];accountId:string;onClose:()=>void;onSave:(t:Task)=>void}) {
   const submit=(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const f=new FormData(e.currentTarget),assignedUid=String(f.get("assignee")),assignee=staffUsers.find(user=>user.uid===assignedUid),createdAt=new Date().toISOString();onSave({id:createId("task"),accountId:String(f.get("account")),title:String(f.get("title")),type:String(f.get("type")),dueDate:String(f.get("date")),priority:String(f.get("priority")),status:"פתוחה",assignedUid,assignedTo:assignee?.displayName||"טרם הוקצה",createdAt,updatedAt:createdAt})};
@@ -704,11 +746,25 @@ function NewCustomerModal({onClose,onSave}:{onClose:()=>void;onSave:(customer:Cu
   return <Modal title="הקמת לקוח חדש" onClose={onClose}><form className="modal-form" onSubmit={submit}><div className="password-setup-note"><Building2 size={20}/><div><strong>הקמה ידנית</strong><p>אפשר להתחיל בכרטיס בסיסי ולהשלים את החוזה, המכונות וההזמנה בתהליך הקליטה.</p></div></div><div className="form-grid"><label><span>שם הלקוח</span><input name="name" required/></label><label><span>דירוג</span><select name="rank"><option>רגיל</option><option>זהב</option><option>אסטרטגי</option></select></label><label><span>איש קשר</span><input name="contact"/></label><label><span>טלפון</span><input name="phone"/></label><label><span>דוא״ל</span><input type="email" name="email"/></label><label><span>מנהל לקוח</span><input name="owner" defaultValue="מנהל המערכת"/></label><label><span>עיר</span><input name="city"/></label><label><span>כתובת</span><input name="address"/></label><label><span>סניף ראשון</span><input name="branch" defaultValue="סניף ראשי"/></label><label><span>ק״ג חודשי משוער</span><input type="number" min="0" name="monthlyKg" defaultValue="0"/></label></div><footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" disabled={saving}>{saving?"מקים…":"הקמת לקוח"}</button></footer></form></Modal>;
 }
 
+function TicketAttachment({attachment}:{attachment:NonNullable<Ticket["attachments"]>[number]}) {
+  const [secureUrl,setSecureUrl]=useState(attachment.url||"");
+  useEffect(()=>{
+    if(!attachment.storagePath)return;
+    let active=true,objectUrl="";
+    void loadTicketAttachment(attachment.storagePath)
+      .then(url=>{objectUrl=url;if(active)setSecureUrl(url);})
+      .catch(()=>{if(active)setSecureUrl("");});
+    return()=>{active=false;if(objectUrl)URL.revokeObjectURL(objectUrl);};
+  },[attachment.storagePath]);
+  if(!secureUrl)return <div className="attachment-loading"><span>🔒</span><small>{attachment.name}</small></div>;
+  // Authenticated objects are rendered from short-lived local blob URLs.
+  // eslint-disable-next-line @next/next/no-img-element
+  return <a href={secureUrl} target="_blank" rel="noopener noreferrer">{attachment.type.startsWith("image/")?<img src={secureUrl} alt={attachment.name}/>:<span>▶</span>}<small>{attachment.name}</small></a>;
+}
+
 function TicketDetailModal({ticket,machine,onClose}:{ticket:Ticket;machine?:Machine;onClose:()=>void}) {
   const customerName=useCustomerName();
   if(!ticket) return null;
   const events=ticket.events?.length?ticket.events:[{id:"opened",type:"created" as const,label:"קריאת השירות נפתחה",createdAt:ticket.openedAt,createdBy:ticket.contact,visibleToCustomer:true},{id:"updated",type:"status" as const,label:`סטטוס: ${ticket.status}`,createdAt:ticket.updatedAt,createdBy:ticket.assignedTo,visibleToCustomer:true}];
-  // Firebase Storage URLs are dynamic evidence thumbnails.
-  // eslint-disable-next-line @next/next/no-img-element
-  return <Modal title={`קריאה ${ticket.id}`} onClose={onClose}><div className="ticket-detail"><div className="detail-summary"><div><small>לקוח</small><strong>{customerName(ticket.accountId)}</strong></div><div><small>מכונה</small><strong>{machine?.model||"בעיה כללית"}</strong></div><div><small>דחיפות</small><Badge>{ticket.urgency}</Badge></div><div><small>סטטוס</small><Badge>{ticket.status}</Badge></div><div><small>אחראי</small><strong>{ticket.assignedTo}</strong></div><div><small>יעד פתרון</small><strong>{formatDateTime(ticket.resolutionDueAt||"")}</strong></div></div><section><h3>{ticket.type}</h3><p>{ticket.description}</p></section>{ticket.attachments?.length?<section className="ticket-attachments"><h3>תמונות וקבצים</h3><div>{ticket.attachments.map(attachment=><a href={attachment.url} target="_blank" rel="noreferrer" key={attachment.url}>{attachment.type.startsWith("image/")?<img src={attachment.url} alt={attachment.name}/>:<span>▶</span>}<small>{attachment.name}</small></a>)}</div></section>:null}<div className="timeline">{[...events].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)).map(event=><div className="done" key={event.id}><i>✓</i><div><strong>{event.label}</strong><small>{event.createdBy} · {formatDateTime(event.createdAt)}</small></div></div>)}</div>{ticket.workSummary&&<div className="close-reason"><strong>סיכום עבודה</strong><span>{ticket.workSummary}</span></div>}{ticket.partsUsed?.length?<div className="close-reason"><strong>חלקים שהוחלפו</strong><span>{ticket.partsUsed.join(", ")}</span></div>:null}{ticket.closeReason&&<div className="close-reason"><strong>סיבת סגירה</strong><span>{ticket.closeReason}</span></div>}<footer><button className="primary" onClick={onClose}>סגירה</button></footer></div></Modal>
+  return <Modal title={`קריאה ${ticket.id}`} onClose={onClose}><div className="ticket-detail"><div className="detail-summary"><div><small>לקוח</small><strong>{customerName(ticket.accountId)}</strong></div><div><small>מכונה</small><strong>{machine?.model||"בעיה כללית"}</strong></div><div><small>דחיפות</small><Badge>{ticket.urgency}</Badge></div><div><small>סטטוס</small><Badge>{ticket.status}</Badge></div><div><small>אחראי</small><strong>{ticket.assignedTo}</strong></div><div><small>יעד פתרון</small><strong>{formatDateTime(ticket.resolutionDueAt||"")}</strong></div></div><section><h3>{ticket.type}</h3><p>{ticket.description}</p></section>{ticket.attachments?.length?<section className="ticket-attachments"><h3>תמונות וקבצים</h3><div>{ticket.attachments.map((attachment,index)=><TicketAttachment attachment={attachment} key={attachment.storagePath||attachment.url||`${attachment.name}-${index}`}/>)}</div></section>:null}<div className="timeline">{[...events].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)).map(event=><div className="done" key={event.id}><i>✓</i><div><strong>{event.label}</strong><small>{event.createdBy} · {formatDateTime(event.createdAt)}</small></div></div>)}</div>{ticket.workSummary&&<div className="close-reason"><strong>סיכום עבודה</strong><span>{ticket.workSummary}</span></div>}{ticket.partsUsed?.length?<div className="close-reason"><strong>חלקים שהוחלפו</strong><span>{ticket.partsUsed.join(", ")}</span></div>:null}{ticket.closeReason&&<div className="close-reason"><strong>סיבת סגירה</strong><span>{ticket.closeReason}</span></div>}<footer><button className="primary" onClick={onClose}>סגירה</button></footer></div></Modal>
 }

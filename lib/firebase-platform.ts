@@ -5,6 +5,7 @@ import {
   EmailAuthProvider,
   GoogleAuthProvider,
   browserLocalPersistence,
+  getIdTokenResult,
   linkWithCredential,
   onAuthStateChanged,
   sendPasswordResetEmail,
@@ -32,6 +33,12 @@ import {
 } from "firebase/firestore";
 import { getFirebaseServices } from "./firebase-client";
 import { resolveInviteEmail } from "./access-invite";
+import {
+  MAX_VIDEO_BYTES,
+  passwordSecurityError,
+  safeStorageFileName,
+  ticketFileSecurityError,
+} from "./security";
 import type {
   AccessInvite,
   Activity,
@@ -182,6 +189,10 @@ export async function linkPasswordToCurrentUser(password: string) {
     throw new Error("auth/provider-already-linked");
   }
 
+  if (passwordSecurityError(password)) {
+    throw new Error("auth/weak-password");
+  }
+
   const credential = EmailAuthProvider.credential(user.email, password);
   return linkWithCredential(user, credential);
 }
@@ -194,6 +205,16 @@ export async function resetPassword(email: string) {
 export async function signOutUser() {
   const { auth } = getFirebaseServices();
   await signOut(auth);
+}
+
+async function requireRecentAdminLogin(maxAgeSeconds = 4 * 60 * 60) {
+  const { auth } = getFirebaseServices();
+  if (!auth.currentUser) throw new Error("auth/requires-recent-login");
+  const token = await getIdTokenResult(auth.currentUser);
+  const authenticatedAt = new Date(token.authTime).getTime();
+  if (!Number.isFinite(authenticatedAt) || Date.now() - authenticatedAt > maxAgeSeconds * 1000) {
+    throw new Error("auth/requires-recent-login");
+  }
 }
 
 export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
@@ -418,6 +439,7 @@ export async function updateUserAccess(
   status: UserProfile["status"],
   serviceDetails?: Pick<UserProfile, "phone" | "serviceRegion" | "skills">,
 ) {
+  await requireRecentAdminLogin();
   const { db } = getFirebaseServices();
   await updateDoc(doc(db, "users", uid), withoutUndefined({
     role,
@@ -557,23 +579,35 @@ export async function uploadTicketAttachment(
   ticketId: string,
   file: File,
 ) {
+  const fileError = ticketFileSecurityError(file);
+  if (fileError) throw new Error(fileError);
   const { app } = getFirebaseServices();
-  const { getDownloadURL, getStorage, ref, uploadBytes } = await import(
+  const { getStorage, ref, uploadBytes } = await import(
     "firebase/storage"
   );
   const storage = getStorage(app);
-  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_֐-׿]/g, "-");
+  const uniqueId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const safeName = safeStorageFileName(file.name, uniqueId);
+  const storagePath = `accounts/${accountId}/tickets/${ticketId}/${safeName}`;
   const attachmentRef = ref(
     storage,
-    `accounts/${accountId}/tickets/${ticketId}/${Date.now()}-${safeName}`,
+    storagePath,
   );
   await uploadBytes(attachmentRef, file, { contentType: file.type });
   return {
     name: file.name,
-    url: await getDownloadURL(attachmentRef),
+    storagePath,
     type: file.type,
     uploadedAt: new Date().toISOString(),
   };
+}
+
+export async function loadTicketAttachment(storagePath: string) {
+  const { app } = getFirebaseServices();
+  const { getBlob, getStorage, ref } = await import("firebase/storage");
+  const storage = getStorage(app);
+  const blob = await getBlob(ref(storage, storagePath), MAX_VIDEO_BYTES);
+  return URL.createObjectURL(blob);
 }
 
 export async function saveLead(lead: Lead) {
@@ -629,6 +663,8 @@ export async function convertQuoteToCustomer(
   if (quote.status !== "אושרה" && !options.manual) {
     throw new Error("הקמה אוטומטית מתבצעת רק לאחר אישור הצעה.");
   }
+
+  if (quote.status === "אושרה") await requireRecentAdminLogin();
 
   const { auth, db } = getFirebaseServices();
   const accountId = quote.accountId || accountIdForQuote(quote);
