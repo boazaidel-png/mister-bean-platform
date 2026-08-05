@@ -6,8 +6,12 @@ export type UserProfile = {
   displayName: string;
   role: Role;
   accountIds: string[];
-  status: "active" | "pending";
+  status: "active" | "pending" | "revoked";
   createdAt: string;
+  adminApprovedBy?: string;
+  adminApprovedAt?: string;
+  revokedAt?: string;
+  revokedBy?: string;
   phone?: string;
   serviceRegion?: string;
   skills?: string[];

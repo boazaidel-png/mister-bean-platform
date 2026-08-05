@@ -15,16 +15,41 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    function isOwnerEmail(email) {
+      return email in [
+        'boazaidel@gmail.com',
+        'boaz@pacifictrade.co'
+      ];
+    }
+
+    function isBootstrapAdminEmail() {
+      return signedIn()
+        && request.auth.token.email != null
+        && isOwnerEmail(request.auth.token.email);
+    }
+
+    function hasApprovedAdminProfile(data) {
+      return data.role == 'admin'
+        && (
+          isOwnerEmail(data.email)
+          || (
+            isOwnerEmail(data.get('adminApprovedBy', ''))
+            && shortString(data.get('adminApprovedAt', ''), 40)
+            && data.get('adminApprovedAt', '').size() > 0
+          )
+        );
+    }
+
     function isStaff() {
       return hasProfile()
         && userProfile().status == 'active'
-        && userProfile().role in ['service', 'admin'];
+        && (userProfile().role == 'service' || isAdmin());
     }
 
     function isAdmin() {
       return hasProfile()
         && userProfile().status == 'active'
-        && userProfile().role == 'admin';
+        && hasApprovedAdminProfile(userProfile());
     }
 
     function belongsToAccount(accountId) {
@@ -40,27 +65,38 @@ service cloud.firestore {
     function validUserProfile(data, userId) {
       return data.keys().hasOnly([
           'uid', 'email', 'displayName', 'role', 'accountIds', 'status',
-          'createdAt', 'phone', 'serviceRegion', 'skills'
+          'createdAt', 'phone', 'serviceRegion', 'skills',
+          'adminApprovedBy', 'adminApprovedAt', 'revokedAt', 'revokedBy'
         ])
         && data.uid == userId
         && shortString(data.email, 320)
         && shortString(data.displayName, 160)
         && data.role in ['customer', 'multi', 'service', 'admin']
-        && data.status in ['active', 'pending']
+        && data.status in ['active', 'pending', 'revoked']
         && data.accountIds is list
         && data.accountIds.size() <= 50
+        && (
+          !(data.role in ['customer', 'multi'])
+          || data.status != 'active'
+          || data.accountIds.size() > 0
+        )
+        && (
+          data.role in ['customer', 'multi']
+          || data.accountIds.size() == 0
+        )
+        && (
+          data.role != 'admin'
+          || hasApprovedAdminProfile(data)
+        )
         && shortString(data.createdAt, 40)
+        && shortString(data.get('adminApprovedBy', ''), 320)
+        && shortString(data.get('adminApprovedAt', ''), 40)
+        && shortString(data.get('revokedAt', ''), 40)
+        && shortString(data.get('revokedBy', ''), 320)
         && shortString(data.get('phone', ''), 40)
         && shortString(data.get('serviceRegion', ''), 120)
         && data.get('skills', []) is list
         && data.get('skills', []).size() <= 30;
-    }
-
-    function isBootstrapAdminEmail() {
-      return request.auth.token.email in [
-        'boazaidel@gmail.com',
-        'boaz@pacifictrade.co'
-      ];
     }
 
     function validSelfRegistration(userId) {
@@ -240,10 +276,25 @@ service cloud.firestore {
           && request.resource.data.email == resource.data.email
           && request.resource.data.createdAt == resource.data.createdAt
           && validUserProfile(request.resource.data, userId)
+          && (
+            request.resource.data.role != 'admin'
+            || isOwnerEmail(request.resource.data.email)
+            || (
+              resource.data.role == 'admin'
+              && request.resource.data.get('adminApprovedBy', '') == resource.data.get('adminApprovedBy', '')
+              && request.resource.data.get('adminApprovedAt', '') == resource.data.get('adminApprovedAt', '')
+            )
+            || (
+              isBootstrapAdminEmail()
+              && request.resource.data.adminApprovedBy == request.auth.token.email
+              && shortString(request.resource.data.adminApprovedAt, 40)
+              && request.resource.data.adminApprovedAt.size() > 0
+            )
+          )
         )
         || validBootstrapAdminUpdate(userId)
         || (
-          resource.data.status == 'pending'
+          resource.data.status in ['pending', 'revoked']
           && resource.data.role == 'customer'
           && resource.data.accountIds.size() == 0
           && validInvitedProfile(userId)

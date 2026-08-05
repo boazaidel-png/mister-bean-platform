@@ -18,6 +18,7 @@ import {
   arrayUnion,
   collection,
   collectionGroup,
+  deleteField,
   deleteDoc,
   doc,
   getDoc,
@@ -32,7 +33,14 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { getFirebaseServices } from "./firebase-client";
-import { resolveInviteEmail } from "./access-invite";
+import {
+  defaultProfileAccess,
+  isBootstrapAdminEmail,
+  isTrustedAdminProfile,
+  isValidInviteEmail,
+  normalizeInviteEmail,
+  resolveInviteEmail,
+} from "./access-invite";
 import {
   MAX_VIDEO_BYTES,
   passwordSecurityError,
@@ -55,10 +63,6 @@ import type {
   UserProfile,
 } from "./platform-types";
 
-const BOOTSTRAP_ADMIN_EMAILS = new Set([
-  "boazaidel@gmail.com",
-  "boaz@pacifictrade.co",
-]);
 const entityKeys = ["tickets", "orders", "tasks", "machines", "activities"] as const;
 const legacyAddonKeys = new Set([
   "fridge",
@@ -222,7 +226,7 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
   const profileRef = doc(db, "users", user.uid);
   const existing = await getDoc(profileRef);
   const email = normalizeEmail(user.email);
-  const isBootstrapAdmin = BOOTSTRAP_ADMIN_EMAILS.has(email);
+  const isBootstrapAdmin = isBootstrapAdminEmail(email);
   const existingProfile = existing.exists()
     ? (existing.data() as UserProfile)
     : null;
@@ -243,6 +247,17 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
       return upgradedProfile;
     }
     if (
+      existingProfile.role === "admin" &&
+      !isTrustedAdminProfile(existingProfile)
+    ) {
+      return {
+        ...existingProfile,
+        role: "customer",
+        status: "pending",
+        accountIds: [],
+      };
+    }
+    if (
       existingProfile.status === "active" ||
       existingProfile.role !== "customer" ||
       existingProfile.accountIds.length > 0
@@ -256,7 +271,10 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
     const inviteSnapshot = await getDoc(inviteRef);
     if (inviteSnapshot.exists()) {
       const invite = inviteSnapshot.data() as AccessInvite;
-      if (invite.status === "ready" && invite.email === email) {
+      const inviteCanBeAccepted =
+        invite.status === "ready" ||
+        (invite.status === "accepted" && invite.acceptedByUid === user.uid);
+      if (inviteCanBeAccepted && invite.email === email) {
         const now = new Date().toISOString();
         const invitedProfile: UserProfile = {
           uid: user.uid,
@@ -273,12 +291,14 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
         };
         const batch = writeBatch(db);
         batch.set(profileRef, invitedProfile);
-        batch.update(inviteRef, {
-          status: "accepted",
-          acceptedAt: now,
-          acceptedByUid: user.uid,
-          updatedAt: now,
-        });
+        if (invite.status === "ready") {
+          batch.update(inviteRef, {
+            status: "accepted",
+            acceptedAt: now,
+            acceptedByUid: user.uid,
+            updatedAt: now,
+          });
+        }
         await batch.commit();
         return invitedProfile;
       }
@@ -289,13 +309,14 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
     return existingProfile;
   }
 
+  const defaultAccess = defaultProfileAccess(email);
   const profile: UserProfile = {
     uid: user.uid,
     email,
     displayName: user.displayName || email.split("@")[0] || "משתמש",
-    role: isBootstrapAdmin ? "admin" : "customer",
+    role: defaultAccess.role,
     accountIds: [],
-    status: isBootstrapAdmin ? "active" : "pending",
+    status: defaultAccess.status,
     createdAt: new Date().toISOString(),
   };
 
@@ -432,6 +453,58 @@ export function subscribeToCustomers(
   return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
 }
 
+function customerInvite(
+  customer: Customer,
+  email: string,
+  createdBy: string,
+  createdAt: string,
+): AccessInvite {
+  return {
+    email,
+    accountId: customer.id,
+    customerName: customer.name,
+    role: "customer",
+    status: "ready",
+    createdAt,
+    updatedAt: createdAt,
+    createdBy,
+    ...(customer.sourceQuoteId ? { sourceQuoteId: customer.sourceQuoteId } : {}),
+  };
+}
+
+export async function ensureCustomerAccessInvites(customers: Customer[]) {
+  const { auth, db } = getFirebaseServices();
+  const currentUser = auth.currentUser;
+  if (!currentUser) return 0;
+  const candidates = customers.filter((customer) =>
+    isValidInviteEmail(customer.email),
+  );
+  if (!candidates.length) return 0;
+
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  let created = 0;
+  for (const customer of candidates) {
+    const email = normalizeInviteEmail(customer.email);
+    const inviteRef = doc(db, "accessInvites", email);
+    const inviteSnapshot = await getDoc(inviteRef);
+    if (!inviteSnapshot.exists()) {
+      batch.set(
+        inviteRef,
+        customerInvite(customer, email, currentUser.uid, now),
+      );
+      created += 1;
+      continue;
+    }
+    const invite = inviteSnapshot.data() as AccessInvite;
+    if (invite.accountId !== customer.id) {
+      throw new Error("access/email-assigned-to-another-customer");
+    }
+  }
+  if (created) await batch.commit();
+  return created;
+}
+
 export async function updateUserAccess(
   uid: string,
   role: UserProfile["role"],
@@ -440,13 +513,68 @@ export async function updateUserAccess(
   serviceDetails?: Pick<UserProfile, "phone" | "serviceRegion" | "skills">,
 ) {
   await requireRecentAdminLogin();
-  const { db } = getFirebaseServices();
+  const { auth, db } = getFirebaseServices();
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error("auth/requires-recent-login");
+  if (uid === currentUser.uid && (role !== "admin" || status !== "active")) {
+    throw new Error("access/cannot-revoke-self");
+  }
+  if (
+    status === "active" &&
+    (role === "customer" || role === "multi") &&
+    accountIds.length === 0
+  ) {
+    throw new Error("access/customer-account-required");
+  }
+  if (role === "admin" && !isBootstrapAdminEmail(currentUser.email)) {
+    throw new Error("access/admin-owner-approval-required");
+  }
+  const approvedAt = new Date().toISOString();
   await updateDoc(doc(db, "users", uid), withoutUndefined({
     role,
-    accountIds,
+    accountIds: role === "customer" || role === "multi" ? accountIds : [],
     status,
+    adminApprovedBy:
+      role === "admin" ? normalizeEmail(currentUser.email) : deleteField(),
+    adminApprovedAt: role === "admin" ? approvedAt : deleteField(),
+    revokedAt: status === "revoked" ? approvedAt : deleteField(),
+    revokedBy:
+      status === "revoked" ? normalizeEmail(currentUser.email) : deleteField(),
     ...(role === "service" ? serviceDetails : {}),
   }));
+}
+
+export async function revokeUserAccess(user: UserProfile) {
+  await requireRecentAdminLogin();
+  const { auth, db } = getFirebaseServices();
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error("auth/requires-recent-login");
+  if (currentUser.uid === user.uid) throw new Error("access/cannot-revoke-self");
+  if (isBootstrapAdminEmail(user.email)) {
+    throw new Error("access/cannot-revoke-owner");
+  }
+
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.update(doc(db, "users", user.uid), {
+    role: "customer",
+    accountIds: [],
+    status: "revoked",
+    adminApprovedBy: deleteField(),
+    adminApprovedAt: deleteField(),
+    revokedAt: now,
+    revokedBy: normalizeEmail(currentUser.email),
+  });
+
+  const email = normalizeInviteEmail(user.email);
+  if (isValidInviteEmail(email)) {
+    const inviteRef = doc(db, "accessInvites", email);
+    const inviteSnapshot = await getDoc(inviteRef);
+    if (inviteSnapshot.exists()) {
+      batch.update(inviteRef, { status: "revoked", updatedAt: now });
+    }
+  }
+  await batch.commit();
 }
 
 function changedEntities(next: PlatformStore, previous: PlatformStore | null) {
@@ -568,10 +696,53 @@ export function subscribeToSalesWorkspace(
 }
 
 export async function saveCustomer(customer: Customer) {
-  const { db } = getFirebaseServices();
-  await setDoc(doc(db, "accounts", customer.id), withoutUndefined(customer), {
+  const { auth, db } = getFirebaseServices();
+  const accountRef = doc(db, "accounts", customer.id);
+  const accountSnapshot = await getDoc(accountRef);
+  const previousCustomer = accountSnapshot.exists()
+    ? (accountSnapshot.data() as Customer)
+    : null;
+  const previousEmail = normalizeInviteEmail(previousCustomer?.email);
+  const nextEmail = normalizeInviteEmail(customer.email);
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.set(accountRef, withoutUndefined({ ...customer, email: nextEmail }), {
     merge: true,
   });
+
+  if (
+    previousEmail &&
+    previousEmail !== nextEmail &&
+    isValidInviteEmail(previousEmail)
+  ) {
+    const previousInviteRef = doc(db, "accessInvites", previousEmail);
+    const previousInviteSnapshot = await getDoc(previousInviteRef);
+    if (
+      previousInviteSnapshot.exists() &&
+      (previousInviteSnapshot.data() as AccessInvite).accountId === customer.id
+    ) {
+      batch.update(previousInviteRef, { status: "revoked", updatedAt: now });
+    }
+  }
+
+  if (isValidInviteEmail(nextEmail)) {
+    const inviteRef = doc(db, "accessInvites", nextEmail);
+    const inviteSnapshot = await getDoc(inviteRef);
+    if (!inviteSnapshot.exists()) {
+      batch.set(
+        inviteRef,
+        customerInvite(
+          customer,
+          nextEmail,
+          auth.currentUser?.uid || "system",
+          now,
+        ),
+      );
+    } else if ((inviteSnapshot.data() as AccessInvite).accountId !== customer.id) {
+      throw new Error("access/email-assigned-to-another-customer");
+    }
+  }
+  await batch.commit();
 }
 
 export async function uploadTicketAttachment(
