@@ -35,14 +35,12 @@ import {
   linkPasswordToCurrentUser,
   observeAuth,
   resetPassword,
-  removeLegacyDemoCustomerData,
   savePlatformStore,
   saveCustomer,
   saveLead,
   saveQuote,
   signInWithEmail,
   signInWithGoogle,
-  signInWithGoogleRedirect,
   signOutUser,
   subscribeToPlatformStore,
   subscribeToSalesWorkspace,
@@ -204,9 +202,6 @@ export default function Home() {
         try{
           const nextProfile=await getOrCreateUserProfile(user);
           if(!active)return;
-          if(nextProfile.role==="admin"&&nextProfile.status==="active"){
-            try{await removeLegacyDemoCustomerData();}catch(error){if(active)setSyncError(firebaseMessage(error));}
-          }
           setProfile(nextProfile);
           setSelectedCustomer(nextProfile.accountIds[0]||"");
           if(nextProfile.status==="active"){
@@ -288,7 +283,6 @@ export default function Home() {
   const enterPreview=(next:PreviewContext)=>{setPreview(next);setSelectedCustomer(next.accountId||"");setView("dashboard");setPreviewOpen(false);setModal(null);};
   const leavePreview=()=>{setPreview(null);setView("dashboard");setModal(null);};
   const loginGoogle=async()=>{setAuthBusy(true);setAuthError("");try{await signInWithGoogle();}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
-  const loginGoogleRedirect=async()=>{setAuthBusy(true);setAuthError("");try{await signInWithGoogleRedirect();}catch(error){setAuthError(firebaseMessage(error));setAuthBusy(false);}};
   const loginEmail=async(email:string,password:string)=>{setAuthBusy(true);setAuthError("");try{await signInWithEmail(email,password);}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
   const sendReset=async(email:string)=>{setAuthBusy(true);setAuthError("");try{await resetPassword(email);setToast("קישור לאיפוס סיסמה נשלח");}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
   const saveQuoteInCycle=async(quote:Quote)=>{
@@ -338,7 +332,7 @@ export default function Home() {
   const createCustomer=async(customer:Customer)=>{if(!allowWrite())return;await saveCustomer(customer);const createdAt=new Date().toISOString();setStore(current=>({...current,tasks:[{id:`task-onboarding-${customer.id}`,accountId:customer.id,title:"השלמת קליטת לקוח חדש",type:"הקמת לקוח",dueDate:new Date(Date.now()+7*86400000).toISOString().slice(0,10),priority:"גבוהה",status:"פתוחה",assignedTo:customer.owner||"מנהל המערכת",createdAt,updatedAt:createdAt},...current.tasks]}));setSelectedCustomer(customer.id);setToast("כרטיס הלקוח נוצר");};
 
   if(!authReady) return <LoadingScreen/>;
-  if(!profile) return <Login onGoogle={loginGoogle} onGoogleRedirect={loginGoogleRedirect} onEmail={loginEmail} onReset={sendReset} busy={authBusy} error={authError}/>;
+  if(!profile) return <Login onGoogle={loginGoogle} onEmail={loginEmail} onReset={sendReset} busy={authBusy} error={authError}/>;
   if(profile.status==="pending") return <PendingAccess profile={profile} onLogout={()=>void signOutUser()}/>;
   if(!role) return <LoadingScreen/>;
 
@@ -419,7 +413,7 @@ function CoffeeBotanical({className=""}:{className?:string}) {
   </svg>;
 }
 
-function Login({onGoogle,onGoogleRedirect,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>;onGoogleRedirect:()=>Promise<void>;onEmail:(email:string,password:string)=>Promise<void>;onReset:(email:string)=>Promise<void>;busy:boolean;error:string}) {
+function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>;onEmail:(email:string,password:string)=>Promise<void>;onReset:(email:string)=>Promise<void>;busy:boolean;error:string}) {
   const [email,setEmail]=useState("");
   const [password,setPassword]=useState("");
   const submit=(event:FormEvent)=>{event.preventDefault();void onEmail(email,password);};
@@ -433,8 +427,7 @@ function Login({onGoogle,onGoogleRedirect,onEmail,onReset,busy,error}:{onGoogle:
       <button className="auth-primary" type="submit" disabled={busy}>{busy?"מתחבר...":"כניסה למערכת"}</button>
       <button className="reset-link" type="button" disabled={busy||!email} onClick={()=>void onReset(email)}>שכחתי סיסמה</button>
       <div className="auth-divider"><span>או</span></div>
-      <button className="google-login" type="button" disabled={busy} onClick={()=>void onGoogle()}><b>G</b> כניסה באמצעות Google</button>
-      <button className="mobile-google-login" type="button" disabled={busy} onClick={()=>void onGoogleRedirect()}>כניסה חלופית לנייד</button>
+      <button className="google-login" type="button" disabled={busy} onClick={()=>void onGoogle()}><b>G</b> {busy?"מתחבר…":"כניסה באמצעות Google"}</button>
     </form>
   </div></div>;
 }
@@ -477,6 +470,9 @@ function firebaseMessage(error:unknown){
   if(message.includes("auth/popup-closed-by-user"))return "חלון הכניסה נסגר לפני השלמת התהליך.";
   if(message.includes("auth/popup-blocked"))return "הדפדפן חסם את חלון הכניסה. יש לאפשר חלונות קופצים ולנסות שוב.";
   if(message.includes("auth/cancelled-popup-request"))return "בקשת הכניסה הקודמת בוטלה. אפשר לנסות שוב.";
+  if(message.includes("auth/network-request-failed"))return "החיבור לאינטרנט נקטע בזמן הכניסה. יש לבדוק קליטה ולנסות שוב.";
+  if(message.includes("auth/web-storage-unsupported"))return "הדפדפן חוסם שמירת התחברות. יש לפתוח את המערכת ב־Safari או Chrome רגיל ולא מתוך דפדפן פנימי.";
+  if(message.includes("auth/operation-not-supported-in-this-environment"))return "הדפדפן הנוכחי אינו תומך בכניסה מאובטחת. יש לפתוח את הקישור ישירות ב־Safari או Chrome.";
   if(message.includes("auth/unauthorized-domain"))return "כתובת האתר עדיין לא אושרה להתחברות ב־Firebase.";
   if(message.includes("auth/weak-password"))return "יש לבחור סיסמה חזקה יותר, באורך 8 תווים לפחות.";
   if(message.includes("auth/provider-already-linked"))return "כניסה עם סיסמה כבר מוגדרת לחשבון הזה.";

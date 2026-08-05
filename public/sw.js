@@ -1,4 +1,4 @@
-const CACHE_NAME = "mister-bean-shell-v2";
+const CACHE_NAME = "mister-bean-shell-v3";
 const APP_ROOT = "/mister-bean-platform/";
 const STATIC_ASSETS = [
   APP_ROOT,
@@ -33,13 +33,21 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
+      caches.match(APP_ROOT).then((cached) => {
+        const network = fetch(request).then((response) => {
           const copy = response.clone();
           void caches.open(CACHE_NAME).then((cache) => cache.put(APP_ROOT, copy));
           return response;
-        })
-        .catch(() => caches.match(APP_ROOT)),
+        });
+        if (!cached) return network;
+
+        // On weak mobile reception, show the saved app shell quickly while
+        // the fresh version keeps downloading for the next navigation.
+        const quickFallback = new Promise((resolve) => {
+          setTimeout(() => resolve(cached), 2500);
+        });
+        return Promise.race([network, quickFallback]).catch(() => cached);
+      }),
     );
     return;
   }
