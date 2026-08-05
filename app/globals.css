@@ -982,7 +982,6 @@ body{background:
 
 /* Operational hardening and role-specific service workspace */
 .score-ring{background:conic-gradient(#f1d4a2 0 var(--score,100%),rgba(255,255,255,.12) var(--score,100%))}
-.mobile-google-login{border:0;background:transparent;color:#386b59;font:700 12px inherit;padding:4px 10px;text-decoration:underline;cursor:pointer}
 .quote-history-lock{margin:14px 20px 0;padding:11px 13px;border:1px solid #d8e6df;border-radius:11px;background:#f2f8f5;color:#315f4e;font-size:13px;font-weight:700}
 .section-spacer{height:22px}
 .onboarding-panel .panel-head{margin-bottom:12px}.onboarding-check{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #edf1ef;color:#77847e}.onboarding-check i{width:25px;height:25px;border-radius:50%;display:grid;place-items:center;background:#f0f3f1;font-style:normal}.onboarding-check.done{color:#1d6c50}.onboarding-check.done i{background:#e3f5ec;color:#14704e;font-weight:900}

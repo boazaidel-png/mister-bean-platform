@@ -1,6 +1,6 @@
 "use client";
 
-import type { User } from "firebase/auth";
+import type { User, UserCredential } from "firebase/auth";
 import {
   EmailAuthProvider,
   GoogleAuthProvider,
@@ -11,7 +11,6 @@ import {
   setPersistence,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signInWithRedirect,
   signOut,
 } from "firebase/auth";
 import {
@@ -65,6 +64,7 @@ type EntityKey = (typeof entityKeys)[number];
 type Entity = Ticket | Order | Task | Machine | Activity;
 
 let lastSyncedStore: PlatformStore | null = null;
+let googleSignInAttempt: Promise<UserCredential> | null = null;
 
 function emptyStore(): PlatformStore {
   return { tickets: [], orders: [], tasks: [], machines: [], activities: [] };
@@ -144,28 +144,25 @@ export function observeAuth(callback: (user: User | null) => void) {
 
 export async function signInWithGoogle() {
   const { auth } = getFirebaseServices();
-  const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account" });
+  if (googleSignInAttempt) return googleSignInAttempt;
 
-  // Keep this call directly connected to the user's tap. Mobile Safari can
-  // block a popup when an awaited operation runs before it, and redirect auth
-  // cannot reliably restore state when the app is hosted on GitHub Pages.
-  // Firebase Auth already uses local persistence by default in web browsers.
-  return signInWithPopup(auth, provider);
-}
-
-export async function signInWithGoogleRedirect() {
-  const { auth } = getFirebaseServices();
   const provider = new GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: "select_account" });
-  await setPersistence(auth, browserLocalPersistence);
-  return signInWithRedirect(auth, provider);
+  auth.useDeviceLanguage();
+
+  // The popup must be created in the same tick as the user's tap. Awaiting
+  // persistence first causes iOS Safari and installed PWAs to block it. A
+  // shared promise also prevents double taps from cancelling each other.
+  const attempt = signInWithPopup(auth, provider).finally(() => {
+    if (googleSignInAttempt === attempt) googleSignInAttempt = null;
+  });
+  googleSignInAttempt = attempt;
+  return attempt;
 }
 
 export async function signInWithEmail(email: string, password: string) {
   const { auth } = getFirebaseServices();
   await setPersistence(auth, browserLocalPersistence);
-  return signInWithEmailAndPassword(auth, email.trim(), password);
+  return signInWithEmailAndPassword(auth, normalizeEmail(email), password);
 }
 
 export async function linkPasswordToCurrentUser(password: string) {
@@ -379,21 +376,6 @@ export async function updateUserAccess(
     status,
     ...(role === "service" ? serviceDetails : {}),
   }));
-}
-
-const legacyDemoAccountIds = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"];
-
-export async function removeLegacyDemoCustomerData() {
-  const { db } = getFirebaseServices();
-  const batch = writeBatch(db);
-  for (const accountId of legacyDemoAccountIds) {
-    for (const key of entityKeys) {
-      const snapshot = await getDocs(collection(db, "accounts", accountId, key));
-      snapshot.docs.forEach((item) => batch.delete(item.ref));
-    }
-    batch.delete(doc(db, "accounts", accountId));
-  }
-  await batch.commit();
 }
 
 function changedEntities(next: PlatformStore, previous: PlatformStore | null) {
