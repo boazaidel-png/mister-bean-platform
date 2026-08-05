@@ -61,11 +61,73 @@ service cloud.firestore {
         );
     }
 
+    function hasReadyInvite() {
+      return signedIn()
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/accessInvites/$(request.auth.token.email))
+        && get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.status == 'ready'
+        && get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.email == request.auth.token.email;
+    }
+
+    function validInvitedProfile(userId) {
+      return hasReadyInvite()
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'role',
+          'accountIds',
+          'status',
+          'createdAt'
+        ])
+        && request.resource.data.role == get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.role
+        && request.resource.data.status == 'active'
+        && request.resource.data.accountIds.size() == 1
+        && request.resource.data.accountIds[0] == get(/databases/$(database)/documents/accessInvites/$(request.auth.token.email)).data.accountId;
+    }
+
+    function validInviteAcceptance() {
+      return signedIn()
+        && request.auth.token.email != null
+        && resource.data.email == request.auth.token.email
+        && resource.data.status == 'ready'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'updatedAt',
+          'acceptedAt',
+          'acceptedByUid'
+        ])
+        && request.resource.data.status == 'accepted'
+        && request.resource.data.acceptedByUid == request.auth.uid;
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isStaff());
-      allow create: if validSelfRegistration(userId);
-      allow update: if isAdmin() || validSelfRegistration(userId);
+      allow create: if validSelfRegistration(userId) || validInvitedProfile(userId);
+      allow update: if isAdmin()
+        || validSelfRegistration(userId)
+        || (
+          resource.data.status == 'pending'
+          && resource.data.role == 'customer'
+          && resource.data.accountIds.size() == 0
+          && validInvitedProfile(userId)
+        );
       allow delete: if isAdmin();
+    }
+
+    match /accessInvites/{inviteEmail} {
+      allow read: if isAdmin()
+        || (
+          signedIn()
+          && request.auth.token.email != null
+          && inviteEmail == request.auth.token.email
+          && resource.data.email == request.auth.token.email
+        );
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || validInviteAcceptance();
     }
 
     // The commercial workspace is internal. Leads and quotes share the same

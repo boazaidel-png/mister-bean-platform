@@ -46,6 +46,7 @@ import { parseLegacyWorkspace } from "@/lib/legacy-migration";
 import type {
   Lead,
   Customer,
+  CustomerConversionResult,
   LeadPriority,
   LeadStatus,
   Quote,
@@ -1092,7 +1093,7 @@ export function QuotesWorkspace({
   readOnly: boolean;
   onSaveQuote: (quote: Quote) => Promise<void>;
   onDeleteQuote: (quoteId: string) => Promise<void>;
-  onConvert: (quote: Quote, lead?: Lead) => Promise<string>;
+  onConvert: (quote: Quote, lead?: Lead) => Promise<CustomerConversionResult>;
   onOpenLeads: () => void;
   initialQuote?: Quote | null;
   initialCustomer?: Customer | null;
@@ -1120,6 +1121,7 @@ export function QuotesWorkspace({
   });
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
+  const [messageError, setMessageError] = useState(false);
   const [expandedClients, setExpandedClients] = useState<Set<string>>(
     () => new Set(),
   );
@@ -1177,10 +1179,22 @@ export function QuotesWorkspace({
   const convert = async (quote: Quote) => {
     setBusyId(quote.id);
     setMessage("");
+    setMessageError(false);
     try {
       const lead = workspace.leads.find((item) => item.id === quote.leadId);
-      const accountId = await onConvert(quote, lead);
-      setMessage(`חשבון הלקוח הוקם בהצלחה: ${accountId}`);
+      const result = await onConvert(quote, lead);
+      setMessage(
+        result.inviteStatus === "created"
+          ? `כרטיס הלקוח הוקם. הגישה למערכת מוכנה עבור ${result.inviteEmail}.`
+          : result.inviteStatus === "already-accepted"
+            ? "כרטיס הלקוח הוקם והמשתמש הקיים כבר משויך אליו."
+            : `כרטיס הלקוח הוקם בהצלחה: ${result.accountId}`,
+      );
+    } catch (error) {
+      setMessageError(true);
+      setMessage(
+        error instanceof Error ? error.message : "לא ניתן היה להקים את הלקוח.",
+      );
     } finally {
       setBusyId("");
     }
@@ -1189,6 +1203,7 @@ export function QuotesWorkspace({
   const decideQuote = async (quote: Quote, nextStatus: "אושרה" | "נדחתה") => {
     setBusyId(quote.id);
     setMessage("");
+    setMessageError(false);
     try {
       const changedAt = now();
       await onSaveQuote({
@@ -1199,8 +1214,13 @@ export function QuotesWorkspace({
       });
       setMessage(
         nextStatus === "אושרה"
-          ? "ההצעה סומנה כאושרה. כרטיס הלקוח הוקם או עודכן אוטומטית."
+          ? "ההצעה אושרה, כרטיס הלקוח הוקם והגישה ללקוח מוכנה לפי כתובת המייל שבהצעה."
           : "ההצעה סומנה כנדחתה.",
+      );
+    } catch (error) {
+      setMessageError(true);
+      setMessage(
+        error instanceof Error ? error.message : "לא ניתן היה לעדכן את ההצעה.",
       );
     } finally {
       setBusyId("");
@@ -1262,7 +1282,11 @@ export function QuotesWorkspace({
           kind="orange"
         />
       </div>
-      {message && <div className="sales-success">{message}</div>}
+      {message && (
+        <div className={messageError ? "sales-error" : "sales-success"}>
+          {message}
+        </div>
+      )}
       <section className="sales-panel">
         <div className="sales-filters">
           <label>
