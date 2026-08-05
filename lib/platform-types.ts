@@ -143,7 +143,8 @@ export type Ticket = {
   events?: TicketEvent[];
   attachments?: Array<{
     name: string;
-    url: string;
+    url?: string;
+    storagePath?: string;
     type: string;
     uploadedAt: string;
   }>;

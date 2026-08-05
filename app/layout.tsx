@@ -4,6 +4,12 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Mister Bean Service Hub",
   description: "מערכת ניהול ושירות לקוחות לעסקי קפה",
+  referrer: "no-referrer",
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: { index: false, follow: false },
+  },
   manifest: "/mister-bean-platform/manifest.webmanifest",
   icons: {
     icon: [
@@ -30,5 +36,5 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="he" dir="rtl"><body>{children}</body></html>;
+  return <html lang="he" dir="rtl"><head><meta name="format-detection" content="telephone=no"/></head><body>{children}</body></html>;
 }
