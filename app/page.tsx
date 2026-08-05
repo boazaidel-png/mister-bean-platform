@@ -23,6 +23,7 @@ import {
   MonitorCog,
   Plus,
   ShieldCheck,
+  Trash2,
   UserCog,
   UsersRound,
   X,
@@ -30,12 +31,14 @@ import {
 import {
   convertQuoteToCustomer,
   deleteQuote,
+  ensureCustomerAccessInvites,
   getOrCreateUserProfile,
   importSalesWorkspace,
   linkPasswordToCurrentUser,
   loadTicketAttachment,
   observeAuth,
   resetPassword,
+  revokeUserAccess,
   savePlatformStore,
   saveCustomer,
   saveLead,
@@ -50,6 +53,7 @@ import {
   updateUserAccess,
   uploadTicketAttachment,
 } from "@/lib/firebase-platform";
+import { isBootstrapAdminEmail, isTrustedAdminProfile } from "@/lib/access-invite";
 import type {
   Customer,
   CustomerConversionResult,
@@ -222,7 +226,7 @@ export default function Home() {
             }
             unsubscribeCustomers=subscribeToCustomers(
               nextProfile,
-              next=>{if(active){setCustomers(next);setSyncError("");}},
+              next=>{if(active){setCustomers(next);setSyncError("");if(nextProfile.role==="admin")void ensureCustomerAccessInvites(next).catch(error=>setSyncError(firebaseMessage(error)));}},
               error=>{if(active)setSyncError(firebaseMessage(error));}
             );
             if(nextProfile.role==="admin"||nextProfile.role==="service"){
@@ -354,7 +358,7 @@ export default function Home() {
 
   if(!authReady) return <LoadingScreen/>;
   if(!profile) return <Login onGoogle={loginGoogle} onEmail={loginEmail} onReset={sendReset} busy={authBusy} error={authError}/>;
-  if(profile.status==="pending") return <PendingAccess profile={profile} onLogout={()=>void signOutUser()}/>;
+  if(profile.status!=="active") return <PendingAccess profile={profile} onLogout={()=>void signOutUser()}/>;
   if(!role) return <LoadingScreen/>;
 
   return (
@@ -394,7 +398,7 @@ export default function Home() {
           {view==="orders"&&<Orders orders={scopedOrders} isStaff={isStaff} onChange={updateOrder}/>}
           {view==="tasks"&&<Tasks tasks={scopedTasks} onCreate={()=>{if(allowWrite())setModal("task");}} onStatus={updateTask}/>}
           {view==="reports"&&role==="admin"&&<Reports store={store} customers={customers} users={users}/>}
-          {view==="access"&&profile.role==="admin"&&<AccessManagement customers={customers} users={users} readOnly={readOnly} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())return;try{await updateUserAccess(user.uid,role,accountIds,status);setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));}}} onPreview={next=>enterPreview(next)}/>}
+          {view==="access"&&profile.role==="admin"&&<AccessManagement currentUser={profile} customers={customers} users={users} readOnly={readOnly} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())return;try{await updateUserAccess(user.uid,role,accountIds,status);setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));}}} onRevoke={async user=>{if(!allowWrite())return;try{await revokeUserAccess(user);setToast("הגישה הוסרה והמשתמש נותק מנתוני הלקוחות");}catch(error){setSyncError(firebaseMessage(error));}}} onPreview={next=>enterPreview(next)}/>}
           {view==="contract"&&(customers.find(c=>c.id===clientId)?<Contract customer={customers.find(c=>c.id===clientId)!} machines={scopedMachines}/>:<EmptyCustomerState/>)}
           {view==="contact"&&<Contact/>}
         </div>
@@ -455,7 +459,7 @@ function Login({onGoogle,onEmail,onReset,busy,error}:{onGoogle:()=>Promise<void>
 
 function LoadingScreen(){return <div className="loading-screen" dir="rtl"><BrandIcon large/><h1>Mister Bean</h1><p>מחברים את סביבת העבודה המאובטחת…</p><i/></div>}
 
-function PendingAccess({profile,onLogout}:{profile:UserProfile;onLogout:()=>void}){return <div className="pending-screen" dir="rtl"><div className="pending-card"><span><LockKeyhole size={26}/></span><small>החשבון נוצר בהצלחה</small><h1>הגישה ממתינה לאישור</h1><p>החשבון של <strong>{profile.email}</strong> מחובר. מנהל המערכת צריך לשייך אותו ללקוח ולהגדיר הרשאה לפני הצגת מידע.</p><button onClick={onLogout}><LogOut size={17}/> יציאה</button></div></div>}
+function PendingAccess({profile,onLogout}:{profile:UserProfile;onLogout:()=>void}){const revoked=profile.status==="revoked";return <div className="pending-screen" dir="rtl"><div className="pending-card"><span><LockKeyhole size={26}/></span><small>{revoked?"הגישה לחשבון הוסרה":"החשבון נוצר בהצלחה"}</small><h1>{revoked?"החשבון אינו פעיל":"הגישה ממתינה לאישור"}</h1><p>{revoked?<>הגישה של <strong>{profile.email}</strong> הוסרה על ידי מנהל המערכת. ניתן לפנות למנהל לצורך חידוש הרשאה.</>:<>החשבון של <strong>{profile.email}</strong> מחובר. מנהל המערכת צריך לשייך אותו ללקוח ולהגדיר הרשאה לפני הצגת מידע.</>}</p><button onClick={onLogout}><LogOut size={17}/> יציאה</button></div></div>}
 
 function PreviewModal({customers,currentAccount,onClose,onEnter}:{customers:Customer[];currentAccount:string;onClose:()=>void;onEnter:(preview:PreviewContext)=>void}){
   const [previewRole,setPreviewRole]=useState<Role>("customer");
@@ -470,19 +474,25 @@ function PreviewModal({customers,currentAccount,onClose,onEnter}:{customers:Cust
   return <Modal title="תצוגת מערכת והרשאות" onClose={onClose}><div className="preview-modal"><div className="preview-note"><Eye size={18}/><div><strong>צפייה בטוחה</strong><span>המערכת תוצג בדיוק לפי התפקיד שתבחר, ללא אפשרות לשנות נתונים.</span></div></div><div className="preview-role-grid">{options.map(([id,title,description,Icon])=><button key={id} className={previewRole===id?"active":""} onClick={()=>setPreviewRole(id)}><Icon size={19}/><strong>{title}</strong><small>{description}</small></button>)}</div>{needsAccount&&<label className="preview-account"><span>איזה לקוח להציג?</span><select value={accountId} onChange={event=>setAccountId(event.target.value)}>{customers.map(customer=><option value={customer.id} key={customer.id}>{customer.name}</option>)}</select></label>}<footer><button onClick={onClose}>ביטול</button><button className="primary" onClick={()=>onEnter({role:previewRole,accountId})}><Eye size={16}/> כניסה למצב תצוגה</button></footer></div></Modal>
 }
 
-function AccessManagement({customers,users,readOnly,onSave,onPreview}:{customers:Customer[];users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
-  return <><SectionTitle title="ניהול והרשאות"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.length}</strong> משתמשים רשומים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(user=>user.role==="admin").length}</strong> מנהלי מערכת</span></div></div><section className="panel access-panel"><div className="access-head"><h3>משתמשי המערכת</h3>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow customers={customers} key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>אין משתמשים רשומים</strong></div>}</div></section></>
+function AccessManagement({currentUser,customers,users,readOnly,onSave,onRevoke,onPreview}:{currentUser:UserProfile;customers:Customer[];users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onRevoke:(user:UserProfile)=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
+  return <><SectionTitle title="ניהול והרשאות"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.filter(user=>user.status!=="revoked").length}</strong> משתמשים פעילים וממתינים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(isTrustedAdminProfile).length}</strong> מנהלים מאושרים</span></div></div><section className="panel access-panel"><div className="access-head"><div><h3>משתמשי המערכת</h3><p>הרשאת מנהל מחייבת אישור מפורש של בעל המערכת.</p></div>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow currentUser={currentUser} customers={customers} key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onRevoke={onRevoke} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>אין משתמשים רשומים</strong></div>}</div></section></>
 }
 
-function UserAccessRow({customers,user,readOnly,onSave,onPreview}:{customers:Customer[];user:UserProfile;readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
+function UserAccessRow({currentUser,customers,user,readOnly,onSave,onRevoke,onPreview}:{currentUser:UserProfile;customers:Customer[];user:UserProfile;readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onRevoke:(user:UserProfile)=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
   const [editing,setEditing]=useState(false);
   const [role,setRole]=useState<Role>(user.role);
   const [accountIds,setAccountIds]=useState<string[]>(user.accountIds);
   const [status,setStatus]=useState<UserProfile["status"]>(user.status);
   const [saving,setSaving]=useState(false);
+  const [adminConfirmed,setAdminConfirmed]=useState(false);
+  const trustedAdmin=isTrustedAdminProfile(user);
+  const canGrantAdmin=isBootstrapAdminEmail(currentUser.email);
+  const canRevoke=!readOnly&&user.uid!==currentUser.uid&&!isBootstrapAdminEmail(user.email)&&user.status!=="revoked";
   const toggleAccount=(accountId:string)=>setAccountIds(current=>current.includes(accountId)?current.filter(id=>id!==accountId):[...current,accountId]);
-  const save=async()=>{setSaving(true);try{await onSave(user,role,accountIds,status);setEditing(false);}finally{setSaving(false);}};
-  return <article className="access-user"><div className="access-user-main"><span className="customer-avatar">{(user.displayName||user.email).slice(0,2)}</span><div><strong>{user.displayName||"משתמש"}</strong><small>{user.email}</small></div><Badge>{user.status==="active"?"פעיל":"ממתין לאישור"}</Badge><span className="role-label">{roleNames[user.role]}</span><div className="access-actions"><button onClick={()=>onPreview({role:user.role,accountId:user.accountIds[0]||customers[0]?.id||""})}><Eye size={15}/> תצוגה</button><button disabled={readOnly} onClick={()=>setEditing(value=>!value)}><UserCog size={15}/> הרשאות</button></div></div>{editing&&<div className="access-editor"><label><span>תפקיד</span><select value={role} onChange={event=>setRole(event.target.value as Role)}><option value="customer">לקוח רגיל</option><option value="multi">לקוח מרובה סניפים</option><option value="service">נציג שירות</option><option value="admin">מנהל מערכת</option></select></label><label><span>מצב החשבון</span><select value={status} onChange={event=>setStatus(event.target.value as UserProfile["status"])}><option value="pending">ממתין לאישור</option><option value="active">פעיל</option></select></label>{(role==="customer"||role==="multi")&&<fieldset><legend>חשבונות לקוח</legend><div>{customers.map(customer=><label key={customer.id}><input type="checkbox" checked={accountIds.includes(customer.id)} onChange={()=>toggleAccount(customer.id)}/><span>{customer.name}</span></label>)}</div></fieldset>}<footer><button onClick={()=>setEditing(false)}>ביטול</button><button className="primary" disabled={saving} onClick={()=>void save()}>{saving?"שומר…":"שמירת הרשאות"}</button></footer></div>}</article>
+  const save=async()=>{setSaving(true);try{await onSave(user,role,accountIds,status);setEditing(false);setAdminConfirmed(false);}finally{setSaving(false);}};
+  const revoke=async()=>{if(!window.confirm(`להסיר את הגישה של ${user.email}? המשתמש לא יוכל לראות נתוני לקוחות.`))return;setSaving(true);try{await onRevoke(user);setEditing(false);}finally{setSaving(false);}};
+  const statusLabel=user.status==="active"?"פעיל":user.status==="revoked"?"גישה הוסרה":"ממתין לאישור";
+  return <article className="access-user"><div className="access-user-main"><span className="customer-avatar">{(user.displayName||user.email).slice(0,2)}</span><div><strong>{user.displayName||"משתמש"}</strong><small>{user.email}</small></div><Badge>{statusLabel}</Badge><span className="role-label">{user.role==="admin"&&!trustedAdmin?"מנהל לא מאושר":roleNames[user.role]}</span><div className="access-actions"><button disabled={user.status!=="active"||!trustedAdmin&&user.role==="admin"} onClick={()=>onPreview({role:user.role,accountId:user.accountIds[0]||customers[0]?.id||""})}><Eye size={15}/> תצוגה</button><button disabled={readOnly} onClick={()=>setEditing(value=>!value)}><UserCog size={15}/> הרשאות</button>{canRevoke&&<button className="access-revoke" disabled={saving} onClick={()=>void revoke()}><Trash2 size={15}/> הסרת גישה</button>}</div></div>{editing&&<div className="access-editor"><label><span>תפקיד</span><select value={role} onChange={event=>{setRole(event.target.value as Role);setAdminConfirmed(false);}}><option value="customer">לקוח רגיל</option><option value="multi">לקוח מרובה סניפים</option><option value="service">נציג שירות</option>{canGrantAdmin&&<option value="admin">מנהל מערכת</option>}</select></label><label><span>מצב החשבון</span><select value={status} onChange={event=>setStatus(event.target.value as UserProfile["status"])}><option value="pending">ממתין לאישור</option><option value="active">פעיל</option>{user.status==="revoked"&&<option value="revoked">גישה הוסרה</option>}</select></label>{(role==="customer"||role==="multi")&&<fieldset><legend>חשבונות לקוח</legend><div>{customers.map(customer=><label key={customer.id}><input type="checkbox" checked={accountIds.includes(customer.id)} onChange={()=>toggleAccount(customer.id)}/><span>{customer.name}</span></label>)}</div></fieldset>}{role==="admin"&&<label className="admin-confirm"><input type="checkbox" checked={adminConfirmed} onChange={event=>setAdminConfirmed(event.target.checked)}/><span>אני מאשר במפורש לתת למשתמש גישת מנהל מלאה</span></label>}<footer><button onClick={()=>setEditing(false)}>ביטול</button><button className="primary" disabled={saving||(role==="admin"&&!adminConfirmed)||(status==="active"&&(role==="customer"||role==="multi")&&!accountIds.length)} onClick={()=>void save()}>{saving?"שומר…":"שמירת הרשאות"}</button></footer></div>}</article>
 }
 
 function firebaseMessage(error:unknown){
@@ -501,6 +511,11 @@ function firebaseMessage(error:unknown){
   if(message.includes("auth/requires-recent-login"))return "מטעמי אבטחה יש להתנתק, להתחבר שוב עם Google ולנסות שנית.";
   if(message.includes("auth/missing-email"))return "לא נמצאה כתובת מייל בחשבון המחובר.";
   if(message.includes("auth/operation-not-allowed"))return "שיטת הכניסה עדיין לא הופעלה ב־Firebase.";
+  if(message.includes("access/cannot-revoke-self"))return "אי אפשר להסיר או להחליש את ההרשאה של המשתמש המחובר.";
+  if(message.includes("access/cannot-revoke-owner"))return "אי אפשר להסיר את חשבון הבעלים של המערכת.";
+  if(message.includes("access/customer-account-required"))return "לקוח פעיל חייב להיות משויך לכרטיס לקוח אחד לפחות.";
+  if(message.includes("access/admin-owner-approval-required"))return "רק בעל המערכת יכול לאשר מנהל נוסף.";
+  if(message.includes("access/email-assigned-to-another-customer"))return "כתובת המייל כבר משויכת לכרטיס לקוח אחר.";
   if(message.includes("permission-denied")||message.includes("Missing or insufficient permissions"))return "כללי הגישה למסד הנתונים עדיין לא פורסמו.";
   return message.replace("Firebase: ","");
 }
