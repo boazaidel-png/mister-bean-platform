@@ -51,6 +51,7 @@ import {
 } from "@/lib/firebase-platform";
 import type {
   Customer,
+  CustomerConversionResult,
   Lead,
   Machine,
   Order,
@@ -287,13 +288,15 @@ export default function Home() {
   const sendReset=async(email:string)=>{setAuthBusy(true);setAuthError("");try{await resetPassword(email);setToast("קישור לאיפוס סיסמה נשלח");}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
   const saveQuoteInCycle=async(quote:Quote)=>{
     if(!allowWrite())return;
-    await saveQuote(quote);
-    if(quote.status==="אושרה"&&!quote.accountId){
+    if(quote.status==="אושרה"&&(!quote.accountId||!quote.accessInviteEmail)){
       const lead=salesWorkspace.leads.find(item=>item.id===quote.leadId);
-      await convertQuoteToCustomer(quote,lead);
-      setToast("ההצעה אושרה וכרטיס הלקוח הוקם אוטומטית");
+      const result=await convertQuoteToCustomer(quote,lead);
+      setToast(result.inviteStatus==="created"
+        ? `העסקה אושרה, כרטיס הלקוח הוקם והגישה מוכנה עבור ${result.inviteEmail}`
+        : "העסקה אושרה וכרטיס הלקוח הוקם. המשתמש הקיים כבר משויך אליו.");
       return;
     }
+    await saveQuote(quote);
     setToast("הצעת המחיר נשמרה");
   };
   const openNewQuoteForCustomer=(customer:Customer)=>{setQuoteToOpen(null);setQuoteCustomer(customer);navigate("quotes");};
@@ -365,7 +368,7 @@ export default function Home() {
         <div className="content">
           {view==="dashboard"&&(role==="service"?<ServiceDashboard profile={profile} store={store} customers={customers} go={navigate} onUpdateTicket={updateTicket}/>:role==="admin"?<AdminDashboard store={store} sales={salesWorkspace} customers={customers} go={navigate} openCustomer={openCustomer} greeting={greeting} firstName={firstName}/>:customers.find(c=>c.id===clientId)?<CustomerDashboard customer={customers.find(c=>c.id===clientId)!} store={store} go={navigate} openTicket={openTicket} greeting={greeting}/>:<EmptyCustomerState/>)}
           {view==="leads"&&role==="admin"&&<LeadsWorkspace workspace={salesWorkspace} readOnly={readOnly} canMigrate={profile.role==="admin"&&!preview} onSaveLead={async(lead:Lead)=>{if(!allowWrite())return;await saveLead(lead);setToast("הליד נשמר");}} onSaveQuote={saveQuoteInCycle} onImport={async(next:SalesWorkspace)=>{if(!allowWrite())return;const result=await importSalesWorkspace(next);setToast(`הועברו ${result.importedLeads} לידים ו־${result.importedQuotes} הצעות. במאגר המאוחד: ${result.storedLeads} לידים ו־${result.storedQuotes} הצעות.`);}} onOpenQuotes={()=>navigate("quotes")}/>}
-          {view==="quotes"&&role==="admin"&&<QuotesWorkspace workspace={salesWorkspace} readOnly={readOnly} onSaveQuote={saveQuoteInCycle} onDeleteQuote={async(quoteId:string)=>{if(!allowWrite())return;await deleteQuote(quoteId);setToast("גרסת ההצעה נמחקה");}} onConvert={async(quote:Quote,lead?:Lead)=>{if(!allowWrite())throw new Error("מצב תצוגה הוא לקריאה בלבד");const accountId=await convertQuoteToCustomer(quote,lead,{manual:quote.status!=="אושרה"});setToast(quote.status==="אושרה"?"חשבון הלקוח הוקם":"כרטיס הלקוח הוקם ידנית");return accountId;}} onOpenLeads={()=>navigate("leads")} initialQuote={quoteToOpen} initialCustomer={quoteCustomer} customerCount={customers.length} onInitialRequestConsumed={()=>{setQuoteToOpen(null);setQuoteCustomer(null);}}/>}
+          {view==="quotes"&&role==="admin"&&<QuotesWorkspace workspace={salesWorkspace} readOnly={readOnly} onSaveQuote={saveQuoteInCycle} onDeleteQuote={async(quoteId:string)=>{if(!allowWrite())return;await deleteQuote(quoteId);setToast("גרסת ההצעה נמחקה");}} onConvert={async(quote:Quote,lead?:Lead):Promise<CustomerConversionResult>=>{if(!allowWrite())throw new Error("מצב תצוגה הוא לקריאה בלבד");const result=await convertQuoteToCustomer(quote,lead,{manual:quote.status!=="אושרה"});setToast(result.inviteStatus==="created"?`כרטיס הלקוח הוקם והגישה מוכנה עבור ${result.inviteEmail}`:quote.status==="אושרה"?"חשבון הלקוח הוקם והמשתמש כבר משויך אליו":"כרטיס הלקוח הוקם ידנית");return result;}} onOpenLeads={()=>navigate("leads")} initialQuote={quoteToOpen} initialCustomer={quoteCustomer} customerCount={customers.length} onInitialRequestConsumed={()=>{setQuoteToOpen(null);setQuoteCustomer(null);}}/>}
           {view==="customers"&&<Customers customers={customers} sales={salesWorkspace} showSalesCycle={role==="admin"} store={store} openCustomer={openCustomer} openTicket={openTicketForCustomer} openTask={openTaskForCustomer} onNewCustomer={()=>setModal("newCustomer")}/>}
           {view==="customer"&&(customers.find(c=>c.id===clientId)?<CustomerCard customer={customers.find(c=>c.id===clientId)!} store={store} sales={salesWorkspace} canManageCustomer={role==="admin"} openTicket={openTicket} openTask={()=>{if(allowWrite())setModal("task");}} onNewQuote={openNewQuoteForCustomer} onOpenQuote={openCustomerQuote} onOpenTicket={id=>{setSelectedTicket(id);setModal("detail");}} onCloseTicket={id=>{if(!allowWrite())return;setSelectedTicket(id);setModal("close");}} onEdit={()=>{if(role==="admin")setModal("customer");else setToast("עריכת פרטי לקוח זמינה למנהל מערכת");}} onMachineStatus={updateMachine} onTicketStatus={updateTicket} onOrderChange={updateOrder} onTaskStatus={updateTask} onSaveCustomer={updateCustomer}/>:<EmptyCustomerState/>)}
           {view==="tickets"&&<Tickets tickets={scopedTickets} machines={store.machines} isStaff={isStaff} staffUsers={users.filter(user=>user.status==="active"&&(user.role==="service"||user.role==="admin"))} onAssign={assignTicket} onUpdate={updateTicket} onOpen={id=>{setSelectedTicket(id);setModal("detail");}} onClose={id=>{if(!allowWrite())return;setSelectedTicket(id);setModal("close");}} openTicket={openTicket}/>}

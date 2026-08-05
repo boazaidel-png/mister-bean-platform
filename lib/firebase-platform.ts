@@ -31,9 +31,12 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { getFirebaseServices } from "./firebase-client";
+import { resolveInviteEmail } from "./access-invite";
 import type {
+  AccessInvite,
   Activity,
   Customer,
+  CustomerConversionResult,
   Machine,
   Order,
   PlatformStore,
@@ -199,15 +202,17 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
   const existing = await getDoc(profileRef);
   const email = normalizeEmail(user.email);
   const isBootstrapAdmin = BOOTSTRAP_ADMIN_EMAILS.has(email);
+  const existingProfile = existing.exists()
+    ? (existing.data() as UserProfile)
+    : null;
 
-  if (existing.exists()) {
-    const profile = existing.data() as UserProfile;
+  if (existingProfile) {
     if (
       isBootstrapAdmin &&
-      (profile.role !== "admin" || profile.status !== "active")
+      (existingProfile.role !== "admin" || existingProfile.status !== "active")
     ) {
       const upgradedProfile: UserProfile = {
-        ...profile,
+        ...existingProfile,
         email,
         role: "admin",
         status: "active",
@@ -216,7 +221,51 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
       await setDoc(profileRef, upgradedProfile);
       return upgradedProfile;
     }
-    return profile;
+    if (
+      existingProfile.status === "active" ||
+      existingProfile.role !== "customer" ||
+      existingProfile.accountIds.length > 0
+    ) {
+      return existingProfile;
+    }
+  }
+
+  if (!isBootstrapAdmin && email) {
+    const inviteRef = doc(db, "accessInvites", email);
+    const inviteSnapshot = await getDoc(inviteRef);
+    if (inviteSnapshot.exists()) {
+      const invite = inviteSnapshot.data() as AccessInvite;
+      if (invite.status === "ready" && invite.email === email) {
+        const now = new Date().toISOString();
+        const invitedProfile: UserProfile = {
+          uid: user.uid,
+          email,
+          displayName:
+            user.displayName ||
+            existingProfile?.displayName ||
+            email.split("@")[0] ||
+            "משתמש",
+          role: invite.role,
+          accountIds: [invite.accountId],
+          status: "active",
+          createdAt: existingProfile?.createdAt || now,
+        };
+        const batch = writeBatch(db);
+        batch.set(profileRef, invitedProfile);
+        batch.update(inviteRef, {
+          status: "accepted",
+          acceptedAt: now,
+          acceptedByUid: user.uid,
+          updatedAt: now,
+        });
+        await batch.commit();
+        return invitedProfile;
+      }
+    }
+  }
+
+  if (existingProfile) {
+    return existingProfile;
   }
 
   const profile: UserProfile = {
@@ -576,28 +625,54 @@ export async function convertQuoteToCustomer(
   quote: Quote,
   lead?: Lead,
   options: { manual?: boolean } = {},
-) {
+): Promise<CustomerConversionResult> {
   if (quote.status !== "אושרה" && !options.manual) {
     throw new Error("הקמה אוטומטית מתבצעת רק לאחר אישור הצעה.");
   }
 
-  const { db } = getFirebaseServices();
+  const { auth, db } = getFirebaseServices();
   const accountId = quote.accountId || accountIdForQuote(quote);
+  const accountRef = doc(db, "accounts", accountId);
+  const accountSnapshot = await getDoc(accountRef);
+  const isNewAccount = !accountSnapshot.exists();
   const now = new Date().toISOString();
   const mainBlend = quote.blends.find((blend) => blend.quantityKg > 0);
+  const shouldCreateInvite = quote.status === "אושרה";
+  const inviteEmail = shouldCreateInvite
+    ? resolveInviteEmail(quote.email, lead?.email)
+    : "";
+
+  if (shouldCreateInvite && !inviteEmail) {
+    throw new Error(
+      "לא ניתן לאשר את העסקה ללא כתובת מייל תקינה של איש הקשר.",
+    );
+  }
+
+  let existingInvite: AccessInvite | null = null;
+  if (inviteEmail) {
+    const inviteSnapshot = await getDoc(doc(db, "accessInvites", inviteEmail));
+    existingInvite = inviteSnapshot.exists()
+      ? (inviteSnapshot.data() as AccessInvite)
+      : null;
+    if (existingInvite && existingInvite.accountId !== accountId) {
+      throw new Error(
+        `כתובת המייל ${inviteEmail} כבר משויכת ללקוח אחר. יש לבדוק את כתובת איש הקשר לפני האישור.`,
+      );
+    }
+  }
+
   const batch = writeBatch(db);
 
-  batch.set(
-    doc(db, "accounts", accountId),
-    {
+  if (isNewAccount) {
+    batch.set(accountRef, {
       id: accountId,
       name: quote.clientName,
       status: "בהקמה",
       rank: quote.clientRank || "רגיל",
-      contactName: lead?.contactName || "",
-      phone: lead?.phone || "",
-      email: lead?.email || "",
-      city: lead?.location || "",
+      contactName: quote.contactName || lead?.contactName || "",
+      phone: quote.phone || lead?.phone || "",
+      email: inviteEmail || quote.email || lead?.email || "",
+      city: quote.location || lead?.location || "",
       address: lead?.meetingLocation || "",
       owner: lead?.owner || quote.owner,
       monthlyKg: quote.knownKg || mainBlend?.quantityKg || 0,
@@ -612,18 +687,46 @@ export async function convertQuoteToCustomer(
       sourceQuoteId: quote.id,
       conversionType: options.manual ? "manual" : "approved-quote",
       createdAt: now,
-    },
-    { merge: true },
-  );
+    });
+  } else {
+    batch.set(
+      accountRef,
+      {
+        name: quote.clientName,
+        contactName: quote.contactName || lead?.contactName || "",
+        phone: quote.phone || lead?.phone || "",
+        email: inviteEmail || quote.email || lead?.email || "",
+        sourceLeadId: quote.leadId || "",
+        sourceQuoteId: quote.id,
+      },
+      { merge: true },
+    );
+  }
   batch.set(
     doc(db, "quotes", quote.id),
     {
       accountId,
+      status: quote.status,
+      ...(inviteEmail ? { accessInviteEmail: inviteEmail } : {}),
       ...(quote.status === "אושרה" ? { approvedAt: quote.approvedAt || now } : {}),
       updatedAt: now,
     },
     { merge: true },
   );
+  if (inviteEmail && existingInvite?.status !== "accepted") {
+    const invite: AccessInvite = {
+      email: inviteEmail,
+      accountId,
+      customerName: quote.clientName,
+      role: "customer",
+      status: "ready",
+      createdAt: existingInvite?.createdAt || now,
+      updatedAt: now,
+      createdBy: auth.currentUser?.uid || "system",
+      sourceQuoteId: quote.id,
+    };
+    batch.set(doc(db, "accessInvites", inviteEmail), invite);
+  }
   if (lead) {
     batch.set(
       doc(db, "leads", lead.id),
@@ -635,63 +738,73 @@ export async function convertQuoteToCustomer(
       { merge: true },
     );
   }
-  quote.equipment
-    .filter(
-      (item) =>
-        item.quantity > 0 &&
-        !legacyAddonKeys.has(item.key || item.model),
-    )
-    .forEach((item, itemIndex) => {
-      for (let index = 0; index < item.quantity; index += 1) {
-        const machineId = `machine-${quote.id}-${itemIndex + 1}-${index + 1}`;
-        batch.set(doc(db, "accounts", accountId, "machines", machineId), {
-          id: machineId,
-          accountId,
-          site: lead?.location || "סניף ראשי",
-          model: item.model,
-          serial: "טרם הוגדר",
-          status: "בהקמה",
-          commercial: item.commercialModel,
-          location: "",
-          lastService: "",
-          nextService: "",
-          updatedAt: now,
-        });
-      }
+  if (isNewAccount) {
+    quote.equipment
+      .filter(
+        (item) =>
+          item.quantity > 0 &&
+          !legacyAddonKeys.has(item.key || item.model),
+      )
+      .forEach((item, itemIndex) => {
+        for (let index = 0; index < item.quantity; index += 1) {
+          const machineId = `machine-${quote.id}-${itemIndex + 1}-${index + 1}`;
+          batch.set(doc(db, "accounts", accountId, "machines", machineId), {
+            id: machineId,
+            accountId,
+            site: lead?.location || "סניף ראשי",
+            model: item.model,
+            serial: "טרם הוגדר",
+            status: "בהקמה",
+            commercial: item.commercialModel,
+            location: "",
+            lastService: "",
+            nextService: "",
+            updatedAt: now,
+          });
+        }
+      });
+
+    const monthlyKg = quote.knownKg || mainBlend?.quantityKg || 0;
+    const orderId = `order-${accountId}-${now.slice(0, 7)}`;
+    batch.set(doc(db, "accounts", accountId, "orders", orderId), {
+      id: orderId,
+      accountId,
+      month: now.slice(0, 7),
+      defaultKg: monthlyKg,
+      requestedKg: monthlyKg,
+      approvedKg: monthlyKg,
+      status: "ממתין לעדכון לקוח",
+      blend: mainBlend?.name || "טרם הוגדרה תערובת",
+      note: "",
+      createdAt: now,
+      updatedAt: now,
     });
 
-  const monthlyKg = quote.knownKg || mainBlend?.quantityKg || 0;
-  const orderId = `order-${accountId}-${now.slice(0, 7)}`;
-  batch.set(doc(db, "accounts", accountId, "orders", orderId), {
-    id: orderId,
-    accountId,
-    month: now.slice(0, 7),
-    defaultKg: monthlyKg,
-    requestedKg: monthlyKg,
-    approvedKg: monthlyKg,
-    status: "ממתין לעדכון לקוח",
-    blend: mainBlend?.name || "טרם הוגדרה תערובת",
-    note: "",
-    createdAt: now,
-    updatedAt: now,
-  });
-
-  const onboardingTaskId = `task-onboarding-${accountId}`;
-  batch.set(doc(db, "accounts", accountId, "tasks", onboardingTaskId), {
-    id: onboardingTaskId,
-    accountId,
-    title: "השלמת קליטת לקוח חדש",
-    type: "הקמת לקוח",
-    dueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
-    priority: "גבוהה",
-    status: "פתוחה",
-    assignedTo: lead?.owner || quote.owner || "מנהל המערכת",
-    createdAt: now,
-    updatedAt: now,
-  });
+    const onboardingTaskId = `task-onboarding-${accountId}`;
+    batch.set(doc(db, "accounts", accountId, "tasks", onboardingTaskId), {
+      id: onboardingTaskId,
+      accountId,
+      title: "השלמת קליטת לקוח חדש",
+      type: "הקמת לקוח",
+      dueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+      priority: "גבוהה",
+      status: "פתוחה",
+      assignedTo: lead?.owner || quote.owner || "מנהל המערכת",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
 
   await batch.commit();
-  return accountId;
+  return {
+    accountId,
+    inviteEmail: inviteEmail || undefined,
+    inviteStatus: inviteEmail
+      ? existingInvite?.status === "accepted"
+        ? "already-accepted"
+        : "created"
+      : "not-created",
+  };
 }
 
 export async function importSalesWorkspace(workspace: SalesWorkspace) {

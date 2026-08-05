@@ -7,9 +7,10 @@
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "lint": "eslint . --ignore-pattern .next --ignore-pattern dist --ignore-pattern .vinext",
-    "test": "npm run test:quote && npm run test:service",
+    "test": "npm run test:quote && npm run test:service && npm run test:access",
     "test:quote": "node --experimental-strip-types --test lib/quote-engine.test.ts",
-    "test:service": "node --experimental-strip-types --test lib/service-engine.test.ts"
+    "test:service": "node --experimental-strip-types --test lib/service-engine.test.ts",
+    "test:access": "node --experimental-strip-types --test lib/access-invite.test.ts"
   },
   "dependencies": {
     "firebase": "^12.16.0",

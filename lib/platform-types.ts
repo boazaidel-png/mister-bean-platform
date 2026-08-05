@@ -13,6 +13,28 @@ export type UserProfile = {
   skills?: string[];
 };
 
+export type AccessInviteStatus = "ready" | "accepted" | "revoked";
+
+export type AccessInvite = {
+  email: string;
+  accountId: string;
+  customerName: string;
+  role: "customer" | "multi";
+  status: AccessInviteStatus;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  sourceQuoteId?: string;
+  acceptedAt?: string;
+  acceptedByUid?: string;
+};
+
+export type CustomerConversionResult = {
+  accountId: string;
+  inviteEmail?: string;
+  inviteStatus: "created" | "already-accepted" | "not-created";
+};
+
 export type PreviewContext = {
   role: Role;
   accountId: string;
@@ -337,6 +359,7 @@ export type Quote = {
   createdAt: string;
   updatedAt: string;
   approvedAt?: string;
+  accessInviteEmail?: string;
 };
 
 export type SalesWorkspace = {
