@@ -512,7 +512,6 @@ export async function updateUserAccess(
   status: UserProfile["status"],
   serviceDetails?: Pick<UserProfile, "phone" | "serviceRegion" | "skills">,
 ) {
-  await requireRecentAdminLogin();
   const { auth, db } = getFirebaseServices();
   const currentUser = auth.currentUser;
   if (!currentUser) throw new Error("auth/requires-recent-login");
@@ -529,8 +528,11 @@ export async function updateUserAccess(
   if (role === "admin" && !isBootstrapAdminEmail(currentUser.email)) {
     throw new Error("access/admin-owner-approval-required");
   }
+  if (role === "admin" || role === "service") {
+    await requireRecentAdminLogin();
+  }
   const approvedAt = new Date().toISOString();
-  await updateDoc(doc(db, "users", uid), withoutUndefined({
+  await updateDoc(doc(db, "users", uid), {
     role,
     accountIds: role === "customer" || role === "multi" ? accountIds : [],
     status,
@@ -540,8 +542,11 @@ export async function updateUserAccess(
     revokedAt: status === "revoked" ? approvedAt : deleteField(),
     revokedBy:
       status === "revoked" ? normalizeEmail(currentUser.email) : deleteField(),
-    ...(role === "service" ? serviceDetails : {}),
-  }));
+    phone: role === "service" ? serviceDetails?.phone || "" : deleteField(),
+    serviceRegion:
+      role === "service" ? serviceDetails?.serviceRegion || "" : deleteField(),
+    skills: role === "service" ? serviceDetails?.skills || [] : deleteField(),
+  });
 }
 
 export async function revokeUserAccess(user: UserProfile) {
