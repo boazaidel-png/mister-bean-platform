@@ -72,8 +72,10 @@ export type Customer = {
   owner: string;
   monthlyKg: number;
   contractEnd: string;
-  serviceLevel: string;
+  serviceLevel?: string;
   branches: string[];
+  contractBlends?: string[];
+  deliveryDayOfMonth?: number;
   sourceLeadId?: string;
   sourceQuoteId?: string;
   conversionType?: "manual" | "approved-quote";

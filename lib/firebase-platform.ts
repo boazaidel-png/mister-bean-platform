@@ -849,6 +849,14 @@ export async function convertQuoteToCustomer(
   const isNewAccount = !accountSnapshot.exists();
   const now = new Date().toISOString();
   const mainBlend = quote.blends.find((blend) => blend.quantityKg > 0);
+  const contractBlends = Array.from(
+    new Set(
+      quote.blends
+        .filter((blend) => blend.quantityKg > 0)
+        .map((blend) => blend.name.trim())
+        .filter(Boolean),
+    ),
+  );
   const shouldCreateInvite = quote.status === "אושרה";
   const inviteEmail = shouldCreateInvite
     ? resolveInviteEmail(quote.email, lead?.email)
@@ -889,7 +897,9 @@ export async function convertQuoteToCustomer(
       owner: lead?.owner || quote.owner,
       monthlyKg: quote.knownKg || mainBlend?.quantityKg || 0,
       contractEnd: "",
-      serviceLevel: "רגיל",
+      serviceLevel: "",
+      contractBlends,
+      deliveryDayOfMonth: 1,
       slaResponseHours: 4,
       slaResolutionHours: 24,
       onboardingStatus: "בהקמה",
@@ -910,6 +920,7 @@ export async function convertQuoteToCustomer(
         email: inviteEmail || quote.email || lead?.email || "",
         sourceLeadId: quote.leadId || "",
         sourceQuoteId: quote.id,
+        contractBlends,
       },
       { merge: true },
     );
