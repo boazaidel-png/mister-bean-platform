@@ -1708,7 +1708,11 @@ function LeadModal({
           </label>
           <label>
             <span>אחראי</span>
-            <input value={draft.owner} onChange={(event) => update("owner", event.target.value)} />
+            <select value={draft.owner} onChange={(event) => update("owner", event.target.value)}>
+              <option>בר</option>
+              <option>בועז</option>
+              <option>בר/בועז</option>
+            </select>
           </label>
           <label>
             <span>תאריך פולואפ</span>
