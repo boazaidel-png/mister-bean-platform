@@ -17,7 +17,6 @@ service cloud.firestore {
 
     function isOwnerEmail(email) {
       return email in [
-        'boazaidel@gmail.com',
         'boaz@pacifictrade.co'
       ];
     }
@@ -231,6 +230,27 @@ service cloud.firestore {
         && data.get('events', []).size() <= 5;
     }
 
+    function validCustomerTicketUpdate(documentId, accountId) {
+      return belongsToAccount(accountId)
+        && resource.data.status != 'נסגרה'
+        && resource.data.status != 'בוטלה על ידי הלקוח'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'description', 'contact', 'phone', 'status', 'updatedAt', 'closedAt',
+          'closeReason', 'events'
+        ])
+        && request.resource.data.status in [resource.data.status, 'בוטלה על ידי הלקוח']
+        && (
+          request.resource.data.status == resource.data.status
+          || (
+            shortString(request.resource.data.get('closedAt', ''), 40)
+            && request.resource.data.closeReason == 'הלקוח עדכן שהסתדר'
+          )
+        )
+        && request.resource.data.get('events', []).size()
+          <= resource.data.get('events', []).size() + 1
+        && validTicket(request.resource.data, documentId, accountId);
+    }
+
     function validOrder(data, documentId, accountId) {
       return data.id == documentId
         && data.accountId == accountId
@@ -359,6 +379,7 @@ service cloud.firestore {
           && validCustomerTicketCreate(request.resource.data, documentId, accountId);
         allow update: if isStaff()
           && validTicket(request.resource.data, documentId, accountId);
+        allow update: if validCustomerTicketUpdate(documentId, accountId);
         allow delete: if isAdmin();
       }
 

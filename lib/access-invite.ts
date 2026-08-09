@@ -3,7 +3,6 @@ export function normalizeInviteEmail(email?: string | null) {
 }
 
 export const BOOTSTRAP_ADMIN_EMAILS = [
-  "boazaidel@gmail.com",
   "boaz@pacifictrade.co",
 ] as const;
 

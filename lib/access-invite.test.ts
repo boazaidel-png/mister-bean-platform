@@ -30,6 +30,7 @@ test("rejects missing, malformed and unsafe invitation emails", () => {
 
 test("only the configured owner emails are bootstrap administrators", () => {
   assert.equal(isBootstrapAdminEmail("BOAZ@PACIFICTRADE.CO"), true);
+  assert.equal(isBootstrapAdminEmail("boazaidel@gmail.com"), false);
   assert.equal(isBootstrapAdminEmail("customer@example.com"), false);
 });
 
