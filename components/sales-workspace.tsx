@@ -1633,8 +1633,12 @@ function LeadModal({
     link.click();
   };
   return (
-    <SalesModal title={lead.company ? `ליד · ${lead.company}` : "ליד חדש"} onClose={onClose}>
-      <form className="sales-form" onSubmit={submit}>
+    <SalesModal
+      title={lead.company ? `ליד · ${lead.company}` : "ליד חדש"}
+      onClose={onClose}
+      className="lead-modal"
+    >
+      <form className="sales-form lead-form" onSubmit={submit}>
         <div className="sales-form-grid">
           <label>
             <span>שם החברה</span>
@@ -3508,17 +3512,24 @@ function SalesModal({
   title,
   onClose,
   wide = false,
+  className = "",
   children,
 }: {
   title: string;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
   children: React.ReactNode;
 }) {
+  useEffect(() => {
+    document.body.classList.add("sales-dialog-open");
+    return () => document.body.classList.remove("sales-dialog-open");
+  }, []);
+
   return (
     <div className="sales-modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section
-        className={`sales-modal ${wide ? "wide" : ""}`}
+        className={`sales-modal ${wide ? "wide" : ""} ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
