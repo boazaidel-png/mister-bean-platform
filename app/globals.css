@@ -982,6 +982,50 @@ body{background:
 .customer-history-list{display:grid;gap:8px}.customer-history-list>button,.customer-history-list>.history-static{width:100%;display:grid;grid-template-columns:minmax(180px,1fr) auto minmax(90px,.3fr) auto;align-items:center;gap:14px;padding:13px 14px;border:1px solid #e0e9e5;border-radius:12px;background:#fbfdfc;text-align:right;color:#25483b}.customer-history-list>button:hover{border-color:#9ecbb8;background:#f3faf6}.customer-history-list>button>div,.customer-history-list>.history-static>div{display:grid;gap:3px}.customer-history-list small{color:#7b8983}.customer-history-list b{color:#147154}
 @media(max-width:720px){.process-cycle{overflow-x:auto;gap:8px}.process-cycle>div{min-width:92px}.process-cycle>small{min-width:150px}.customer-history-panel>header{align-items:flex-start;flex-direction:column}.customer-history-list>button,.customer-history-list>.history-static{grid-template-columns:1fr auto}.customer-history-list>button>span,.customer-history-list>.history-static>span{grid-column:1}.customer-history-list>button>b{grid-column:2;grid-row:2}}
 
+/* Keep the lead editor usable above the iPhone home/Safari bars. */
+@media(max-width:720px){
+  body.sales-dialog-open{overflow:hidden;padding-bottom:0}
+  body.sales-dialog-open .mobile-nav{display:none}
+  .sales-modal-backdrop{padding:max(8px,env(safe-area-inset-top)) 0 0}
+  .sales-modal.lead-modal{
+    display:flex;
+    flex-direction:column;
+    width:100%;
+    height:100%;
+    max-height:100%;
+    overflow:hidden;
+    overscroll-behavior:contain}
+  .lead-modal>header{flex:0 0 auto}
+  .lead-modal>.lead-form{
+    flex:1 1 auto;
+    min-height:0;
+    padding:0;
+    display:flex;
+    flex-direction:column;
+    overflow:hidden}
+  .lead-form>.sales-form-grid{
+    flex:1 1 auto;
+    min-height:0;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+    padding:15px}
+  .lead-form>footer{
+    position:relative;
+    z-index:7;
+    flex:0 0 auto;
+    margin:0;
+    padding:11px 15px max(11px,env(safe-area-inset-bottom));
+    border-top:1px solid #dfe7e3;
+    background:#fff;
+    box-shadow:0 -8px 22px rgba(20,52,41,.08);
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px}
+  .lead-form>footer .lead-to-quote-button{flex:1 0 100%;margin:0;order:-1}
+  .lead-form>footer>button:not(.lead-to-quote-button){flex:1 1 90px;min-width:0;min-height:44px;padding-inline:8px;justify-content:center}
+}
+
 /* Operational hardening and role-specific service workspace */
 .score-ring{background:conic-gradient(#f1d4a2 0 var(--score,100%),rgba(255,255,255,.12) var(--score,100%))}
 .quote-history-lock{margin:14px 20px 0;padding:11px 13px;border:1px solid #d8e6df;border-radius:11px;background:#f2f8f5;color:#315f4e;font-size:13px;font-weight:700}
