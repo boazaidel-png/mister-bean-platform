@@ -200,6 +200,7 @@ function legacyQuote(id: string, source: UnknownRecord): Quote {
       };
     }),
     equipment: equipmentRows,
+    autoSyncAccessories: false,
     equipmentCosts: Object.fromEntries(
       Object.entries(costMap).map(([key, value]) => [key, number(value)]),
     ),

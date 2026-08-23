@@ -338,6 +338,7 @@ export type Quote = {
   workDaysMonth: number;
   blends: QuoteBlend[];
   equipment: QuoteEquipment[];
+  autoSyncAccessories?: boolean;
   equipmentCosts: Record<string, number>;
   allocation: QuoteAllocation[];
   supplierMonths: number;

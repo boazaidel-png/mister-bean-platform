@@ -121,6 +121,8 @@ function normalizeLeadRecord(value: Lead): Lead {
 function normalizeQuoteRecord(value: Quote): Quote {
   return {
     ...value,
+    autoSyncAccessories:
+      value.autoSyncAccessories ?? (value.equipment || []).length === 0,
     equipmentCosts: value.equipmentCosts || {},
     allocation: value.allocation || [],
     supplierMonths: value.supplierMonths || 8,

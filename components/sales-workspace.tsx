@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import {
   addonCatalog,
+  automaticAddonsEnabled,
   calculateQuote,
   equipmentTotalCost,
   equipmentCatalog,
@@ -169,6 +170,7 @@ const quoteFromLead = (lead?: Lead): Quote => {
     },
   ],
   equipment: [],
+  autoSyncAccessories: true,
   equipmentCosts: {},
   allocation: [],
   supplierMonths: 8,
@@ -1990,13 +1992,17 @@ function QuoteModal({
   onClose: () => void;
   onSave: (quote: Quote) => Promise<void>;
 }) {
+  const initialAutoSyncAccessories = automaticAddonsEnabled(quote);
   const [draft, setDraft] = useState(() => ({
     ...quote,
-    equipment: syncAutomaticAddons(quote.equipment),
+    equipment: quote.equipment.map((item) => ({ ...item })),
+    autoSyncAccessories: initialAutoSyncAccessories,
   }));
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [autoSyncAccessories, setAutoSyncAccessories] = useState(true);
+  const [autoSyncAccessories, setAutoSyncAccessories] = useState(
+    initialAutoSyncAccessories,
+  );
   const [financedAmountManual, setFinancedAmountManual] = useState(false);
   const [recommendationBaseline, setRecommendationBaseline] =
     useState<Quote | null>(null);
@@ -2038,7 +2044,9 @@ function QuoteModal({
       addonKeys?: string[];
     },
     synchronizeAccessories = false,
+    manualAccessoryOverride = false,
   ) => {
+    if (manualAccessoryOverride) setAutoSyncAccessories(false);
     setDraft((current) => {
       const existingIndex = current.equipment.findIndex(
         (item) => (item.key || item.model) === key,
@@ -2093,6 +2101,9 @@ function QuoteModal({
         ...current,
         equipment,
         allocation,
+        autoSyncAccessories: manualAccessoryOverride
+          ? false
+          : current.autoSyncAccessories,
         financedAmount:
           current.financingType === "loan" && !financedAmountManual
             ? equipmentTotalCost(equipment)
@@ -2123,6 +2134,7 @@ function QuoteModal({
         commercialModel: "ללא עלות" as const,
         monthlyPrice: 0,
       }));
+    setAutoSyncAccessories(true);
     setDraft((current) => {
       const equipment = syncAutomaticAddons(machineItems);
       const allocation = machineItems.map((item) => {
@@ -2142,6 +2154,7 @@ function QuoteModal({
         ...current,
         equipment,
         allocation,
+        autoSyncAccessories: true,
         financedAmount:
           current.financingType === "loan" && !financedAmountManual
             ? equipmentTotalCost(equipment)
@@ -2543,19 +2556,20 @@ function QuoteModal({
                   onChange={(event) => {
                     const checked = event.target.checked;
                     setAutoSyncAccessories(checked);
-                    if (checked) {
-                      setDraft((current) => {
-                        const equipment = syncAutomaticAddons(current.equipment);
-                        return {
-                          ...current,
-                          equipment,
-                          financedAmount:
-                            current.financingType === "loan" && !financedAmountManual
-                              ? equipmentTotalCost(equipment)
-                              : current.financedAmount,
-                        };
-                      });
-                    }
+                    setDraft((current) => {
+                      const equipment = checked
+                        ? syncAutomaticAddons(current.equipment)
+                        : current.equipment;
+                      return {
+                        ...current,
+                        autoSyncAccessories: checked,
+                        equipment,
+                        financedAmount:
+                          current.financingType === "loan" && !financedAmountManual
+                            ? equipmentTotalCost(equipment)
+                            : current.financedAmount,
+                      };
+                    });
                   }}
                 />
                 <span>
@@ -2638,7 +2652,7 @@ function QuoteModal({
                                       label: item.label,
                                       cost: selected?.unitCost ?? item.cost,
                                       importer: item.importer,
-                                    })
+                                    }, false, true)
                                   }
                                 />
                               </label>

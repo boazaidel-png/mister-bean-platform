@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { Quote, QuoteEquipment } from "./platform-types.ts";
 import {
+  automaticAddonsEnabled,
   calculateQuote,
   normalizeAllocationForQuantity,
   recommendedConsumptionKg,
@@ -92,6 +93,32 @@ test("machine quantity automatically creates the correct accessory quantities", 
   assert.equal(quantities.fridge, 2);
   assert.equal(quantities.filter, 2);
   assert.equal(quantities.install, 2);
+});
+
+test("saved equipment defaults to manual mode and keeps explicit overrides", () => {
+  const equipment = syncAutomaticAddons([machine(9)]).map((item) =>
+    item.key === "fridge" || item.key === "filter" || item.key === "install"
+      ? { ...item, quantity: 8 }
+      : item,
+  );
+  equipment.push({
+    key: "frother",
+    model: "מקציף חלב",
+    quantity: 4,
+    unitCost: 129,
+    importer: "tavor",
+    commercialModel: "ללא עלות",
+    monthlyPrice: 0,
+  });
+
+  assert.equal(automaticAddonsEnabled({ equipment }), false);
+  assert.equal(automaticAddonsEnabled({ equipment: [] }), true);
+  assert.equal(
+    automaticAddonsEnabled({ equipment, autoSyncAccessories: true }),
+    true,
+  );
+  assert.equal(equipment.find((item) => item.key === "fridge")?.quantity, 8);
+  assert.equal(equipment.find((item) => item.key === "frother")?.quantity, 4);
 });
 
 test("allocation remains consistent when machine quantity changes", () => {

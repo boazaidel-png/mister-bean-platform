@@ -71,6 +71,12 @@ export function equipmentTotalCost(equipment: QuoteEquipment[]) {
   );
 }
 
+export function automaticAddonsEnabled(
+  quote: Pick<Quote, "equipment" | "autoSyncAccessories">,
+) {
+  return quote.autoSyncAccessories ?? quote.equipment.length === 0;
+}
+
 export function syncAutomaticAddons(equipment: QuoteEquipment[]) {
   const required = new Map<string, number>();
   const automaticKeys = new Set(
