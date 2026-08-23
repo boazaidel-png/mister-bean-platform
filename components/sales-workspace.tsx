@@ -1993,7 +1993,7 @@ function QuoteModal({
   onSave: (quote: Quote) => Promise<void>;
 }) {
   const initialAutoSyncAccessories = automaticAddonsEnabled(quote);
-  const [draft, setDraft] = useState(() => ({
+  const [draft, setDraft] = useState<Quote>(() => ({
     ...quote,
     equipment: quote.equipment.map((item) => ({ ...item })),
     autoSyncAccessories: initialAutoSyncAccessories,
