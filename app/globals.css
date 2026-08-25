@@ -1055,6 +1055,23 @@ body{background:
 .quote-live-summary dt{font-size:11px}
 .quote-live-summary dd{overflow-wrap:anywhere}
 
+.pricing-model-selector{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.pricing-model-selector button{border:1px solid #d9e5df;border-radius:13px;background:#fff;padding:14px;text-align:right;display:grid;gap:4px;color:#42574e;cursor:pointer}
+.pricing-model-selector button strong{font:800 15px inherit;color:#213a30}
+.pricing-model-selector button span{font-size:12px;color:#718078}
+.pricing-model-selector button.active{border-color:#2d8263;background:linear-gradient(145deg,#eff9f4,#e5f4ed);box-shadow:0 0 0 2px rgba(45,130,99,.08)}
+.pricing-model-selector button.active strong{color:#176f53}
+.package-pricing-panel{border:1px solid #cfe4da;border-radius:14px;padding:15px;background:linear-gradient(145deg,#f5fbf8,#ecf7f2)}
+.package-pricing-panel .compact{margin-top:0}
+.package-live-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+.package-live-metrics span{display:grid;gap:3px;background:#fff;border-radius:10px;padding:10px}
+.package-live-metrics small{font-size:10px;color:#718078}
+.package-live-metrics b{font-size:14px;color:#1e5f48}
+.package-pricing-panel>p,.quote-package-note{margin:10px 0 0;color:#587067;font-size:12px;line-height:1.6}
+.quote-package-note{margin:0;border:1px solid #cfe4da;border-radius:11px;background:#eff8f4;padding:11px;color:#27664f}
+.allocation-row.package{grid-template-columns:minmax(150px,1.3fr) .65fr minmax(130px,1fr)}
+.quote-line.package-blend{grid-template-columns:1.25fr repeat(2,1fr) auto}
+
 @media(max-width:1000px){
   .quote-live-summary{grid-template-columns:150px minmax(0,1fr)}
   .quote-live-summary dl{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -1066,4 +1083,11 @@ body{background:
   .quote-live-summary>strong{margin-bottom:7px}
   .quote-live-summary dl{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
   .quote-live-summary dl div{padding:7px 9px}
+  .pricing-model-selector,.package-live-metrics{grid-template-columns:1fr}
+  .allocation-row.package{grid-template-columns:1fr 1fr}
+  .quote-line.package-blend{grid-template-columns:1fr 1fr}
+}
+
+@media(max-width:430px){
+  .allocation-row.package,.quote-line.package-blend{grid-template-columns:1fr}
 }
