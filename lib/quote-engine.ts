@@ -209,6 +209,8 @@ function addFlow(values: number[], month: number, amount: number) {
 }
 
 export function calculateQuote(quote: Quote) {
+  const pricingModel = quote.pricingModel || "standard";
+  const isMonthlyPackage = pricingModel === "monthly_package";
   const grams = positive(quote.gramsPerCup) || 12;
   const workDays = positive(quote.workDaysMonth) || 21;
   const cupsPerEmployee = positive(quote.cupsPerEmployee) || 1.5;
@@ -223,19 +225,30 @@ export function calculateQuote(quote: Quote) {
     (sum, blend) => sum + positive(blend.quantityKg),
     0,
   );
-  const excessKg = quote.applyVolumeDiscount
+  const volumeDiscountKg = quote.applyVolumeDiscount && !isMonthlyPackage
     ? Math.max(0, totalKg - 100)
     : 0;
-  let beanIncome = 0;
+  let standardBeanIncome = 0;
   let beanCost = 0;
   for (const blend of quote.blends) {
     const quantity = positive(blend.quantityKg);
     const cost = positive(blend.costPerKg);
     const price = Math.max(positive(blend.pricePerKg), cost + 10);
-    const discounted = totalKg ? excessKg * (quantity / totalKg) : 0;
-    beanIncome += (quantity - discounted) * price + discounted * price * 0.9;
+    const discounted = totalKg ? volumeDiscountKg * (quantity / totalKg) : 0;
+    standardBeanIncome +=
+      (quantity - discounted) * price + discounted * price * 0.9;
     beanCost += quantity * cost;
   }
+  const packageCount = Math.max(1, positive(quote.packageCount) || 1);
+  const packageIncludedKg =
+    packageCount * positive(quote.packageIncludedKg);
+  const packageExcessKg = Math.max(0, totalKg - packageIncludedKg);
+  const packageFixedIncome =
+    packageCount * positive(quote.packageMonthlyFee);
+  const packageExcessIncome =
+    packageExcessKg * positive(quote.packageExtraKgPrice);
+  const packageIncome = packageFixedIncome + packageExcessIncome;
+  const beanIncome = isMonthlyPackage ? 0 : standardBeanIncome;
   const beanProfit = beanIncome - beanCost;
   const averageBeanProfit = totalKg ? beanProfit / totalKg : 0;
 
@@ -269,6 +282,11 @@ export function calculateQuote(quote: Quote) {
     saleIncome += allocation.sale * salePrice;
     saleProfit += allocation.sale * (salePrice - packageCost);
   }
+  if (isMonthlyPackage) {
+    leaseIncome = 0;
+    saleIncome = 0;
+    saleProfit = 0;
+  }
 
   const contractMonths = Math.max(1, positive(quote.clientCostMonths) || 36);
   const supplierMonths = Math.max(1, positive(quote.supplierMonths) || 8);
@@ -297,13 +315,21 @@ export function calculateQuote(quote: Quote) {
     ? (financingType === "supplier" ? equipmentTotal : unfinancedEquipment) /
       supplierMonths
     : 0;
+  const packageServiceCost = isMonthlyPackage
+    ? positive(quote.packageServiceCost)
+    : 0;
+  const monthlyOperatingCost =
+    positive(quote.extraMonthlyCost) + packageServiceCost;
+  const monthlyClientRevenue = isMonthlyPackage
+    ? packageIncome
+    : beanIncome + leaseIncome;
   const operatingProfit =
-    beanProfit + leaseIncome - positive(quote.extraMonthlyCost);
+    monthlyClientRevenue - beanCost - monthlyOperatingCost;
 
   const totalClientRevenue =
-    (beanIncome + leaseIncome) * contractMonths + saleIncome;
+    monthlyClientRevenue * contractMonths + saleIncome;
   const totalBeanCost = beanCost * contractMonths;
-  const totalOperatingCost = positive(quote.extraMonthlyCost) * contractMonths;
+  const totalOperatingCost = monthlyOperatingCost * contractMonths;
   const totalEquipmentEconomicCost = equipmentTotal + financingInterest;
   const totalContractProfit =
     totalClientRevenue -
@@ -318,7 +344,7 @@ export function calculateQuote(quote: Quote) {
   );
   const monthlyFixedForBreakEven = Math.max(
     0,
-    positive(quote.extraMonthlyCost) +
+    monthlyOperatingCost +
       totalEquipmentEconomicCost / contractMonths -
       leaseIncome -
       saleIncome / contractMonths,
@@ -351,9 +377,9 @@ export function calculateQuote(quote: Quote) {
   const loanPayments = Array(displayMonths + 1).fill(0);
 
   for (let month = 1; month <= contractMonths; month += 1) {
-    addFlow(clientIncome, month + clientDelay, beanIncome + leaseIncome);
+    addFlow(clientIncome, month + clientDelay, monthlyClientRevenue);
     addFlow(coffeePayments, month + coffeeDelay, beanCost);
-    addFlow(extraCosts, month, positive(quote.extraMonthlyCost));
+    addFlow(extraCosts, month, monthlyOperatingCost);
   }
   if (saleIncome) addFlow(clientIncome, 1 + clientDelay, saleIncome);
 
@@ -500,6 +526,17 @@ export function calculateQuote(quote: Quote) {
   const averageLeasePerSet = leasedSetCount
     ? leaseIncome / leasedSetCount
     : 0;
+  const requiredMonthlyRevenueForTarget =
+    beanCost +
+    monthlyOperatingCost +
+    totalEquipmentEconomicCost / contractMonths +
+    targetMonthlyProfit;
+  const minimumPackageFeeForTarget = isMonthlyPackage
+    ? Math.max(
+        0,
+        (requiredMonthlyRevenueForTarget - packageExcessIncome) / packageCount,
+      )
+    : 0;
 
   const alerts: Array<{
     code: string;
@@ -552,6 +589,26 @@ export function calculateQuote(quote: Quote) {
       message: `בסיום התקשרות בחודש ${earlyExitMonth} נותרת חשיפה משוערת של ${Math.round(earlyExitExposure).toLocaleString("he-IL")} ₪.`,
     });
   }
+  if (
+    isMonthlyPackage &&
+    packageExcessKg > 0 &&
+    positive(quote.packageExtraKgPrice) <=
+      (totalKg ? beanCost / totalKg : 0)
+  ) {
+    alerts.push({
+      code: "package-extra-price",
+      severity: "danger",
+      message:
+        "מחיר הק״ג הנוסף אינו גבוה מעלות הקפה הממוצעת, ולכן כל חריגה שוחקת את העסקה.",
+    });
+  }
+  if (isMonthlyPackage && totalKg < packageIncludedKg) {
+    alerts.push({
+      code: "package-unused-allowance",
+      severity: "info",
+      message: `הצריכה הצפויה נמוכה ב-${Math.round(packageIncludedKg - totalKg)} ק״ג מהכמות הכלולה בחבילה.`,
+    });
+  }
 
   return {
     consumption: {
@@ -562,7 +619,7 @@ export function calculateQuote(quote: Quote) {
     },
     beans: {
       totalKg,
-      excessKg,
+      excessKg: isMonthlyPackage ? packageExcessKg : volumeDiscountKg,
       income: beanIncome,
       cost: beanCost,
       profit: beanProfit,
@@ -579,6 +636,24 @@ export function calculateQuote(quote: Quote) {
       leaseIncome,
       saleIncome,
       saleProfit,
+    },
+    package: {
+      active: isMonthlyPackage,
+      count: packageCount,
+      monthlyFee: positive(quote.packageMonthlyFee),
+      includedKgPerPackage: positive(quote.packageIncludedKg),
+      totalIncludedKg: packageIncludedKg,
+      excessKg: packageExcessKg,
+      extraKgPrice: positive(quote.packageExtraKgPrice),
+      fixedIncome: packageFixedIncome,
+      excessIncome: packageExcessIncome,
+      monthlyIncome: packageIncome,
+      serviceCost: packageServiceCost,
+      effectiveIncomePerKg: totalKg ? packageIncome / totalKg : 0,
+      extraKgMargin:
+        positive(quote.packageExtraKgPrice) -
+        (totalKg ? beanCost / totalKg : 0),
+      minimumMonthlyFeeForTarget: minimumPackageFeeForTarget,
     },
     financing: {
       type: financingType,
@@ -605,6 +680,7 @@ export function calculateQuote(quote: Quote) {
     },
     profitability: {
       operatingProfit,
+      monthlyClientRevenue,
       monthlyBalance: averageMonthlyProfit,
       averageMonthlyProfit,
       totalContractProfit,
