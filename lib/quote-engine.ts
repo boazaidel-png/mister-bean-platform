@@ -315,11 +315,11 @@ export function calculateQuote(quote: Quote) {
     ? (financingType === "supplier" ? equipmentTotal : unfinancedEquipment) /
       supplierMonths
     : 0;
-  const packageServiceCost = isMonthlyPackage
-    ? positive(quote.packageServiceCost)
-    : 0;
+  const monthlyServiceCost = positive(
+    quote.monthlyServiceCost ?? quote.packageServiceCost,
+  );
   const monthlyOperatingCost =
-    positive(quote.extraMonthlyCost) + packageServiceCost;
+    positive(quote.extraMonthlyCost) + monthlyServiceCost;
   const monthlyClientRevenue = isMonthlyPackage
     ? packageIncome
     : beanIncome + leaseIncome;
@@ -648,7 +648,7 @@ export function calculateQuote(quote: Quote) {
       fixedIncome: packageFixedIncome,
       excessIncome: packageExcessIncome,
       monthlyIncome: packageIncome,
-      serviceCost: packageServiceCost,
+      serviceCost: monthlyServiceCost,
       effectiveIncomePerKg: totalKg ? packageIncome / totalKg : 0,
       extraKgMargin:
         positive(quote.packageExtraKgPrice) -
@@ -701,5 +701,163 @@ export function calculateQuote(quote: Quote) {
       cashProfitGap,
     },
     alerts,
+  };
+}
+
+function roundUpTo(value: number, increment: number) {
+  if (value <= 0) return 0;
+  return Math.ceil(value / increment) * increment;
+}
+
+export function recommendQuotePricing(quote: Quote) {
+  const structural = calculateQuote({ ...quote, pricingModel: "standard" });
+  const totalKg = structural.beans.totalKg;
+  const contractMonths = Math.max(1, positive(quote.clientCostMonths) || 36);
+  const targetMonthlyProfit = positive(quote.targetMonthlyProfit ?? 500);
+  const monthlyServiceCost = positive(
+    quote.monthlyServiceCost ?? quote.packageServiceCost,
+  );
+  const monthlyOperatingCost =
+    positive(quote.extraMonthlyCost) + monthlyServiceCost;
+  const equipmentPerMonth =
+    structural.profitability.totalEquipmentEconomicCost / contractMonths;
+  const requiredMonthlyRevenue =
+    structural.beans.cost +
+    monthlyOperatingCost +
+    equipmentPerMonth +
+    targetMonthlyProfit;
+
+  const standardRevenueNeeded = Math.max(
+    0,
+    requiredMonthlyRevenue -
+      structural.equipment.leaseIncome -
+      structural.equipment.saleIncome / contractMonths,
+  );
+  const standardDiscountKg = quote.applyVolumeDiscount
+    ? Math.max(0, totalKg - 100)
+    : 0;
+  const standardRevenueFactor = totalKg
+    ? 1 - 0.1 * (standardDiscountKg / totalKg)
+    : 1;
+  const rawStandardRevenue = standardRevenueNeeded / standardRevenueFactor;
+  const standardMarginPerKg = totalKg
+    ? Math.max(10, (rawStandardRevenue - structural.beans.cost) / totalKg)
+    : 0;
+  const recommendedBlends = quote.blends.map((blend) => ({
+    ...blend,
+    pricePerKg: roundUpTo(positive(blend.costPerKg) + standardMarginPerKg, 1),
+  }));
+  const standardQuote: Quote = {
+    ...quote,
+    pricingModel: "standard",
+    blends: recommendedBlends,
+  };
+  const standardMetrics = calculateQuote(standardQuote);
+
+  const machineCount = Math.max(
+    1,
+    quote.equipment
+      .filter((item) =>
+        equipmentCatalog.some(
+          (catalog) => catalog.key === (item.key || item.model),
+        ),
+      )
+      .reduce((sum, item) => sum + positive(item.quantity), 0) ||
+      positive(quote.requestedMachines) ||
+      1,
+  );
+  const expectedKgPerPackage = totalKg / machineCount;
+  const includedKgPerPackage =
+    expectedKgPerPackage <= 5
+      ? Math.max(1, Math.floor(expectedKgPerPackage) || 1)
+      : Math.max(5, Math.floor(expectedKgPerPackage / 5) * 5);
+  const totalIncludedKg = includedKgPerPackage * machineCount;
+  const expectedExcessKg = Math.max(0, totalKg - totalIncludedKg);
+  const averageBeanCost = totalKg
+    ? structural.beans.cost / totalKg
+    : 0;
+  const currentAveragePrice = totalKg
+    ? quote.blends.reduce(
+        (sum, blend) =>
+          sum + positive(blend.quantityKg) * positive(blend.pricePerKg),
+        0,
+      ) / totalKg
+    : 0;
+  const extraKgPrice = roundUpTo(
+    Math.max(averageBeanCost + 20, currentAveragePrice),
+    5,
+  );
+  const packageMonthlyFee = roundUpTo(
+    Math.max(0, requiredMonthlyRevenue - expectedExcessKg * extraKgPrice) /
+      machineCount,
+    10,
+  );
+  const packageQuote: Quote = {
+    ...quote,
+    pricingModel: "monthly_package",
+    packageCount: machineCount,
+    packageIncludedKg: includedKgPerPackage,
+    packageExtraKgPrice: extraKgPrice,
+    packageMonthlyFee,
+    monthlyServiceCost,
+  };
+  const packageMetrics = calculateQuote(packageQuote);
+
+  const preference = quote.clientPricingPreference || "unknown";
+  const certainty =
+    quote.consumptionCertainty || (quote.knownKg > 0 ? "exact" : "estimated");
+  let recommendedModel: "standard" | "monthly_package" = "standard";
+  let reason =
+    "התמחור הרגיל שומר על גמישות כאשר הצריכה עדיין אינה ודאית.";
+  if (preference === "standard") {
+    recommendedModel = "standard";
+    reason = "הלקוח מעדיף תמחור לפי צריכה, והמסלול חושב כך שיעמוד ביעד הרווח.";
+  } else if (preference === "monthly_package") {
+    recommendedModel = "monthly_package";
+    reason = "הלקוח מעדיף תשלום חודשי קבוע, והחבילה כוללת את עלות הציוד, השירות והפולים.";
+  } else if (certainty === "exact" && structural.equipment.total > 0) {
+    recommendedModel = "monthly_package";
+    reason = "הצריכה ידועה וקיימת השקעת ציוד, ולכן חבילה חודשית מאפשרת החזר השקעה יציב וברור.";
+  } else if (
+    certainty === "estimated" &&
+    structural.equipment.total > 0 &&
+    contractMonths >= 24
+  ) {
+    recommendedModel = "monthly_package";
+    reason = "קיימת השקעת ציוד וחוזה מספיק ארוך; החבילה מאזנת בין ודאות חודשית לבין חיוב על חריגה.";
+  }
+
+  const missing: string[] = [];
+  if (!totalKg) missing.push("כמות פולים חודשית");
+  if (!quote.blends.some((blend) => positive(blend.costPerKg) > 0))
+    missing.push("עלות הפולים");
+  if (!contractMonths) missing.push("תקופת חוזה");
+
+  return {
+    recommendedModel,
+    reason,
+    confidence:
+      missing.length > 0
+        ? "low"
+        : certainty === "exact"
+          ? "high"
+          : "medium",
+    missing,
+    standard: {
+      quote: standardQuote,
+      metrics: standardMetrics,
+      averagePrice: standardMetrics.beans.averageSalePrice,
+      marginPerKg: standardMarginPerKg,
+    },
+    monthlyPackage: {
+      quote: packageQuote,
+      metrics: packageMetrics,
+      packageCount: machineCount,
+      includedKgPerPackage,
+      totalIncludedKg,
+      expectedExcessKg,
+      extraKgPrice,
+      monthlyFee: packageMonthlyFee,
+    },
   };
 }

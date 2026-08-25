@@ -6,6 +6,7 @@ import {
   automaticAddonsEnabled,
   calculateQuote,
   normalizeAllocationForQuantity,
+  recommendQuotePricing,
   recommendedConsumptionKg,
   syncAutomaticAddons,
 } from "./quote-engine.ts";
@@ -218,6 +219,76 @@ test("monthly package profit includes service, operations and equipment", () => 
   );
   assert.equal(result.cashflow.rows[0].income, 3500);
   assert.equal(result.cashflow.rows[0].operatingCost, 200);
+});
+
+test("pricing recommendation prefers a package for known usage with equipment", () => {
+  const quote = {
+    ...baseQuote([machine(1)]),
+    knownKg: 38,
+    consumptionCertainty: "exact" as const,
+    clientPricingPreference: "unknown" as const,
+    monthlyServiceCost: 100,
+    financingType: "none" as const,
+  };
+  const recommendation = recommendQuotePricing(quote);
+
+  assert.equal(recommendation.recommendedModel, "monthly_package");
+  assert.equal(recommendation.confidence, "high");
+  assert.equal(recommendation.monthlyPackage.packageCount, 1);
+  assert.equal(recommendation.monthlyPackage.includedKgPerPackage, 35);
+  assert.ok(
+    recommendation.monthlyPackage.metrics.profitability.averageMonthlyProfit >=
+      quote.targetMonthlyProfit!,
+  );
+});
+
+test("pricing recommendation stays flexible when consumption is unknown", () => {
+  const recommendation = recommendQuotePricing({
+    ...baseQuote([machine(1)]),
+    consumptionCertainty: "unknown",
+    clientPricingPreference: "unknown",
+  });
+
+  assert.equal(recommendation.recommendedModel, "standard");
+  assert.match(recommendation.reason, /אינה ודאית/);
+  assert.ok(
+    recommendation.standard.metrics.profitability.averageMonthlyProfit >= 500,
+  );
+});
+
+test("client pricing preference overrides the automatic route", () => {
+  const standard = recommendQuotePricing({
+    ...baseQuote([machine(1)]),
+    knownKg: 38,
+    consumptionCertainty: "exact",
+    clientPricingPreference: "standard",
+  });
+  const monthlyPackage = recommendQuotePricing({
+    ...baseQuote([]),
+    consumptionCertainty: "unknown",
+    clientPricingPreference: "monthly_package",
+  });
+
+  assert.equal(standard.recommendedModel, "standard");
+  assert.equal(monthlyPackage.recommendedModel, "monthly_package");
+});
+
+test("monthly service reserve is charged in both pricing routes", () => {
+  const quote = {
+    ...baseQuote([]),
+    clientCostMonths: 12,
+    monthlyServiceCost: 125,
+    packageServiceCost: 0,
+  };
+  const standard = calculateQuote({ ...quote, pricingModel: "standard" });
+  const monthlyPackage = calculateQuote({
+    ...quote,
+    pricingModel: "monthly_package",
+    packageMonthlyFee: 5000,
+  });
+
+  assert.equal(standard.profitability.totalOperatingCost, 125 * 12);
+  assert.equal(monthlyPackage.profitability.totalOperatingCost, 125 * 12);
 });
 
 test("a loan is cashflow, not profit, and equipment is paid at purchase", () => {

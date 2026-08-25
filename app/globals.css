@@ -1054,6 +1054,23 @@ body{background:
 .quote-live-summary dl div{min-width:0;padding:8px 10px;border:1px solid #e0e9e4;border-radius:10px;background:#fff;display:flex;flex-direction:column;justify-content:center;gap:4px}
 .quote-live-summary dt{font-size:11px}
 .quote-live-summary dd{overflow-wrap:anywhere}
+.quote-stepper{grid-template-columns:repeat(6,1fr)}
+
+.pricing-recommendation-step{display:grid;gap:15px}
+.pricing-recommendation-head{display:flex;align-items:center;gap:13px;border-radius:16px;padding:18px;background:linear-gradient(125deg,#164c3b,#27775c);color:#fff}
+.pricing-recommendation-head>span{width:44px;height:44px;border-radius:13px;background:rgba(255,255,255,.14);display:grid;place-items:center;flex:0 0 auto}
+.pricing-recommendation-head>div{flex:1}.pricing-recommendation-head small{opacity:.75}.pricing-recommendation-head h3{margin:2px 0;font-size:21px}.pricing-recommendation-head p{margin:3px 0 0;font-size:12px;line-height:1.6;opacity:.86}
+.pricing-recommendation-head .confidence{border-radius:999px;padding:7px 10px;background:rgba(255,255,255,.14);font-size:11px;white-space:nowrap}.pricing-recommendation-head .confidence.low{background:#fff0d9;color:#8b5810}
+.pricing-missing-data{border:1px solid #efd19b;border-radius:11px;background:#fff7e8;color:#855717;padding:11px 13px;font-size:12px;font-weight:700}
+.pricing-comparison-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.pricing-comparison-grid article{position:relative;border:1px solid #dce6e1;border-radius:15px;background:#fff;padding:15px;display:grid;gap:13px;box-shadow:0 6px 18px rgba(18,55,42,.04)}
+.pricing-comparison-grid article.recommended{border-color:#3b9876;background:linear-gradient(145deg,#f5fbf8,#edf8f3);box-shadow:0 0 0 2px rgba(59,152,118,.08)}
+.pricing-comparison-grid article>em{position:absolute;top:12px;left:12px;border-radius:999px;background:#176f53;color:#fff;padding:5px 9px;font:800 10px inherit;font-style:normal}
+.pricing-comparison-grid header{display:flex;justify-content:space-between;align-items:center;color:#236b51}.pricing-comparison-grid header small{color:#75837c}.pricing-comparison-grid h3{margin:2px 0 0;color:#1b352b}
+.pricing-comparison-grid dl{margin:0;display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.pricing-comparison-grid dl div{border-radius:10px;background:#f3f7f5;padding:9px;display:grid;gap:3px}.pricing-comparison-grid dt{font-size:10px;color:#73817a}.pricing-comparison-grid dd{margin:0;font:800 13px inherit;color:#213e33}
+.pricing-comparison-grid article>button{border:0;border-radius:10px;background:#176f53;color:#fff;padding:10px;font:800 12px inherit;cursor:pointer}.pricing-comparison-grid article>button:disabled{opacity:.45;cursor:not-allowed}
+.pricing-manual-editor{border:1px solid #dce7e2;border-radius:14px;padding:15px;background:#fafcfb}.pricing-manual-editor>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.pricing-manual-editor>header small,.pricing-manual-editor>header h3{display:block}.pricing-manual-editor>header h3{margin:2px 0 0}.pricing-manual-editor>header>span{color:#718078;font-size:11px}.pricing-manual-editor>p{margin:10px 0 0;color:#60736a;font-size:11px}
+.recommended-blend-prices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.recommended-blend-prices label{display:grid;gap:5px}.recommended-blend-prices span{font-size:11px;color:#61736b}.recommended-blend-prices input{height:41px;border:1px solid #d6e1dc;border-radius:9px;padding:8px 10px;font:700 13px inherit}
 
 .pricing-model-selector{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .pricing-model-selector button{border:1px solid #d9e5df;border-radius:13px;background:#fff;padding:14px;text-align:right;display:grid;gap:4px;color:#42574e;cursor:pointer}
@@ -1086,6 +1103,9 @@ body{background:
   .pricing-model-selector,.package-live-metrics{grid-template-columns:1fr}
   .allocation-row.package{grid-template-columns:1fr 1fr}
   .quote-line.package-blend{grid-template-columns:1fr 1fr}
+  .pricing-comparison-grid{grid-template-columns:1fr}
+  .pricing-recommendation-head,.pricing-manual-editor>header{align-items:flex-start;flex-wrap:wrap}
+  .recommended-blend-prices{grid-template-columns:1fr}
 }
 
 @media(max-width:430px){

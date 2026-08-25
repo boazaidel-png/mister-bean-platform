@@ -35,6 +35,7 @@ import {
   equipmentCatalog,
   importers,
   normalizeAllocationForQuantity,
+  recommendQuotePricing,
   recommendedConsumptionKg,
   recommendedEquipment,
   syncAutomaticAddons,
@@ -161,12 +162,15 @@ const quoteFromLead = (lead?: Lead): Quote => {
   cupsPerEmployee: 1.5,
   gramsPerCup: 12,
   workDaysMonth: 21,
+  consumptionCertainty: lead?.monthlyConsumption ? "exact" : "estimated",
+  clientPricingPreference: "unknown",
   pricingModel: "standard",
   packageMonthlyFee: 650,
   packageCount: 1,
   packageIncludedKg: 5,
   packageExtraKgPrice: 90,
   packageServiceCost: 0,
+  monthlyServiceCost: 0,
   blends: [
     {
       name: "DX",
@@ -2012,6 +2016,11 @@ function QuoteModal({
     packageIncludedKg: quote.packageIncludedKg ?? 5,
     packageExtraKgPrice: quote.packageExtraKgPrice ?? 90,
     packageServiceCost: quote.packageServiceCost ?? 0,
+    monthlyServiceCost:
+      quote.monthlyServiceCost ?? quote.packageServiceCost ?? 0,
+    consumptionCertainty:
+      quote.consumptionCertainty || (quote.knownKg > 0 ? "exact" : "estimated"),
+    clientPricingPreference: quote.clientPricingPreference || "unknown",
     equipment: quote.equipment.map((item) => ({ ...item })),
     autoSyncAccessories: initialAutoSyncAccessories,
   }));
@@ -2025,6 +2034,10 @@ function QuoteModal({
     useState<Quote | null>(null);
   const historical = ["נשלחה", "אושרה", "נדחתה"].includes(quote.status);
   const metrics = useMemo(() => quoteMetrics(draft), [draft]);
+  const pricingRecommendation = useMemo(
+    () => recommendQuotePricing(draft),
+    [draft],
+  );
   const update = <K extends keyof Quote>(key: K, value: Quote[K]) =>
     setDraft((current) => ({ ...current, [key]: value }));
   const updateBlend = (index: number, data: Partial<QuoteBlend>) =>
@@ -2229,6 +2242,24 @@ function QuoteModal({
       metrics.package.minimumMonthlyFeeForTarget,
     );
   };
+  const applyPricingRecommendation = (
+    model: "standard" | "monthly_package",
+  ) => {
+    if (!recommendationBaseline) setRecommendationBaseline(draft);
+    const recommended =
+      model === "standard"
+        ? pricingRecommendation.standard.quote
+        : pricingRecommendation.monthlyPackage.quote;
+    setDraft((current) => ({
+      ...current,
+      pricingModel: model,
+      blends: recommended.blends,
+      packageCount: recommended.packageCount,
+      packageIncludedKg: recommended.packageIncludedKg,
+      packageExtraKgPrice: recommended.packageExtraKgPrice,
+      packageMonthlyFee: recommended.packageMonthlyFee,
+    }));
+  };
   const submit = async (asCopy = false) => {
     setSaving(true);
     try {
@@ -2264,7 +2295,14 @@ function QuoteModal({
     }
     setStep(nextStep);
   };
-  const steps = ["לקוח וצריכה", "פולים", "ציוד", "מתווה ומימון", "סיכום"];
+  const steps = [
+    "לקוח וצריכה",
+    "פולים ועלויות",
+    "ציוד",
+    "מתווה ומימון",
+    "המלצת תמחור",
+    "סיכום",
+  ];
 
   return (
     <SalesModal
@@ -2409,6 +2447,38 @@ function QuoteModal({
                 />
               </label>
               <label>
+                <span>רמת ודאות בצריכה</span>
+                <select
+                  value={draft.consumptionCertainty || "estimated"}
+                  onChange={(event) =>
+                    update(
+                      "consumptionCertainty",
+                      event.target.value as Quote["consumptionCertainty"],
+                    )
+                  }
+                >
+                  <option value="exact">צריכה ידועה ומדויקת</option>
+                  <option value="estimated">הערכת צריכה</option>
+                  <option value="unknown">עדיין לא ידוע</option>
+                </select>
+              </label>
+              <label>
+                <span>העדפת תמחור של הלקוח</span>
+                <select
+                  value={draft.clientPricingPreference || "unknown"}
+                  onChange={(event) =>
+                    update(
+                      "clientPricingPreference",
+                      event.target.value as Quote["clientPricingPreference"],
+                    )
+                  }
+                >
+                  <option value="unknown">לא ידוע / פתוח להמלצה</option>
+                  <option value="standard">מחיר לפי צריכה</option>
+                  <option value="monthly_package">תשלום חודשי קבוע</option>
+                </select>
+              </label>
+              <label>
                 <span>כוסות לעובד ביום</span>
                 <input
                   type="number"
@@ -2466,8 +2536,8 @@ function QuoteModal({
             <div className="quote-lines">
               <div className="quote-lines-head">
                 <div>
-                  <h3>מסלול תמחור ופולים</h3>
-                  <p>בחירת מסלול אחד לעסקה ועלויות הקפה בפועל</p>
+                  <h3>פולים ועלויות</h3>
+                  <p>מגדירים כאן רק את הכמות והעלות. מחיר המכירה יומלץ בהמשך.</p>
                 </div>
                 <button
                   onClick={() =>
@@ -2480,67 +2550,8 @@ function QuoteModal({
                   <Plus size={15} /> הוספת בלנד
                 </button>
               </div>
-              <div className="pricing-model-selector">
-                <button
-                  className={(draft.pricingModel || "standard") === "standard" ? "active" : ""}
-                  onClick={() => update("pricingModel", "standard")}
-                >
-                  <strong>תמחור רגיל</strong>
-                  <span>מחיר לק״ג ושכירות או מכירת ציוד</span>
-                </button>
-                <button
-                  className={draft.pricingModel === "monthly_package" ? "active" : ""}
-                  onClick={() => update("pricingModel", "monthly_package")}
-                >
-                  <strong>חבילה חודשית</strong>
-                  <span>מכונה, שירות וכמות פולים במחיר קבוע</span>
-                </button>
-              </div>
-              {draft.pricingModel === "monthly_package" ? (
-                <section className="package-pricing-panel">
-                  <div className="sales-form-grid compact">
-                    <label>
-                      <span>מחיר חודשי לחבילה</span>
-                      <input type="number" min="0" value={draft.packageMonthlyFee ?? 0} onChange={(event) => update("packageMonthlyFee", +event.target.value)} />
-                    </label>
-                    <label>
-                      <span>מספר חבילות</span>
-                      <input type="number" min="1" value={draft.packageCount ?? 1} onChange={(event) => update("packageCount", +event.target.value)} />
-                    </label>
-                    <label>
-                      <span>ק״ג כלולים בכל חבילה</span>
-                      <input type="number" min="0" step="0.1" value={draft.packageIncludedKg ?? 0} onChange={(event) => update("packageIncludedKg", +event.target.value)} />
-                    </label>
-                    <label>
-                      <span>מחיר לכל ק״ג נוסף</span>
-                      <input type="number" min="0" value={draft.packageExtraKgPrice ?? 0} onChange={(event) => update("packageExtraKgPrice", +event.target.value)} />
-                    </label>
-                    <label className="full">
-                      <span>עלות שירות חודשית פנימית לעסקה</span>
-                      <input type="number" min="0" value={draft.packageServiceCost ?? 0} onChange={(event) => update("packageServiceCost", +event.target.value)} />
-                    </label>
-                  </div>
-                  <div className="package-live-metrics">
-                    <span><small>סה״כ כלול</small><b>{metrics.package.totalIncludedKg} ק״ג</b></span>
-                    <span><small>חריגה צפויה</small><b>{metrics.package.excessKg} ק״ג</b></span>
-                    <span><small>הכנסה חודשית</small><b>{money(metrics.package.monthlyIncome)}</b></span>
-                  </div>
-                  <p>הכמות הכלולה מתאפסת מדי חודש. במסלול הזה מחירי המכירה הרגילים והשכרת הציוד אינם נספרים בנוסף.</p>
-                </section>
-              ) : (
-                <label className="quote-discount-toggle">
-                  <input
-                    type="checkbox"
-                    checked={draft.applyVolumeDiscount}
-                    onChange={(event) =>
-                      update("applyVolumeDiscount", event.target.checked)
-                    }
-                  />
-                  <span>הפעלת הנחת כמות של 10% על הק״ג שמעל 100 ק״ג</span>
-                </label>
-              )}
               {draft.blends.map((blend, index) => (
-                <div className={`quote-line${draft.pricingModel === "monthly_package" ? " package-blend" : ""}`} key={`${blend.name}-${index}`}>
+                <div className="quote-line package-blend" key={`${blend.name}-${index}`}>
                   <label>
                     <span>בלנד</span>
                     <select
@@ -2585,19 +2596,6 @@ function QuoteModal({
                       }
                     />
                   </label>
-                  {draft.pricingModel !== "monthly_package" && (
-                    <label>
-                      <span>מחיר מכירה</span>
-                      <input
-                        type="number"
-                        min="0"
-                        value={blend.pricePerKg}
-                        onChange={(event) =>
-                          updateBlend(index, { pricePerKg: +event.target.value })
-                        }
-                      />
-                    </label>
-                  )}
                   <button
                     className="line-remove"
                     onClick={() =>
@@ -2801,11 +2799,9 @@ function QuoteModal({
                   <p>חלוקת הציוד ובדיקת מבנה העסקה</p>
                 </div>
               </div>
-              {draft.pricingModel === "monthly_package" && (
-                <div className="quote-package-note">
-                  הציוד כלול בחבילה. עלותו ומימונו מחושבים במלואם, ללא הכנסה נוספת מהשכרה או ממכירה.
-                </div>
-              )}
+              <div className="quote-package-note">
+                חלוקת הציוד משמשת להשוואת המסלול הרגיל. אם תיבחר חבילה חודשית, עלות הציוד תחושב אך הכנסה מהשכרה או ממכירה לא תיספר בנוסף.
+              </div>
               <div className="allocation-list">
                 {draft.equipment
                   .filter(
@@ -2823,13 +2819,13 @@ function QuoteModal({
                       allocation.lease -
                       allocation.sale;
                     return (
-                      <div className={`allocation-row${draft.pricingModel === "monthly_package" ? " package" : ""}`} key={item.key || item.model}>
+                      <div className="allocation-row" key={item.key || item.model}>
                         <strong>{item.model}</strong>
                         <label>
                           <span>כמות</span>
                           <input value={item.quantity} readOnly />
                         </label>
-                        {draft.pricingModel !== "monthly_package" && (["free", "lease", "sale"] as const).map((field) => (
+                        {(["free", "lease", "sale"] as const).map((field) => (
                           <label key={field}>
                             <span>
                               {field === "free"
@@ -2848,21 +2844,17 @@ function QuoteModal({
                             />
                           </label>
                         ))}
-                        {draft.pricingModel === "monthly_package" ? (
-                          <small>כלול במחיר החבילה</small>
-                        ) : (
-                          <small className={remaining < 0 ? "negative" : ""}>
-                            {remaining < 0
-                              ? `חריגה של ${Math.abs(remaining)}`
-                              : `נותרו לחלוקה: ${remaining}`}
-                          </small>
-                        )}
+                        <small className={remaining < 0 ? "negative" : ""}>
+                          {remaining < 0
+                            ? `חריגה של ${Math.abs(remaining)}`
+                            : `נותרו לחלוקה: ${remaining}`}
+                        </small>
                       </div>
                     );
                   })}
               </div>
               <div className="sales-form-grid">
-                {draft.pricingModel !== "monthly_package" && <><label>
+                <label>
                   <span>תקופה לכיסוי ציוד בהשכרה</span>
                   <input
                     type="number"
@@ -2893,7 +2885,18 @@ function QuoteModal({
                     />
                     <b>%</b>
                   </div>
-                </label></>}
+                </label>
+                <label>
+                  <span>רזרבת שירות חודשית</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={draft.monthlyServiceCost ?? 0}
+                    onChange={(event) =>
+                      update("monthlyServiceCost", +event.target.value)
+                    }
+                  />
+                </label>
                 <label>
                   <span>תקופת חוזה לחישוב</span>
                   <input
@@ -3111,6 +3114,123 @@ function QuoteModal({
             </div>
           )}
           {step === 4 && (
+            <div className="pricing-recommendation-step">
+              <section className="pricing-recommendation-head">
+                <span><Sparkles size={22} /></span>
+                <div>
+                  <small>המלצת המערכת</small>
+                  <h3>
+                    {pricingRecommendation.recommendedModel === "monthly_package"
+                      ? "חבילה חודשית"
+                      : "תמחור רגיל לפי צריכה"}
+                  </h3>
+                  <p>{pricingRecommendation.reason}</p>
+                </div>
+                <b className={`confidence ${pricingRecommendation.confidence}`}>
+                  {pricingRecommendation.confidence === "high"
+                    ? "ודאות גבוהה"
+                    : pricingRecommendation.confidence === "medium"
+                      ? "ודאות בינונית"
+                      : "חסרים נתונים"}
+                </b>
+              </section>
+
+              {pricingRecommendation.missing.length > 0 && (
+                <div className="pricing-missing-data">
+                  להמלצה מלאה יש להשלים: {pricingRecommendation.missing.join(" · ")}
+                </div>
+              )}
+
+              <div className="pricing-comparison-grid">
+                <article className={pricingRecommendation.recommendedModel === "standard" ? "recommended" : ""}>
+                  {pricingRecommendation.recommendedModel === "standard" && <em>מומלץ</em>}
+                  <header>
+                    <div><small>מסלול</small><h3>תמחור רגיל</h3></div>
+                    <CircleDollarSign size={23} />
+                  </header>
+                  <dl>
+                    <div><dt>מחיר ממוצע מומלץ לק״ג</dt><dd>{money(pricingRecommendation.standard.averagePrice)}</dd></div>
+                    <div><dt>רווח חודשי אמיתי</dt><dd>{money(pricingRecommendation.standard.metrics.profitability.averageMonthlyProfit)}</dd></div>
+                    <div><dt>תקופת חישוב</dt><dd>{draft.clientCostMonths} חודשים</dd></div>
+                    <div><dt>סיכון בנטישה מוקדמת</dt><dd>{money(pricingRecommendation.standard.metrics.profitability.earlyExitExposure)}</dd></div>
+                  </dl>
+                  <button
+                    disabled={pricingRecommendation.missing.length > 0}
+                    onClick={() => applyPricingRecommendation("standard")}
+                  >
+                    החלת התמחור הרגיל
+                  </button>
+                </article>
+
+                <article className={pricingRecommendation.recommendedModel === "monthly_package" ? "recommended" : ""}>
+                  {pricingRecommendation.recommendedModel === "monthly_package" && <em>מומלץ</em>}
+                  <header>
+                    <div><small>מסלול</small><h3>חבילה חודשית</h3></div>
+                    <Sparkles size={23} />
+                  </header>
+                  <dl>
+                    <div><dt>מחיר מומלץ</dt><dd>{pricingRecommendation.monthlyPackage.packageCount} × {money(pricingRecommendation.monthlyPackage.monthlyFee)}</dd></div>
+                    <div><dt>כמות כלולה</dt><dd>{pricingRecommendation.monthlyPackage.totalIncludedKg} ק״ג</dd></div>
+                    <div><dt>מחיר לק״ג נוסף</dt><dd>{money(pricingRecommendation.monthlyPackage.extraKgPrice)}</dd></div>
+                    <div><dt>רווח חודשי אמיתי</dt><dd>{money(pricingRecommendation.monthlyPackage.metrics.profitability.averageMonthlyProfit)}</dd></div>
+                  </dl>
+                  <button
+                    disabled={pricingRecommendation.missing.length > 0}
+                    onClick={() => applyPricingRecommendation("monthly_package")}
+                  >
+                    החלת החבילה החודשית
+                  </button>
+                </article>
+              </div>
+
+              <section className="pricing-manual-editor">
+                <header>
+                  <div>
+                    <small>המסלול שנבחר להצעה</small>
+                    <h3>{draft.pricingModel === "monthly_package" ? "חבילה חודשית" : "תמחור רגיל"}</h3>
+                  </div>
+                  <span>ניתן לתקן את ההמלצה ידנית לפני הסיכום</span>
+                </header>
+                {draft.pricingModel === "monthly_package" ? (
+                  <>
+                    <div className="sales-form-grid compact">
+                      <label><span>מחיר חודשי לחבילה</span><input type="number" min="0" value={draft.packageMonthlyFee ?? 0} onChange={(event) => update("packageMonthlyFee", +event.target.value)} /></label>
+                      <label><span>מספר חבילות</span><input type="number" min="1" value={draft.packageCount ?? 1} onChange={(event) => update("packageCount", +event.target.value)} /></label>
+                      <label><span>ק״ג כלולים בכל חבילה</span><input type="number" min="0" step="0.1" value={draft.packageIncludedKg ?? 0} onChange={(event) => update("packageIncludedKg", +event.target.value)} /></label>
+                      <label><span>מחיר לכל ק״ג נוסף</span><input type="number" min="0" value={draft.packageExtraKgPrice ?? 0} onChange={(event) => update("packageExtraKgPrice", +event.target.value)} /></label>
+                    </div>
+                    <div className="package-live-metrics">
+                      <span><small>סה״כ כלול</small><b>{metrics.package.totalIncludedKg} ק״ג</b></span>
+                      <span><small>חריגה צפויה</small><b>{metrics.package.excessKg} ק״ג</b></span>
+                      <span><small>הכנסה חודשית</small><b>{money(metrics.package.monthlyIncome)}</b></span>
+                    </div>
+                    <p>במסלול זה מחירי המכירה הרגילים והשכרת הציוד אינם נספרים בנוסף.</p>
+                  </>
+                ) : (
+                  <>
+                    <label className="quote-discount-toggle">
+                      <input type="checkbox" checked={draft.applyVolumeDiscount} onChange={(event) => update("applyVolumeDiscount", event.target.checked)} />
+                      <span>הפעלת הנחת כמות של 10% על הק״ג שמעל 100 ק״ג</span>
+                    </label>
+                    <div className="recommended-blend-prices">
+                      {draft.blends.map((blend, index) => (
+                        <label key={`${blend.name}-price-${index}`}>
+                          <span>{blend.name} · {blend.quantityKg} ק״ג · עלות {money(blend.costPerKg)}</span>
+                          <input type="number" min="0" value={blend.pricePerKg} onChange={(event) => updateBlend(index, { pricePerKg: +event.target.value })} />
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {recommendationBaseline && (
+                  <button className="quote-undo" onClick={() => { setDraft(recommendationBaseline); setRecommendationBaseline(null); }}>
+                    ביטול החלת ההמלצה
+                  </button>
+                )}
+              </section>
+            </div>
+          )}
+          {step === 5 && (
             <div className="quote-summary">
               <div className="quote-summary-hero">
                 <span>
@@ -3138,7 +3258,7 @@ function QuoteModal({
                   <span><small>{draft.pricingModel === "monthly_package" ? "מרווח על ק״ג נוסף" : "רווח גולמי לק״ג"}</small><b>{money(draft.pricingModel === "monthly_package" ? metrics.package.extraKgMargin : metrics.beans.grossProfitPerKg)}</b></span>
                   {draft.pricingModel === "monthly_package" && <span><small>חבילה חודשית</small><b>{metrics.package.count} × {money(metrics.package.monthlyFee)}</b></span>}
                   {draft.pricingModel === "monthly_package" && <span><small>כמות כלולה</small><b>{metrics.package.totalIncludedKg} ק״ג</b></span>}
-                  <span><small>תפעול ושירות חודשי</small><b>{money(draft.extraMonthlyCost + (draft.pricingModel === "monthly_package" ? (draft.packageServiceCost || 0) : 0))}</b></span>
+                  <span><small>תפעול ושירות חודשי</small><b>{money(draft.extraMonthlyCost + (draft.monthlyServiceCost ?? draft.packageServiceCost ?? 0))}</b></span>
                   <span><small>תשלום לקוח</small><b>{draft.clientPayTerm ? `שוטף + ${draft.clientPayTerm * 30}` : "מיידי"}</b></span>
                   <span><small>תשלום ספק פולים</small><b>{draft.coffeeSupplierPayTerm ? `שוטף + ${draft.coffeeSupplierPayTerm * 30}` : "מיידי"}</b></span>
                   <span><small>אופן תשלום ציוד</small><b>{metrics.financing.type === "loan" ? "הלוואה" : metrics.financing.type === "supplier" ? "פריסה ליבואן" : "ללא מימון"}</b></span>
