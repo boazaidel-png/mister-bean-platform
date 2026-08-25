@@ -126,11 +126,16 @@ function normalizeQuoteRecord(value: Quote): Quote {
     equipmentCosts: value.equipmentCosts || {},
     allocation: value.allocation || [],
     pricingModel: value.pricingModel || "standard",
+    consumptionCertainty:
+      value.consumptionCertainty || (value.knownKg > 0 ? "exact" : "estimated"),
+    clientPricingPreference: value.clientPricingPreference || "unknown",
     packageMonthlyFee: value.packageMonthlyFee || 0,
     packageCount: Math.max(1, value.packageCount || 1),
     packageIncludedKg: value.packageIncludedKg || 0,
     packageExtraKgPrice: value.packageExtraKgPrice || 0,
     packageServiceCost: value.packageServiceCost || 0,
+    monthlyServiceCost:
+      value.monthlyServiceCost ?? value.packageServiceCost ?? 0,
     supplierMonths: value.supplierMonths || 8,
     leaseMonths: value.leaseMonths || 24,
     manualLeasePerSet: value.manualLeasePerSet || 0,
