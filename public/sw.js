@@ -1,4 +1,4 @@
-const CACHE_NAME = "mister-bean-shell-v9";
+const CACHE_NAME = "mister-bean-shell-v10";
 const APP_ROOT = "/mister-bean-platform/";
 const STATIC_ASSETS = [
   APP_ROOT,
