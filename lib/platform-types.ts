@@ -315,6 +315,11 @@ export type QuoteAllocation = {
 
 export type QuoteFinancingType = "none" | "loan" | "supplier";
 export type QuotePricingModel = "standard" | "monthly_package";
+export type ConsumptionCertainty = "exact" | "estimated" | "unknown";
+export type ClientPricingPreference =
+  | "unknown"
+  | "standard"
+  | "monthly_package";
 
 export type Quote = {
   id: string;
@@ -337,12 +342,15 @@ export type Quote = {
   cupsPerEmployee: number;
   gramsPerCup: number;
   workDaysMonth: number;
+  consumptionCertainty?: ConsumptionCertainty;
+  clientPricingPreference?: ClientPricingPreference;
   pricingModel?: QuotePricingModel;
   packageMonthlyFee?: number;
   packageCount?: number;
   packageIncludedKg?: number;
   packageExtraKgPrice?: number;
   packageServiceCost?: number;
+  monthlyServiceCost?: number;
   blends: QuoteBlend[];
   equipment: QuoteEquipment[];
   autoSyncAccessories?: boolean;
