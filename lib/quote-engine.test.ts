@@ -150,6 +150,76 @@ test("quote totals include the machine and its synchronized package", () => {
   assert.ok(Math.abs(result.beans.costPerCup - 1.2) < 0.000001);
 });
 
+test("monthly package charges a fixed fee plus only the excess kilograms", () => {
+  const result = calculateQuote({
+    ...baseQuote([]),
+    pricingModel: "monthly_package",
+    blends: [{ name: "DX", quantityKg: 8, costPerKg: 55, pricePerKg: 999 }],
+    packageMonthlyFee: 650,
+    packageCount: 1,
+    packageIncludedKg: 5,
+    packageExtraKgPrice: 90,
+    packageServiceCost: 0,
+    financingType: "none",
+  });
+
+  assert.equal(result.package.totalIncludedKg, 5);
+  assert.equal(result.package.excessKg, 3);
+  assert.equal(result.package.fixedIncome, 650);
+  assert.equal(result.package.excessIncome, 270);
+  assert.equal(result.profitability.monthlyClientRevenue, 920);
+  assert.equal(result.beans.cost, 440);
+  assert.equal(result.profitability.operatingProfit, 480);
+});
+
+test("monthly package never double-counts bean prices, equipment rent or sales", () => {
+  const equipment = [
+    { ...machine(1), commercialModel: "השכרה" as const },
+  ];
+  const quote = {
+    ...baseQuote(equipment),
+    pricingModel: "monthly_package" as const,
+    packageMonthlyFee: 650,
+    packageCount: 1,
+    packageIncludedKg: 38,
+    packageExtraKgPrice: 90,
+    allocation: [{ key: "f15", free: 0, lease: 0, sale: 1 }],
+    manualLeasePerSet: 5000,
+  };
+  const first = calculateQuote(quote);
+  const second = calculateQuote({
+    ...quote,
+    blends: [{ ...quote.blends[0], pricePerKg: 5000 }],
+  });
+
+  assert.equal(first.equipment.leaseIncome, 0);
+  assert.equal(first.equipment.saleIncome, 0);
+  assert.equal(first.profitability.totalClientRevenue, 650 * 36);
+  assert.equal(second.profitability.totalClientRevenue, 650 * 36);
+});
+
+test("monthly package profit includes service, operations and equipment", () => {
+  const result = calculateQuote({
+    ...baseQuote([machine(1)]),
+    pricingModel: "monthly_package",
+    packageMonthlyFee: 3500,
+    packageCount: 1,
+    packageIncludedKg: 38,
+    packageExtraKgPrice: 90,
+    packageServiceCost: 120,
+    extraMonthlyCost: 80,
+    financingType: "none",
+  });
+
+  assert.equal(result.profitability.totalOperatingCost, 200 * 36);
+  assert.equal(
+    result.profitability.totalContractProfit,
+    3500 * 36 - 38 * 60 * 36 - 200 * 36 - 4090,
+  );
+  assert.equal(result.cashflow.rows[0].income, 3500);
+  assert.equal(result.cashflow.rows[0].operatingCost, 200);
+});
+
 test("a loan is cashflow, not profit, and equipment is paid at purchase", () => {
   const equipment = syncAutomaticAddons([machine(1)]);
   const quote = {
