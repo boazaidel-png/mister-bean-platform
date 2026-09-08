@@ -853,8 +853,6 @@ export async function convertQuoteToCustomer(
     throw new Error("הקמה אוטומטית מתבצעת רק לאחר אישור הצעה.");
   }
 
-  if (quote.status === "אושרה") await requireRecentAdminLogin();
-
   const { auth, db } = getFirebaseServices();
   const accountId = quote.accountId || accountIdForQuote(quote);
   const accountRef = doc(db, "accounts", accountId);
