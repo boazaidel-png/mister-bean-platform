@@ -873,12 +873,6 @@ export async function convertQuoteToCustomer(
     ? resolveInviteEmail(quote.email, lead?.email)
     : "";
 
-  if (shouldCreateInvite && !inviteEmail) {
-    throw new Error(
-      "לא ניתן לאשר את העסקה ללא כתובת מייל תקינה של איש הקשר.",
-    );
-  }
-
   let existingInvite: AccessInvite | null = null;
   if (inviteEmail) {
     const inviteSnapshot = await getDoc(doc(db, "accessInvites", inviteEmail));
