@@ -631,7 +631,9 @@ const activityEntityNames = {
   machines: "מכונה",
 } as const;
 
-export async function savePlatformStore(next: PlatformStore, actor?: UserProfile) {
+let platformSaveQueue: Promise<void> = Promise.resolve();
+
+async function persistPlatformStore(next: PlatformStore, actor?: UserProfile) {
   const changes = changedEntities(next, lastSyncedStore);
   if (!changes.length) return;
 
@@ -660,6 +662,20 @@ export async function savePlatformStore(next: PlatformStore, actor?: UserProfile
   }
   await batch.commit();
   lastSyncedStore = next;
+}
+
+export function savePlatformStore(next: PlatformStore, actor?: UserProfile) {
+  const snapshot: PlatformStore = {
+    tickets: next.tickets.map((item) => ({ ...item })),
+    orders: next.orders.map((item) => ({ ...item })),
+    tasks: next.tasks.map((item) => ({ ...item })),
+    machines: next.machines.map((item) => ({ ...item })),
+    activities: next.activities.map((item) => ({ ...item })),
+  };
+  platformSaveQueue = platformSaveQueue
+    .catch(() => undefined)
+    .then(() => persistPlatformStore(snapshot, actor));
+  return platformSaveQueue;
 }
 
 export function subscribeToSalesWorkspace(

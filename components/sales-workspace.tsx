@@ -33,6 +33,7 @@ import {
   calculateQuote,
   equipmentTotalCost,
   equipmentCatalog,
+  isMachineEquipment,
   importers,
   normalizeAllocationForQuantity,
   recommendQuotePricing,
@@ -2047,6 +2048,40 @@ function QuoteModal({
         blendIndex === index ? { ...blend, ...data } : blend,
       ),
     );
+  const updateCustomMachine = (key: string, data: Partial<QuoteEquipment>) =>
+    setDraft((current) => {
+      const oldItem = current.equipment.find((item) => (item.key || item.model) === key);
+      const oldQuantity = oldItem?.quantity || 0;
+      const equipment = current.equipment.map((item) =>
+        (item.key || item.model) === key ? { ...item, ...data } : item,
+      );
+      const newItem = equipment.find((item) => (item.key || item.model) === key);
+      const allocation = current.allocation.map((row) =>
+        row.key === key
+          ? { ...normalizeAllocationForQuantity(row, oldQuantity, newItem?.quantity || 0), key }
+          : row,
+      );
+      return {
+        ...current,
+        equipment,
+        allocation,
+        financedAmount:
+          current.financingType === "loan" && !financedAmountManual
+            ? equipmentTotalCost(equipment)
+            : current.financedAmount,
+      };
+    });
+  const addCustomMachine = () => {
+    const key = id("custom-machine");
+    setDraft((current) => ({
+      ...current,
+      equipment: [...current.equipment, {
+        key, model: "", quantity: 1, unitCost: 0, importer: "manual",
+        commercialModel: "ללא עלות", monthlyPrice: 0,
+      }],
+      allocation: [...current.allocation, { key, free: 1, lease: 0, sale: 0 }],
+    }));
+  };
   const updateConsumption = (
     key: "employees" | "knownKg" | "cupsPerEmployee" | "gramsPerCup" | "workDaysMonth",
     value: number,
@@ -2543,7 +2578,7 @@ function QuoteModal({
                   onClick={() =>
                     update("blends", [
                       ...draft.blends,
-                      { name: "DX", quantityKg: 0, costPerKg: 60, pricePerKg: 100 },
+                      { name: "", quantityKg: 0, costPerKg: 0, pricePerKg: 0 },
                     ])
                   }
                 >
@@ -2554,7 +2589,8 @@ function QuoteModal({
                 <div className="quote-line package-blend" key={`${blend.name}-${index}`}>
                   <label>
                     <span>בלנד</span>
-                    <select
+                    <input
+                      list="quote-blend-options"
                       value={blend.name}
                       onChange={(event) => {
                         const selected = blendCatalog.find(
@@ -2568,11 +2604,8 @@ function QuoteModal({
                             : blend.pricePerKg,
                         });
                       }}
-                    >
-                      {blendCatalog.map((item) => (
-                        <option key={item.name}>{item.name}</option>
-                      ))}
-                    </select>
+                      placeholder="שם הבלנד"
+                    />
                   </label>
                   <label>
                     <span>כמות ק״ג</span>
@@ -2596,6 +2629,17 @@ function QuoteModal({
                       }
                     />
                   </label>
+                  <label>
+                    <span>מחיר מכירה לק״ג</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={blend.pricePerKg}
+                      onChange={(event) =>
+                        updateBlend(index, { pricePerKg: +event.target.value })
+                      }
+                    />
+                  </label>
                   <button
                     className="line-remove"
                     onClick={() =>
@@ -2609,6 +2653,9 @@ function QuoteModal({
                   </button>
                 </div>
               ))}
+              <datalist id="quote-blend-options">
+                {blendCatalog.map((item) => <option value={item.name} key={item.name}/>) }
+              </datalist>
             </div>
           )}
           {step === 2 && (
@@ -2618,10 +2665,24 @@ function QuoteModal({
                   <h3>ציוד לפי יבואן</h3>
                   <p>מכונות, ציוד נלווה ועלויות בפועל</p>
                 </div>
-                <button onClick={applyRecommendation}>
-                  <Sparkles size={15} /> מלא לפי המלצת המערכת
-                </button>
+                <div className="quote-head-actions">
+                  <button onClick={addCustomMachine}><Plus size={15}/> הוספת מכונה ידנית</button>
+                  <button onClick={applyRecommendation}><Sparkles size={15} /> מלא לפי המלצת המערכת</button>
+                </div>
               </div>
+              {draft.equipment.filter((item) => (item.key || "").startsWith("custom-machine-")).length > 0 && (
+                <section className="custom-equipment-section">
+                  <h4>מכונות שהוספו ידנית</h4>
+                  {draft.equipment.filter((item) => (item.key || "").startsWith("custom-machine-")).map((item) => (
+                    <div className="custom-equipment-row" key={item.key}>
+                      <label><span>דגם / סוג מכונה</span><input value={item.model} onChange={(event) => updateCustomMachine(item.key!, { model: event.target.value })}/></label>
+                      <label><span>כמות</span><input type="number" min="0" value={item.quantity} onChange={(event) => updateCustomMachine(item.key!, { quantity: +event.target.value })}/></label>
+                      <label><span>עלות ליחידה</span><input type="number" min="0" value={item.unitCost} onChange={(event) => updateCustomMachine(item.key!, { unitCost: +event.target.value })}/></label>
+                      <button className="line-remove" aria-label="הסרת מכונה" onClick={() => setDraft((current) => ({...current, equipment: current.equipment.filter((row) => row.key !== item.key), allocation: current.allocation.filter((row) => row.key !== item.key)}))}><X size={16}/></button>
+                    </div>
+                  ))}
+                </section>
+              )}
               <label className="quote-discount-toggle equipment-sync-toggle">
                 <input
                   type="checkbox"
@@ -2807,9 +2868,7 @@ function QuoteModal({
                   .filter(
                     (item) =>
                       item.quantity > 0 &&
-                      equipmentCatalog.some(
-                        (catalog) => catalog.key === (item.key || item.model),
-                      ),
+                      isMachineEquipment(item),
                   )
                   .map((item) => {
                     const allocation = allocationFor(item);
@@ -3250,7 +3309,7 @@ function QuoteModal({
                   <span><small>לקוח</small><b>{draft.clientName || "לקוח חדש"}</b></span>
                   <span><small>מסלול תמחור</small><b>{draft.pricingModel === "monthly_package" ? "חבילה חודשית" : "תמחור רגיל"}</b></span>
                   <span><small>תקופת חוזה</small><b>{draft.clientCostMonths} חודשים</b></span>
-                  <span><small>מספר מכונות</small><b>{draft.equipment.filter((item) => equipmentCatalog.some((catalog) => catalog.key === (item.key || item.model))).reduce((sum, item) => sum + item.quantity, 0)}</b></span>
+                  <span><small>מספר מכונות</small><b>{draft.equipment.filter(isMachineEquipment).reduce((sum, item) => sum + item.quantity, 0)}</b></span>
                   <span><small>עלות ציוד כוללת</small><b>{money(metrics.equipment.total)}</b></span>
                   <span><small>צריכת קפה חודשית</small><b>{metrics.beans.totalKg} ק״ג</b></span>
                   <span><small>{draft.pricingModel === "monthly_package" ? "הכנסה אפקטיבית לק״ג" : "מחיר מכירה ממוצע לק״ג"}</small><b>{money(draft.pricingModel === "monthly_package" ? metrics.package.effectiveIncomePerKg : metrics.beans.averageSalePrice)}</b></span>
@@ -3455,7 +3514,7 @@ function QuoteModal({
             </div>
             <div>
               <dt>מכונות</dt>
-              <dd>{draft.equipment.filter((item) => equipmentCatalog.some((catalog) => catalog.key === (item.key || item.model))).reduce((sum, item) => sum + item.quantity, 0)}</dd>
+              <dd>{draft.equipment.filter(isMachineEquipment).reduce((sum, item) => sum + item.quantity, 0)}</dd>
             </div>
             <div>
               <dt>עלות ציוד כוללת</dt>

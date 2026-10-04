@@ -45,6 +45,11 @@ export const addonCatalog: AddonCatalogItem[] = [
   { key: "ypeper_install", label: "התקנה", cost: 350, importer: "ypeper" },
 ];
 
+export function isMachineEquipment(item: Pick<QuoteEquipment, "key" | "model">) {
+  const key = item.key || item.model;
+  return key.startsWith("custom-machine-") || equipmentCatalog.some((catalog) => catalog.key === key);
+}
+
 const roundUp = (value: number) => Math.ceil(Number(value) || 0);
 const positive = (value?: number) => Math.max(0, Number(value) || 0);
 
@@ -233,7 +238,7 @@ export function calculateQuote(quote: Quote) {
   for (const blend of quote.blends) {
     const quantity = positive(blend.quantityKg);
     const cost = positive(blend.costPerKg);
-    const price = Math.max(positive(blend.pricePerKg), cost + 10);
+    const price = positive(blend.pricePerKg);
     const discounted = totalKg ? volumeDiscountKg * (quantity / totalKg) : 0;
     standardBeanIncome +=
       (quantity - discounted) * price + discounted * price * 0.9;
@@ -254,7 +259,7 @@ export function calculateQuote(quote: Quote) {
 
   const equipmentTotal = equipmentTotalCost(quote.equipment);
   const allocations = quote.equipment
-    .filter((item) => equipmentCatalog.some((catalog) => catalog.key === (item.key || item.model)))
+    .filter(isMachineEquipment)
     .map((item) => ({ item, allocation: allocationFor(quote, item) }));
   let leaseIncome = 0;
   let saleIncome = 0;
@@ -757,11 +762,7 @@ export function recommendQuotePricing(quote: Quote) {
   const machineCount = Math.max(
     1,
     quote.equipment
-      .filter((item) =>
-        equipmentCatalog.some(
-          (catalog) => catalog.key === (item.key || item.model),
-        ),
-      )
+      .filter(isMachineEquipment)
       .reduce((sum, item) => sum + positive(item.quantity), 0) ||
       positive(quote.requestedMachines) ||
       1,
