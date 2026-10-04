@@ -202,7 +202,15 @@ service cloud.firestore {
         && data.accountId == accountId
         && shortString(data.model, 300)
         && shortString(data.serial, 160)
-        && shortString(data.status, 80);
+        && shortString(data.status, 80)
+        && shortString(data.get('site', ''), 300)
+        && shortString(data.get('location', ''), 300)
+        && shortString(data.get('floor', ''), 80)
+        && shortString(data.get('commercial', ''), 160)
+        && shortString(data.get('filterReplacementDue', ''), 40)
+        && data.get('monthlyRent', 0) is number
+        && data.get('monthlyRent', 0) >= 0
+        && data.get('monthlyRent', 0) <= 1000000;
     }
 
     function validTicket(data, documentId, accountId) {
@@ -277,7 +285,53 @@ service cloud.firestore {
       return data.id == documentId
         && data.accountId == accountId
         && shortString(data.title, 500)
-        && shortString(data.status, 80);
+        && shortString(data.status, 80)
+        && shortString(data.get('type', ''), 120)
+        && shortString(data.get('dueDate', ''), 40)
+        && shortString(data.get('priority', ''), 40)
+        && shortString(data.get('assignedTo', ''), 160)
+        && shortString(data.get('assignedUid', ''), 160)
+        && shortString(data.get('machineId', ''), 160)
+        && shortString(data.get('automationKey', ''), 240);
+    }
+
+    function validLead(data, documentId) {
+      return data.id == documentId
+        && shortString(data.company, 300)
+        && shortString(data.get('notes', ''), 10000)
+        && shortString(data.get('email', ''), 320)
+        && shortString(data.get('phone', ''), 40)
+        && data.get('employees', 0) is number
+        && data.get('employees', 0) >= 0
+        && data.get('employees', 0) <= 100000
+        && data.get('machineCount', 0) is number
+        && data.get('machineCount', 0) >= 0
+        && data.get('machineCount', 0) <= 10000
+        && data.get('tasks', []) is list
+        && data.get('tasks', []).size() <= 500
+        && data.get('statusHistory', []) is list
+        && data.get('statusHistory', []).size() <= 1000;
+    }
+
+    function validQuote(data, documentId) {
+      return data.id == documentId
+        && shortString(data.clientName, 300)
+        && shortString(data.get('notes', ''), 10000)
+        && data.get('employees', 0) is number
+        && data.get('employees', 0) >= 0
+        && data.get('employees', 0) <= 100000
+        && data.get('knownKg', 0) is number
+        && data.get('knownKg', 0) >= 0
+        && data.get('knownKg', 0) <= 100000
+        && data.get('clientCostMonths', 1) is number
+        && data.get('clientCostMonths', 1) >= 1
+        && data.get('clientCostMonths', 1) <= 600
+        && data.get('equipment', []) is list
+        && data.get('equipment', []).size() <= 250
+        && data.get('blends', []) is list
+        && data.get('blends', []).size() <= 100
+        && data.get('allocation', []) is list
+        && data.get('allocation', []).size() <= 250;
     }
 
     function validActivity(data, documentId, accountId) {
@@ -334,17 +388,13 @@ service cloud.firestore {
     match /leads/{leadId} {
       allow read, delete: if isAdmin();
       allow create, update: if isAdmin()
-        && request.resource.data.id == leadId
-        && shortString(request.resource.data.company, 300)
-        && shortString(request.resource.data.get('notes', ''), 10000);
+        && validLead(request.resource.data, leadId);
     }
 
     match /quotes/{quoteId} {
       allow read, delete: if isAdmin();
       allow create, update: if isAdmin()
-        && request.resource.data.id == quoteId
-        && shortString(request.resource.data.clientName, 300)
-        && shortString(request.resource.data.get('notes', ''), 10000);
+        && validQuote(request.resource.data, quoteId);
     }
 
     match /{path=**}/machines/{documentId} { allow read: if isStaff(); }

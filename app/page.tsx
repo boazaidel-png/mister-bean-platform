@@ -9,6 +9,7 @@ import {
   CalendarDays,
   ChartNoAxesCombined,
   Coffee,
+  Download,
   Eye,
   FileText,
   FileSignature,
@@ -76,6 +77,7 @@ import {
 } from "@/lib/service-engine";
 import { passwordSecurityError } from "@/lib/security";
 import { reconcileFilterReplacementTask, updateTaskStatus } from "@/lib/maintenance-engine";
+import { createBusinessBackup } from "@/lib/system-backup";
 
 const SalesWorkspaceLoading = () => (
   <div className="workspace-loading" role="status" aria-live="polite">
@@ -372,6 +374,7 @@ export default function Home() {
   const updateTask=(id:string,status:string)=>{if(!allowWrite())return;const changedAt=new Date().toISOString();setStore(current=>({...current,tasks:updateTaskStatus(current.tasks,id,status,changedAt)}));setToast("המשימה עודכנה");};
   const updateCustomer=async(customer:Customer)=>{if(!allowWrite())return;await saveCustomer(customer);setCustomers(current=>current.map(item=>item.id===customer.id?customer:item));setToast("כרטיס הלקוח נשמר");};
   const createCustomer=async(customer:Customer)=>{if(!allowWrite())return;await saveCustomer(customer);const createdAt=new Date().toISOString();setStore(current=>current.tasks.some(task=>task.id===`task-onboarding-${customer.id}`)?current:({...current,tasks:[{id:`task-onboarding-${customer.id}`,accountId:customer.id,title:"השלמת קליטת לקוח חדש",type:"הקמת לקוח",dueDate:new Date(Date.now()+7*86400000).toISOString().slice(0,10),priority:"גבוהה",status:"פתוחה",assignedTo:customer.owner||"מנהל המערכת",createdAt,updatedAt:createdAt},...current.tasks]}));setSelectedCustomer(customer.id);setToast("כרטיס הלקוח נוצר");};
+  const downloadBackup=()=>{if(!allowWrite())return;const backup=createBusinessBackup(customers,users,salesWorkspace,store);const blob=new Blob([JSON.stringify(backup,null,2)],{type:"application/json"});const link=document.createElement("a");link.href=URL.createObjectURL(blob);link.download=`mister-bean-backup-${backup.exportedAt.slice(0,10)}.json`;link.click();URL.revokeObjectURL(link.href);setToast("גיבוי נתוני העסק הורד בהצלחה");};
 
   if(!authReady) return <LoadingScreen/>;
   if(!profile) return <Login onGoogle={loginGoogle} onEmail={loginEmail} onReset={sendReset} busy={authBusy} error={authError}/>;
@@ -415,7 +418,7 @@ export default function Home() {
           {view==="orders"&&<Orders orders={scopedOrders} isStaff={isStaff} onChange={updateOrder}/>}
           {view==="tasks"&&<Tasks tasks={scopedTasks} onCreate={()=>{if(allowWrite())setModal("task");}} onStatus={updateTask}/>}
           {view==="reports"&&role==="admin"&&<Reports store={store} customers={customers} users={users}/>}
-          {view==="access"&&profile.role==="admin"&&<AccessManagement currentUser={profile} customers={customers} users={users} readOnly={readOnly} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await updateUserAccess(user.uid,role,accountIds,status);setSyncError("");setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onRevoke={async user=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await revokeUserAccess(user);setSyncError("");setToast("הגישה הוסרה והמשתמש נותק מנתוני הלקוחות");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onPreview={next=>enterPreview(next)}/>}
+          {view==="access"&&profile.role==="admin"&&<AccessManagement currentUser={profile} customers={customers} users={users} readOnly={readOnly} onBackup={downloadBackup} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await updateUserAccess(user.uid,role,accountIds,status);setSyncError("");setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onRevoke={async user=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await revokeUserAccess(user);setSyncError("");setToast("הגישה הוסרה והמשתמש נותק מנתוני הלקוחות");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onPreview={next=>enterPreview(next)}/>}
           {view==="contract"&&(customers.find(c=>c.id===clientId)?<Contract customer={customers.find(c=>c.id===clientId)!} machines={scopedMachines}/>:<EmptyCustomerState/>)}
           {view==="contact"&&<Contact/>}
         </div>
@@ -499,8 +502,8 @@ function PreviewModal({customers,currentAccount,onClose,onEnter}:{customers:Cust
   return <Modal title="תצוגת מערכת והרשאות" onClose={onClose}><div className="preview-modal"><div className="preview-note"><Eye size={18}/><div><strong>צפייה בטוחה</strong><span>המערכת תוצג בדיוק לפי התפקיד שתבחר, ללא אפשרות לשנות נתונים.</span></div></div><div className="preview-role-grid">{options.map(([id,title,description,Icon])=><button key={id} className={previewRole===id?"active":""} onClick={()=>setPreviewRole(id)}><Icon size={19}/><strong>{title}</strong><small>{description}</small></button>)}</div>{needsAccount&&<label className="preview-account"><span>איזה לקוח להציג?</span><select value={accountId} onChange={event=>setAccountId(event.target.value)}>{customers.map(customer=><option value={customer.id} key={customer.id}>{customer.name}</option>)}</select></label>}<footer><button onClick={onClose}>ביטול</button><button className="primary" onClick={()=>onEnter({role:previewRole,accountId})}><Eye size={16}/> כניסה למצב תצוגה</button></footer></div></Modal>
 }
 
-function AccessManagement({currentUser,customers,users,readOnly,onSave,onRevoke,onPreview}:{currentUser:UserProfile;customers:Customer[];users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onRevoke:(user:UserProfile)=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
-  return <><SectionTitle title="ניהול והרשאות"/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.filter(user=>user.status!=="revoked").length}</strong> משתמשים פעילים וממתינים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(isTrustedAdminProfile).length}</strong> מנהלים מאושרים</span></div></div><section className="panel access-panel"><div className="access-head"><div><h3>משתמשי המערכת</h3><p>הרשאת מנהל מחייבת אישור מפורש של בעל המערכת.</p></div>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow currentUser={currentUser} customers={customers} key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onRevoke={onRevoke} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>אין משתמשים רשומים</strong></div>}</div></section></>
+function AccessManagement({currentUser,customers,users,readOnly,onSave,onRevoke,onPreview,onBackup}:{currentUser:UserProfile;customers:Customer[];users:UserProfile[];readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onRevoke:(user:UserProfile)=>Promise<void>;onPreview:(preview:PreviewContext)=>void;onBackup:()=>void}){
+  return <><SectionTitle title="ניהול והרשאות" action={<button disabled={readOnly} onClick={onBackup}><Download size={16}/> הורדת גיבוי נתונים</button>}/><div className="access-summary"><div><UserCog size={20}/><span><strong>{users.filter(user=>user.status!=="revoked").length}</strong> משתמשים פעילים וממתינים</span></div><div><LockKeyhole size={20}/><span><strong>{users.filter(user=>user.status==="pending").length}</strong> ממתינים לאישור</span></div><div><ShieldCheck size={20}/><span><strong>{users.filter(isTrustedAdminProfile).length}</strong> מנהלים מאושרים</span></div></div><section className="panel access-panel"><div className="access-head"><div><h3>משתמשי המערכת</h3><p>הרשאת מנהל מחייבת אישור מפורש של בעל המערכת.</p></div>{readOnly&&<Badge>קריאה בלבד</Badge>}</div><div className="access-list">{users.length?users.map(user=><UserAccessRow currentUser={currentUser} customers={customers} key={user.uid} user={user} readOnly={readOnly} onSave={onSave} onRevoke={onRevoke} onPreview={onPreview}/>):<div className="empty-access"><UserCog size={28}/><strong>אין משתמשים רשומים</strong></div>}</div></section></>
 }
 
 function UserAccessRow({currentUser,customers,user,readOnly,onSave,onRevoke,onPreview}:{currentUser:UserProfile;customers:Customer[];user:UserProfile;readOnly:boolean;onSave:(user:UserProfile,role:Role,accountIds:string[],status:UserProfile["status"])=>Promise<void>;onRevoke:(user:UserProfile)=>Promise<void>;onPreview:(preview:PreviewContext)=>void}){
