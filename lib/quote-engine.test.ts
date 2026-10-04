@@ -141,6 +141,33 @@ test("allocation remains consistent when machine quantity changes", () => {
   );
 });
 
+test("a manually added machine participates in equipment economics", () => {
+  const custom: QuoteEquipment = {
+    key: "custom-machine-special",
+    model: "מכונה מיוחדת",
+    quantity: 2,
+    unitCost: 3000,
+    importer: "manual",
+    commercialModel: "ללא עלות",
+    monthlyPrice: 0,
+  };
+  const quote = baseQuote([custom]);
+  quote.allocation = [{ key: custom.key!, free: 2, lease: 0, sale: 0 }];
+  const metrics = calculateQuote(quote);
+  assert.equal(metrics.equipment.total, 6000);
+  assert.equal(metrics.profitability.totalEquipmentEconomicCost, 6000);
+});
+
+test("manual bean price is honored even when it exposes a loss", () => {
+  const quote = baseQuote([]);
+  quote.blends = [{ name: "בלנד ידני", quantityKg: 10, costPerKg: 60, pricePerKg: 50 }];
+  quote.allocation = [];
+  const metrics = calculateQuote(quote);
+  assert.equal(metrics.beans.income, 500);
+  assert.equal(metrics.beans.cost, 600);
+  assert.equal(metrics.beans.profit, -100);
+});
+
 test("quote totals include the machine and its synchronized package", () => {
   const quote = baseQuote(syncAutomaticAddons([machine(1)]));
   const result = calculateQuote(quote);
