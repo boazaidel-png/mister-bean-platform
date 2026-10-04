@@ -299,6 +299,17 @@ export default function Home() {
   const role = preview?.role || profile?.role || null;
   const isStaff = role==="service"||role==="admin";
   const readOnly = Boolean(preview);
+  useEffect(()=>{
+    if(!storeReady||!isStaff||preview)return;
+    const ownersByAccount=new Map(customers.map(customer=>[customer.id,customer.owner||"מנהל המערכת"]));
+    const reconcile=()=>setStore(current=>{
+      const tasks=current.machines.reduce((next,machine)=>reconcileFilterReplacementTask(next,machine,ownersByAccount.get(machine.accountId)||"מנהל המערכת"),current.tasks);
+      return tasks===current.tasks?current:{...current,tasks};
+    });
+    reconcile();
+    const timer=window.setInterval(reconcile,60*60*1000);
+    return()=>window.clearInterval(timer);
+  },[customers,isStaff,preview,storeReady]);
   const clientId = customers.some(customer=>customer.id===selectedCustomer)?selectedCustomer:(customers[0]?.id||"");
   const scopedMachines = isStaff?store.machines:store.machines.filter(m=>m.accountId===clientId);
   const scopedTickets = isStaff?store.tickets:store.tickets.filter(t=>t.accountId===clientId);
@@ -731,7 +742,7 @@ function MachineEditorModal({machine,accountId,customers,onClose,onSave}:{machin
       <label><span>מערכת מים</span><select value={draft.waterSystem||"none"} onChange={e=>update("waterSystem",e.target.value as Machine["waterSystem"])}><option value="none">ללא</option><option value="filter">פילטר</option><option value="osmosis">אוסמוזה</option><option value="filter_and_osmosis">פילטר ואוסמוזה</option></select></label>
       <label><span>תאריך התקנת פילטר / אוסמוזה</span><input type="date" value={draft.waterSystemInstalledAt?.slice(0,10)||""} onChange={e=>update("waterSystemInstalledAt",e.target.value)}/></label>
       <label><span>החלפת פילטר אחרונה</span><input type="date" value={draft.lastFilterReplacementAt?.slice(0,10)||""} onChange={e=>update("lastFilterReplacementAt",e.target.value)}/></label>
-      <label><span>מועד החלפת פילטר הבא</span><input type="date" min={draft.waterSystemInstalledAt?.slice(0,10)||undefined} value={draft.filterReplacementDue?.slice(0,10)||""} onChange={e=>update("filterReplacementDue",e.target.value)}/><small>שמירה תיצור משימה אוטומטית לתאריך זה.</small></label>
+      <label><span>מועד החלפת פילטר הבא</span><input type="date" min={draft.waterSystemInstalledAt?.slice(0,10)||undefined} value={draft.filterReplacementDue?.slice(0,10)||""} onChange={e=>update("filterReplacementDue",e.target.value)}/><small>המשימה תיפתח אוטומטית 14 ימים לפני מועד ההחלפה.</small></label>
       <label><span>טיפול הבא</span><input type="date" value={draft.nextService?.slice(0,10)||""} onChange={e=>update("nextService",e.target.value)}/></label>
     </div></div>
     <div className="machine-form-section"><h3>שכירות למכונה זו</h3><div className="form-grid">
