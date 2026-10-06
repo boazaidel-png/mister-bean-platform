@@ -79,6 +79,13 @@ const quoteStatuses: QuoteStatus[] = [
   "אושרה",
   "נדחתה",
 ];
+const quoteTabs = ["פעילות", "נסגרו", "נדחו"] as const;
+type QuoteTab = (typeof quoteTabs)[number];
+const quoteMatchesTab = (quote: Quote, tab: QuoteTab) => {
+  if (tab === "נסגרו") return quote.status === "אושרה";
+  if (tab === "נדחו") return quote.status === "נדחתה";
+  return !["אושרה", "נדחתה"].includes(quote.status);
+};
 const blendCatalog = [
   { name: "EMERALD", cost: 50 },
   { name: "DX", cost: 60 },
@@ -1114,7 +1121,7 @@ export function QuotesWorkspace({
   onInitialRequestConsumed?: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("הכל");
+  const [status, setStatus] = useState<QuoteTab>("פעילות");
   const [editing, setEditing] = useState<Quote | null>(() => {
     if (initialQuote) return initialQuote;
     if (!initialCustomer) return null;
@@ -1168,12 +1175,9 @@ export function QuotesWorkspace({
         const haystack = `${group.name} ${group.quotes
           .map((quote) => quote.versionName)
           .join(" ")}`.toLowerCase();
-        return (
-          haystack.includes(query.toLowerCase()) &&
-          (status === "הכל" ||
-            group.quotes.some((quote) => quote.status === status))
-        );
+        return haystack.includes(query.toLowerCase()) && group.quotes.some((quote) => quoteMatchesTab(quote, status));
       })
+      .map((group) => ({ ...group, quotes: group.quotes.filter((quote) => quoteMatchesTab(quote, status)) }))
       .sort((left, right) =>
         (right.quotes[0]?.savedAt || right.quotes[0]?.updatedAt || "").localeCompare(
           left.quotes[0]?.savedAt || left.quotes[0]?.updatedAt || "",
@@ -1310,12 +1314,12 @@ export function QuotesWorkspace({
               placeholder="חיפוש לקוח או גרסה"
             />
           </label>
-          <select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option>הכל</option>
-            {quoteStatuses.map((item) => (
-              <option key={item}>{item}</option>
-            ))}
-          </select>
+          <div className="quote-tabs" aria-label="סינון הצעות מחיר">
+            {quoteTabs.map((item) => {
+              const count = workspace.quotes.filter((quote) => quoteMatchesTab(quote, item)).length;
+              return <button key={item} className={status === item ? "active" : ""} onClick={() => setStatus(item)}>{item}<b>{count}</b></button>;
+            })}
+          </div>
         </div>
         <div className="quote-client-grid">
           {clientGroups.map((group) => {

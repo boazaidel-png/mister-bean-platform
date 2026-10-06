@@ -88,7 +88,7 @@ export type Customer = {
   profitabilityBlends?: ProfitabilityBlendPreset[];
 };
 
-export type ProfitabilitySalesChannel = "company" | "employees";
+export type ProfitabilitySalesChannel = "contract" | "company_extra" | "employees" | "company";
 
 export type ProfitabilityBlendPreset = {
   id: string;
@@ -213,6 +213,10 @@ export type Order = {
   status: string;
   blend: string;
   note: string;
+  deliveredAt?: string;
+  paid?: boolean;
+  invoiceSent?: boolean;
+  deliveryNoteSent?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };

@@ -9,8 +9,8 @@ export function calculateActualProfitability(record: MonthlyProfitability) {
     costPerKg: amount(line.costPerKg),
     pricePerKg: amount(line.pricePerKg),
   }));
-  const channel = (name: ProfitabilitySalesChannel) => {
-    const rows = sales.filter((line) => line.channel === name);
+  const channel = (names: ProfitabilitySalesChannel[]) => {
+    const rows = sales.filter((line) => names.includes(line.channel));
     const kg = rows.reduce((sum, line) => sum + line.quantityKg, 0);
     const revenue = rows.reduce(
       (sum, line) => sum + (line.includedInFixedRevenue ? 0 : line.quantityKg * line.pricePerKg),
@@ -19,8 +19,15 @@ export function calculateActualProfitability(record: MonthlyProfitability) {
     const beanCost = rows.reduce((sum, line) => sum + line.quantityKg * line.costPerKg, 0);
     return { kg, revenue, beanCost, grossProfit: revenue - beanCost };
   };
-  const company = channel("company");
-  const employees = channel("employees");
+  const contract = channel(["contract", "company"]);
+  const companyExtra = channel(["company_extra"]);
+  const company = {
+    kg: contract.kg + companyExtra.kg,
+    revenue: contract.revenue + companyExtra.revenue,
+    beanCost: contract.beanCost + companyExtra.beanCost,
+    grossProfit: contract.grossProfit + companyExtra.grossProfit,
+  };
+  const employees = channel(["employees"]);
   const variableRevenue = company.revenue + employees.revenue;
   const fixedRevenue = amount(record.fixedRevenue) + amount(record.rentalRevenue) + amount(record.otherRevenue);
   const revenue = variableRevenue + fixedRevenue;
@@ -30,6 +37,8 @@ export function calculateActualProfitability(record: MonthlyProfitability) {
   const netProfit = grossProfit - operatingCosts;
   const totalKg = company.kg + employees.kg;
   return {
+    contract,
+    companyExtra,
     company,
     employees,
     totalKg,
@@ -50,8 +59,8 @@ export function buildDefaultCompanySales(
   order?: Order,
 ): ProfitabilitySaleLine[] {
   if (!quote) return [];
-  const includedInFixedRevenue = quote.pricingModel === "monthly_package";
   const blends = quote.blends.filter((blend) => blend.name.trim());
+  let baseLines: ProfitabilitySaleLine[];
   if (order) {
     const matchingBlend = blends.find(
       (blend) => blend.name.trim().toLowerCase() === order.blend.trim().toLowerCase(),
@@ -59,23 +68,45 @@ export function buildDefaultCompanySales(
     const selected = matchingBlend || blends[0];
     const quantityKg = Math.max(0, order.approvedKg || order.requestedKg || order.defaultKg);
     if (!selected || quantityKg <= 0) return [];
-    return [{
+    baseLines = [{
       id: `contract-${order.id}`,
-      channel: "company",
+      channel: "contract",
       blendName: matchingBlend ? order.blend : selected.name,
       quantityKg,
       costPerKg: selected.costPerKg,
       pricePerKg: selected.pricePerKg,
-      includedInFixedRevenue,
     }];
+  } else {
+    baseLines = blends.map((blend, index) => ({
+      id: `contract-${quote.id}-${index + 1}`,
+      channel: "contract" as const,
+      blendName: blend.name,
+      quantityKg: Math.max(0, blend.quantityKg || (index === 0 ? quote.knownKg : 0)),
+      costPerKg: blend.costPerKg,
+      pricePerKg: blend.pricePerKg,
+    })).filter((line) => line.quantityKg > 0);
   }
-  return blends.map((blend, index) => ({
-    id: `contract-${quote.id}-${index + 1}`,
-    channel: "company" as const,
-    blendName: blend.name,
-    quantityKg: Math.max(0, blend.quantityKg || (index === 0 ? quote.knownKg : 0)),
-    costPerKg: blend.costPerKg,
-    pricePerKg: blend.pricePerKg,
-    includedInFixedRevenue,
-  })).filter((line) => line.quantityKg > 0);
+  if (quote.pricingModel !== "monthly_package") return baseLines;
+
+  let remainingIncludedKg = Math.max(0, (quote.packageCount || 1) * (quote.packageIncludedKg || 0));
+  return baseLines.flatMap((line) => {
+    const contractKg = Math.min(line.quantityKg, remainingIncludedKg);
+    const extraKg = line.quantityKg - contractKg;
+    remainingIncludedKg -= contractKg;
+    return [
+      ...(contractKg > 0 ? [{
+        ...line,
+        quantityKg: contractKg,
+        includedInFixedRevenue: true,
+      }] : []),
+      ...(extraKg > 0 ? [{
+        ...line,
+        id: `${line.id}-extra`,
+        channel: "company_extra" as const,
+        quantityKg: extraKg,
+        pricePerKg: quote.packageExtraKgPrice || line.pricePerKg,
+        includedInFixedRevenue: false,
+      }] : []),
+    ];
+  });
 }
