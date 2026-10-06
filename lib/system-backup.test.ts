@@ -4,7 +4,7 @@ import { createBusinessBackup, parseBusinessBackup } from "./system-backup.ts";
 
 test("business backup preserves all business and audit records", () => {
   const backup = createBusinessBackup([], [], { leads: [], quotes: [] }, {
-    tickets: [], orders: [], tasks: [], machines: [], activities: [{
+    tickets: [], orders: [], tasks: [], machines: [], profitability: [], activities: [{
       id: "audit", accountId: "a", entityType: "customer", entityId: "a",
       action: "updated", summary: "x", actorUid: "u", actorName: "n", createdAt: "now",
     }],

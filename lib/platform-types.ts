@@ -85,6 +85,44 @@ export type Customer = {
   slaResponseHours?: number;
   slaResolutionHours?: number;
   notes?: CustomerNote[];
+  profitabilityBlends?: ProfitabilityBlendPreset[];
+};
+
+export type ProfitabilitySalesChannel = "company" | "employees";
+
+export type ProfitabilityBlendPreset = {
+  id: string;
+  channel: ProfitabilitySalesChannel;
+  name: string;
+  costPerKg: number;
+  pricePerKg: number;
+  updatedAt: string;
+};
+
+export type ProfitabilitySaleLine = {
+  id: string;
+  channel: ProfitabilitySalesChannel;
+  blendName: string;
+  quantityKg: number;
+  costPerKg: number;
+  pricePerKg: number;
+};
+
+export type MonthlyProfitability = {
+  id: string;
+  accountId: string;
+  month: string;
+  sales: ProfitabilitySaleLine[];
+  fixedRevenue: number;
+  rentalRevenue: number;
+  otherRevenue: number;
+  serviceCost: number;
+  deliveryCost: number;
+  equipmentCost: number;
+  otherCost: number;
+  status: "draft" | "closed";
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type CustomerNote = {
@@ -199,7 +237,7 @@ export type Task = {
 export type Activity = {
   id: string;
   accountId: string;
-  entityType: "ticket" | "order" | "task" | "machine" | "customer";
+  entityType: "ticket" | "order" | "task" | "machine" | "customer" | "profitability";
   entityId: string;
   action: "created" | "updated" | "deleted";
   summary: string;
@@ -214,6 +252,7 @@ export type PlatformStore = {
   tasks: Task[];
   machines: Machine[];
   activities: Activity[];
+  profitability: MonthlyProfitability[];
 };
 
 export type LeadPriority = "נמוכה" | "בינונית" | "גבוהה";

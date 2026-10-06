@@ -53,6 +53,7 @@ import type {
   Customer,
   CustomerConversionResult,
   Machine,
+  MonthlyProfitability,
   Order,
   PlatformStore,
   Lead,
@@ -63,7 +64,7 @@ import type {
   UserProfile,
 } from "./platform-types";
 
-const entityKeys = ["tickets", "orders", "tasks", "machines", "activities"] as const;
+const entityKeys = ["tickets", "orders", "tasks", "machines", "activities", "profitability"] as const;
 const legacyAddonKeys = new Set([
   "fridge",
   "filter",
@@ -75,13 +76,13 @@ const legacyAddonKeys = new Set([
   "ypeper_install",
 ]);
 type EntityKey = (typeof entityKeys)[number];
-type Entity = Ticket | Order | Task | Machine | Activity;
+type Entity = Ticket | Order | Task | Machine | Activity | MonthlyProfitability;
 
 let lastSyncedStore: PlatformStore | null = null;
 let googleSignInAttempt: Promise<UserCredential> | null = null;
 
 function emptyStore(): PlatformStore {
-  return { tickets: [], orders: [], tasks: [], machines: [], activities: [] };
+  return { tickets: [], orders: [], tasks: [], machines: [], activities: [], profitability: [] };
 }
 
 function withoutUndefined<T>(value: T): T {
@@ -363,14 +364,18 @@ export function subscribeToPlatformStore(
     tasks: new Map(),
     machines: new Map(),
     activities: new Map(),
+    profitability: new Map(),
   };
   const unsubscribers: Unsubscribe[] = [];
   const accountIds =
     profile.role === "admin" || profile.role === "service"
       ? [undefined]
       : profile.accountIds;
+  const subscriptionKeys = profile.role === "admin"
+    ? entityKeys
+    : entityKeys.filter((key) => key !== "profitability");
   const readySubscriptions = new Set<string>();
-  const expectedSubscriptions = entityKeys.length * accountIds.length;
+  const expectedSubscriptions = subscriptionKeys.length * accountIds.length;
 
   if (!accountIds.length) {
     lastSyncedStore = emptyStore();
@@ -386,12 +391,13 @@ export function subscribeToPlatformStore(
       tasks: [...buckets.tasks.values()] as Task[],
       machines: [...buckets.machines.values()] as Machine[],
       activities: [...buckets.activities.values()] as Activity[],
+      profitability: [...buckets.profitability.values()] as MonthlyProfitability[],
     };
     lastSyncedStore = next;
     onStore(next);
   };
 
-  for (const key of entityKeys) {
+  for (const key of subscriptionKeys) {
     for (const accountId of accountIds) {
       const unsubscribe = onSnapshot(
         queryFor(key, profile, accountId),
@@ -629,6 +635,7 @@ const activityEntityNames = {
   orders: "הזמנה",
   tasks: "משימה",
   machines: "מכונה",
+  profitability: "דוח רווחיות חודשי",
 } as const;
 
 let platformSaveQueue: Promise<void> = Promise.resolve();
@@ -650,7 +657,7 @@ async function persistPlatformStore(next: PlatformStore, actor?: UserProfile) {
       batch.set(activityRef, {
         id: activityRef.id,
         accountId: entity.accountId,
-        entityType: key.slice(0, -1),
+        entityType: key === "profitability" ? "profitability" : key.slice(0, -1),
         entityId: entity.id,
         action,
         summary: `${activityEntityNames[key]} ${actionLabel}`,
@@ -671,6 +678,7 @@ export function savePlatformStore(next: PlatformStore, actor?: UserProfile) {
     tasks: next.tasks.map((item) => ({ ...item })),
     machines: next.machines.map((item) => ({ ...item })),
     activities: next.activities.map((item) => ({ ...item })),
+    profitability: next.profitability.map((item) => ({ ...item, sales: item.sales.map((line) => ({ ...line })) })),
   };
   platformSaveQueue = platformSaveQueue
     .catch(() => undefined)
