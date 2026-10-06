@@ -2082,6 +2082,19 @@ function QuoteModal({
       allocation: [...current.allocation, { key, free: 1, lease: 0, sale: 0 }],
     }));
   };
+  const removeCustomMachine = (key: string) =>
+    setDraft((current) => {
+      const equipment = current.equipment.filter((row) => row.key !== key);
+      return {
+        ...current,
+        equipment,
+        allocation: current.allocation.filter((row) => row.key !== key),
+        financedAmount:
+          current.financingType === "loan" && !financedAmountManual
+            ? equipmentTotalCost(equipment)
+            : current.financedAmount,
+      };
+    });
   const updateConsumption = (
     key: "employees" | "knownKg" | "cupsPerEmployee" | "gramsPerCup" | "workDaysMonth",
     value: number,
@@ -2678,7 +2691,8 @@ function QuoteModal({
                       <label><span>דגם / סוג מכונה</span><input value={item.model} onChange={(event) => updateCustomMachine(item.key!, { model: event.target.value })}/></label>
                       <label><span>כמות</span><input type="number" min="0" value={item.quantity} onChange={(event) => updateCustomMachine(item.key!, { quantity: +event.target.value })}/></label>
                       <label><span>עלות ליחידה</span><input type="number" min="0" value={item.unitCost} onChange={(event) => updateCustomMachine(item.key!, { unitCost: +event.target.value })}/></label>
-                      <button className="line-remove" aria-label="הסרת מכונה" onClick={() => setDraft((current) => ({...current, equipment: current.equipment.filter((row) => row.key !== item.key), allocation: current.allocation.filter((row) => row.key !== item.key)}))}><X size={16}/></button>
+                      <div className="custom-equipment-subtotal"><span>עלות שורה</span><strong>{money(Math.max(0,item.quantity)*Math.max(0,item.unitCost))}</strong></div>
+                      <button className="line-remove" aria-label="הסרת מכונה" onClick={() => removeCustomMachine(item.key!)}><X size={16}/></button>
                     </div>
                   ))}
                 </section>
@@ -2872,6 +2886,8 @@ function QuoteModal({
                   )
                   .map((item) => {
                     const allocation = allocationFor(item);
+                    const explicitRentalPrice =
+                      item.monthlyPrice || draft.manualLeasePerSet || 0;
                     const remaining =
                       item.quantity -
                       allocation.free -
@@ -2903,10 +2919,23 @@ function QuoteModal({
                             />
                           </label>
                         ))}
+                        <label className="machine-rental-price">
+                          <span>שכירות חודשית ליחידה</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.monthlyPrice || 0}
+                            onChange={(event) =>
+                              updateCustomMachine(item.key || item.model, {
+                                monthlyPrice: +event.target.value,
+                              })
+                            }
+                          />
+                        </label>
                         <small className={remaining < 0 ? "negative" : ""}>
                           {remaining < 0
                             ? `חריגה של ${Math.abs(remaining)}`
-                            : `נותרו לחלוקה: ${remaining}`}
+                            : `נותרו לחלוקה: ${remaining} · ${explicitRentalPrice ? `שכירות מחושבת: ${money(allocation.lease * explicitRentalPrice)}` : "השכירות תחושב אוטומטית לפי העלות והתקופה"}`}
                         </small>
                       </div>
                     );
@@ -2923,7 +2952,7 @@ function QuoteModal({
                   />
                 </label>
                 <label>
-                  <span>שכירות ידנית לסט</span>
+                  <span>ברירת מחדל לשכירות חודשית ליחידה</span>
                   <input
                     type="number"
                     min="0"
@@ -2932,6 +2961,7 @@ function QuoteModal({
                       update("manualLeasePerSet", +event.target.value)
                     }
                   />
+                  <small>תחול רק על סוגי מכונות שלא הוגדר להם מחיר שכירות נפרד.</small>
                 </label>
                 <label>
                   <span>רווח רצוי במכירה</span>
