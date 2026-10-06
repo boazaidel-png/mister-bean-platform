@@ -194,7 +194,9 @@ service cloud.firestore {
         && data.get('branches', []) is list
         && data.get('branches', []).size() <= 100
         && data.get('notes', []) is list
-        && data.get('notes', []).size() <= 250;
+        && data.get('notes', []).size() <= 250
+        && data.get('profitabilityBlends', []) is list
+        && data.get('profitabilityBlends', []).size() <= 200;
     }
 
     function validMachine(data, documentId, accountId) {
@@ -293,6 +295,25 @@ service cloud.firestore {
         && shortString(data.get('assignedUid', ''), 160)
         && shortString(data.get('machineId', ''), 160)
         && shortString(data.get('automationKey', ''), 240);
+    }
+
+    function validProfitability(data, documentId, accountId) {
+      return data.id == documentId
+        && data.accountId == accountId
+        && shortString(data.month, 10)
+        && data.month.matches('^[0-9]{4}-[0-9]{2}$')
+        && data.status in ['draft', 'closed']
+        && data.sales is list
+        && data.sales.size() <= 300
+        && data.fixedRevenue is number && data.fixedRevenue >= 0 && data.fixedRevenue <= 100000000
+        && data.rentalRevenue is number && data.rentalRevenue >= 0 && data.rentalRevenue <= 100000000
+        && data.otherRevenue is number && data.otherRevenue >= 0 && data.otherRevenue <= 100000000
+        && data.serviceCost is number && data.serviceCost >= 0 && data.serviceCost <= 100000000
+        && data.deliveryCost is number && data.deliveryCost >= 0 && data.deliveryCost <= 100000000
+        && data.equipmentCost is number && data.equipmentCost >= 0 && data.equipmentCost <= 100000000
+        && data.otherCost is number && data.otherCost >= 0 && data.otherCost <= 100000000
+        && shortString(data.createdAt, 40)
+        && shortString(data.updatedAt, 40);
     }
 
     function validLead(data, documentId) {
@@ -402,6 +423,7 @@ service cloud.firestore {
     match /{path=**}/orders/{documentId} { allow read: if isStaff(); }
     match /{path=**}/tasks/{documentId} { allow read: if isStaff(); }
     match /{path=**}/activities/{documentId} { allow read: if isStaff(); }
+    match /{path=**}/profitability/{documentId} { allow read: if isAdmin(); }
 
     match /accounts/{accountId} {
       allow read: if isStaff() || belongsToAccount(accountId);
@@ -454,6 +476,13 @@ service cloud.firestore {
         allow create: if isStaff()
           && validActivity(request.resource.data, documentId, accountId);
         allow update, delete: if false;
+      }
+
+      match /profitability/{documentId} {
+        allow read: if isAdmin();
+        allow create, update: if isAdmin()
+          && validProfitability(request.resource.data, documentId, accountId);
+        allow delete: if isAdmin();
       }
     }
   }

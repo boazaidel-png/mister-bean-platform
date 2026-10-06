@@ -32,6 +32,7 @@ export function createBusinessBackup(
       tasks: structuredClone(store.tasks),
       machines: structuredClone(store.machines),
       activities: structuredClone(store.activities),
+      profitability: structuredClone(store.profitability),
     },
   };
 }
@@ -54,5 +55,11 @@ export function parseBusinessBackup(value: string): BusinessBackup {
   ) {
     throw new Error("קובץ הגיבוי אינו תקין או שאינו מתאים לגרסת המערכת.");
   }
-  return parsed as BusinessBackup;
+  const backup = parsed as BusinessBackup;
+  // Backups created before the profitability board did not include this list.
+  // Treat them as an empty history so existing backups remain restorable.
+  backup.operations.profitability = Array.isArray(parsed.operations?.profitability)
+    ? parsed.operations.profitability
+    : [];
+  return backup;
 }
