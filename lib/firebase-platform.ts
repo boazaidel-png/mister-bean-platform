@@ -1025,7 +1025,7 @@ export async function convertQuoteToCustomer(
       defaultKg: monthlyKg,
       requestedKg: monthlyKg,
       approvedKg: monthlyKg,
-      status: "ממתין לעדכון לקוח",
+      status: "לפי חוזה",
       blend: mainBlend?.name || "טרם הוגדרה תערובת",
       note: "",
       createdAt: now,

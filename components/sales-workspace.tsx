@@ -2358,7 +2358,7 @@ function QuoteModal({
       onClose={onClose}
       wide
     >
-      {historical && <div className="quote-history-lock">הגרסה הזו נשמרה בהיסטוריה ולא תידרס. כל שינוי יישמר כגרסה חדשה.</div>}
+      {historical && <div className="quote-history-lock">זו הצעה שנשמרה בהיסטוריה. אפשר לעדכן אותה ישירות או לשמור את השינוי כגרסה חדשה.</div>}
       <div className="quote-stepper">
         {steps.map((label, index) => (
           <button
@@ -3581,15 +3581,15 @@ function QuoteModal({
                 disabled={readOnly || saving || !draft.clientName}
                 onClick={() => void submit(true)}
               >
-                {historical ? "יצירת גרסה חדשה" : "שמור כגרסה חדשה"}
+                שמירה כגרסה חדשה
               </button>
-              {!historical && <button
+              <button
                 className="sales-primary"
                 disabled={readOnly || saving || !draft.clientName}
                 onClick={() => void submit(false)}
               >
-                {saving ? "שומר…" : "שמירת הצעה"}
-              </button>}
+                {saving ? "שומר…" : historical ? "שמירת שינויים בהצעה זו" : "שמירת הצעה"}
+              </button>
             </>
           )}
         </div>

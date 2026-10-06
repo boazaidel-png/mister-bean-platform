@@ -106,6 +106,7 @@ export type ProfitabilitySaleLine = {
   quantityKg: number;
   costPerKg: number;
   pricePerKg: number;
+  includedInFixedRevenue?: boolean;
 };
 
 export type MonthlyProfitability = {
