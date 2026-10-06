@@ -156,6 +156,32 @@ test("a manually added machine participates in equipment economics", () => {
   const metrics = calculateQuote(quote);
   assert.equal(metrics.equipment.total, 6000);
   assert.equal(metrics.profitability.totalEquipmentEconomicCost, 6000);
+  assert.equal(metrics.cashflow.rows[0].equipmentPayment, 750);
+});
+
+test("each machine type can use a different monthly rental price", () => {
+  const standard = { ...machine(2), monthlyPrice: 390, commercialModel: "השכרה" as const };
+  const custom: QuoteEquipment = {
+    key: "custom-machine-rental",
+    model: "מכונה ידנית",
+    quantity: 1,
+    unitCost: 3000,
+    importer: "manual",
+    commercialModel: "השכרה",
+    monthlyPrice: 275,
+  };
+  const quote = baseQuote([standard, custom]);
+  quote.manualLeasePerSet = 999;
+  quote.allocation = [
+    { key: standard.key!, free: 0, lease: 2, sale: 0 },
+    { key: custom.key!, free: 0, lease: 1, sale: 0 },
+  ];
+
+  const metrics = calculateQuote(quote);
+
+  assert.equal(metrics.equipment.total, 11180);
+  assert.equal(metrics.equipment.leaseIncome, 2 * 390 + 275);
+  assert.equal(metrics.profitability.monthlyClientRevenue, 3800 + 1055);
 });
 
 test("manual bean price is honored even when it exposes a loss", () => {

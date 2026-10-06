@@ -280,6 +280,7 @@ export function calculateQuote(quote: Quote) {
       }, 0);
     uncoveredCost += (allocation.free + allocation.lease) * packageCost;
     const leasePerSet =
+      positive(item.monthlyPrice) ||
       positive(quote.manualLeasePerSet) ||
       packageCost / Math.max(1, positive(quote.leaseMonths) || 24);
     leaseIncome += allocation.lease * leasePerSet;
