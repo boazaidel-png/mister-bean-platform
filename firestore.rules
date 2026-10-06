@@ -272,7 +272,11 @@ service cloud.firestore {
         && data.approvedKg >= 0 && data.approvedKg <= 10000
         && shortString(data.blend, 160)
         && shortString(data.note, 2000)
-        && shortString(data.status, 80);
+        && shortString(data.status, 80)
+        && shortString(data.get('deliveredAt', ''), 40)
+        && data.get('paid', false) is bool
+        && data.get('invoiceSent', false) is bool
+        && data.get('deliveryNoteSent', false) is bool;
     }
 
     function validCustomerOrderUpdate(documentId, accountId) {
