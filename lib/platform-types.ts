@@ -88,6 +88,9 @@ export type Customer = {
   notes?: CustomerNote[];
   profitabilityBlends?: ProfitabilityBlendPreset[];
   commercialAgreement?: CommercialAgreement;
+  /** A trial customer: managed like any customer (orders, service, profitability) but clearly marked. */
+  pilot?: boolean;
+  pilotStartedAt?: string;
 };
 
 export type CommercialAgreementModel =
@@ -305,6 +308,7 @@ export type LeadStatus =
   | "בהמתנה להצעת מחיר"
   | "נשלחה הצעת מחיר"
   | "לפנייה עתידית"
+  | "פיילוט"
   | "נסגר"
   | "לא רלוונטי";
 

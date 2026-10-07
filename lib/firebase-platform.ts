@@ -58,6 +58,7 @@ import type {
   Order,
   PlatformStore,
   Lead,
+  LeadStatus,
   Quote,
   SalesWorkspace,
   Task,
@@ -123,6 +124,14 @@ function normalizeLeadRecord(value: Lead): Lead {
 function normalizeQuoteRecord(value: Quote): Quote {
   return {
     ...value,
+    // Older or partial records may lack these lists; the quote editor maps over them.
+    blends: (Array.isArray(value.blends) ? value.blends : []).map((blend) => ({
+      name: blend?.name || "",
+      quantityKg: Number(blend?.quantityKg) || 0,
+      costPerKg: Number(blend?.costPerKg) || 0,
+      pricePerKg: Number(blend?.pricePerKg) || 0,
+    })),
+    equipment: Array.isArray(value.equipment) ? value.equipment : [],
     autoSyncAccessories:
       value.autoSyncAccessories ?? (value.equipment || []).length === 0,
     equipmentCosts: value.equipmentCosts || {},
@@ -1061,6 +1070,132 @@ export async function convertQuoteToCustomer(
         : "created"
       : "not-created",
   };
+}
+
+function accountIdForLead(lead: Lead) {
+  const readable = lead.company
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0590-\u05ff]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 36);
+  return `${readable || "customer"}-${lead.id.slice(-6).toLowerCase()}`;
+}
+
+export type LeadCustomerStatus = Extract<LeadStatus, "נסגר" | "פיילוט">;
+
+/**
+ * A lead marked "נסגר" or "פיילוט" becomes a customer account. When the lead
+ * already has a quote, the account is built from it like a quote approval;
+ * otherwise from the lead's own details. Running it again only updates the
+ * pilot marking, so moving a lead from pilot to closed keeps the same account.
+ */
+export async function convertLeadToCustomer(
+  lead: Lead,
+  status: LeadCustomerStatus,
+  quote?: Quote,
+): Promise<{ accountId: string; created: boolean }> {
+  const { db } = getFirebaseServices();
+  const now = new Date().toISOString();
+  const pilot = status === "פיילוט";
+  let accountId = lead.convertedAccountId || quote?.accountId || "";
+  let existing = accountId
+    ? await getDoc(doc(db, "accounts", accountId))
+    : null;
+  let created = false;
+
+  if (!existing?.exists()) {
+    if (quote) {
+      const result = await convertQuoteToCustomer(quote, lead, {
+        manual: quote.status !== "אושרה",
+      });
+      accountId = result.accountId;
+    } else {
+      accountId = accountId || accountIdForLead(lead);
+      const batch = writeBatch(db);
+      const monthlyKg = Math.max(0, Math.round(lead.monthlyConsumption || 0));
+      batch.set(doc(db, "accounts", accountId), withoutUndefined({
+        id: accountId,
+        name: lead.company.trim() || "לקוח חדש",
+        status: "בהקמה",
+        rank: "רגיל",
+        contactName: lead.contactName || "",
+        phone: lead.phone || "",
+        email: normalizeInviteEmail(lead.email),
+        city: lead.location || "",
+        address: lead.meetingLocation || "",
+        owner: lead.owner || "",
+        monthlyKg,
+        contractEnd: "",
+        serviceLevel: "",
+        contractBlends: [],
+        deliveryDayOfMonth: 1,
+        slaResponseHours: 4,
+        slaResolutionHours: 24,
+        onboardingStatus: "בהקמה",
+        notes: [],
+        branches: [lead.location || "סניף ראשי"],
+        sourceLeadId: lead.id,
+        conversionType: "manual",
+        createdAt: now,
+      } satisfies Customer));
+      if (monthlyKg > 0) {
+        const orderId = `order-${accountId}-${now.slice(0, 7)}`;
+        batch.set(doc(db, "accounts", accountId, "orders", orderId), {
+          id: orderId,
+          accountId,
+          month: now.slice(0, 7),
+          defaultKg: monthlyKg,
+          requestedKg: monthlyKg,
+          approvedKg: monthlyKg,
+          status: "לפי חוזה",
+          blend: "טרם הוגדרה תערובת",
+          note: "",
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      const onboardingTaskId = `task-onboarding-${accountId}`;
+      batch.set(doc(db, "accounts", accountId, "tasks", onboardingTaskId), {
+        id: onboardingTaskId,
+        accountId,
+        title: pilot ? "הקמת לקוח בפיילוט" : "השלמת קליטת לקוח חדש",
+        type: "הקמת לקוח",
+        dueDate: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+        priority: "גבוהה",
+        status: "פתוחה",
+        assignedTo: lead.owner || "מנהל המערכת",
+        createdAt: now,
+        updatedAt: now,
+      });
+      await batch.commit();
+    }
+    created = true;
+    existing = await getDoc(doc(db, "accounts", accountId));
+  }
+
+  const account = existing?.data() as Customer | undefined;
+  const batch = writeBatch(db);
+  batch.set(
+    doc(db, "accounts", accountId),
+    pilot
+      ? {
+          pilot: true,
+          pilotStartedAt: account?.pilotStartedAt || now,
+          // A pilot is already operating: orders and service run as usual.
+          ...(account?.status === "בהקמה" || !account?.status ? { status: "פעיל" } : {}),
+        }
+      : { pilot: false },
+    { merge: true },
+  );
+  // convertQuoteToCustomer marks the lead closed; restore the chosen status.
+  batch.set(
+    doc(db, "leads", lead.id),
+    { status, convertedAccountId: accountId, updatedAt: now },
+    { merge: true },
+  );
+  await batch.commit();
+  return { accountId, created };
 }
 
 export async function importSalesWorkspace(workspace: SalesWorkspace) {

@@ -46,6 +46,7 @@ import {
   type LegacyMigrationSnapshot,
 } from "@/lib/legacy-firebase";
 import { parseLegacyWorkspace } from "@/lib/legacy-migration";
+import { backdropDismiss } from "@/lib/backdrop-dismiss";
 import type {
   Lead,
   Customer,
@@ -69,6 +70,7 @@ const leadStatuses: LeadStatus[] = [
   "בהמתנה להצעת מחיר",
   "נשלחה הצעת מחיר",
   "לפנייה עתידית",
+  "פיילוט",
   "נסגר",
   "לא רלוונטי",
 ];
@@ -217,6 +219,7 @@ const quoteFromLead = (lead?: Lead): Quote => {
 };
 
 function tone(status: string) {
+  if (status === "פיילוט") return "orange";
   if (status.includes("אושר") || status === "נסגר") return "green";
   if (status.includes("נשלח") || status.includes("פגישה")) return "blue";
   if (status.includes("נדח") || status.includes("רלוונטי")) return "red";
@@ -244,7 +247,7 @@ function FlowStrip({
         <span className="flow-icon">
           <UsersRound size={18} />
         </span>
-        <b>{leads.filter((lead) => !lead.deleted && !["נסגר", "לא רלוונטי"].includes(lead.status)).length}</b>
+        <b>{leads.filter((lead) => !lead.deleted && !["נסגר", "פיילוט", "לא רלוונטי"].includes(lead.status)).length}</b>
         <small>לידים פעילים</small>
       </div>
       <ArrowLeft size={20} />
@@ -274,6 +277,7 @@ type LeadTab =
   | "פגישות"
   | "הצעות"
   | "לפנייה עתידית"
+  | "פיילוט"
   | "נסגר"
   | "לא רלוונטי"
   | "נמחקו";
@@ -285,6 +289,7 @@ const leadTabs: LeadTab[] = [
   "פגישות",
   "הצעות",
   "לפנייה עתידית",
+  "פיילוט",
   "נסגר",
   "לא רלוונטי",
   "נמחקו",
@@ -294,11 +299,11 @@ const today = () => new Date().toISOString().slice(0, 10);
 const isDue = (value: string) => Boolean(value && value <= today());
 const isActiveLead = (lead: Lead) =>
   !lead.deleted &&
-  !["נסגר", "לא רלוונטי", "לפנייה עתידית"].includes(lead.status);
+  !["נסגר", "פיילוט", "לא רלוונטי", "לפנייה עתידית"].includes(lead.status);
 
 const leadPipelineStages = ["פנייה", "שיחה", "פגישה", "הצעה", "סגירה"];
 function leadPipelineIndex(status: LeadStatus) {
-  if (status === "נסגר") return 4;
+  if (status === "נסגר" || status === "פיילוט") return 4;
   if (["בהמתנה להצעת מחיר", "נשלחה הצעת מחיר"].includes(status)) return 3;
   if (
     ["בהמתנה לקביעת פגישה", "נקבעה פגישה"].includes(status)
@@ -2603,7 +2608,7 @@ function QuoteModal({
                 </button>
               </div>
               {draft.blends.map((blend, index) => (
-                <div className="quote-line package-blend" key={`${blend.name}-${index}`}>
+                <div className="quote-line package-blend" key={`blend-${index}`}>
                   <label>
                     <span>בלנד</span>
                     <input
@@ -3307,7 +3312,7 @@ function QuoteModal({
                     </label>
                     <div className="recommended-blend-prices">
                       {draft.blends.map((blend, index) => (
-                        <label key={`${blend.name}-price-${index}`}>
+                        <label key={`blend-price-${index}`}>
                           <span>{blend.name} · {blend.quantityKg} ק״ג · עלות {money(blend.costPerKg)}</span>
                           <input type="number" min="0" value={blend.pricePerKg} onChange={(event) => updateBlend(index, { pricePerKg: +event.target.value })} />
                         </label>
@@ -3851,13 +3856,12 @@ function SalesModal({
   }, []);
 
   return (
-    <div className="sales-modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="sales-modal-backdrop" role="presentation" {...backdropDismiss(onClose)}>
       <section
         className={`sales-modal ${wide ? "wide" : ""} ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
           <h2>{title}</h2>

@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Copy, Download, Maximize2, Pencil, Plus, Trash2, X } from "lucide-react";
 import QRCode from "qrcode";
 import type { Customer, TastingBlend, TastingResponse, TastingSession, TastingSessionBlend } from "@/lib/platform-types";
+import { backdropDismiss } from "@/lib/backdrop-dismiss";
 import {
   blendRatioLabel,
   clampPercent,
@@ -433,7 +434,7 @@ function TastingModal({ title, onClose, children }: { title: string; onClose: ()
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [onClose]);
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  return <div className="modal-backdrop" {...backdropDismiss(onClose)}>
     <div className="modal" role="dialog" aria-label={title}>
       <header><h2>{title}</h2><button onClick={onClose} aria-label="סגירה">×</button></header>
       {children}
