@@ -111,11 +111,25 @@ test("a manually created package can build its contract coffee cost without a qu
     extraKgPrice: 95, monthlyRentalIncome: 0, monthlyServiceIncome: 0,
     oneTimeEquipmentIncome: 0, updatedAt: "now",
   };
-  const sales = buildDefaultCompanySales(undefined, undefined, agreement);
+  const order = { id: "manual-order", accountId: "a", month: "2026-10", defaultKg: 10, requestedKg: 10, approvedKg: 10, status: "אושר", blend: "DX", note: "" };
+  const sales = buildDefaultCompanySales(undefined, order, agreement);
   const result = calculateActualProfitability({ ...record, fixedRevenue: 1650, serviceCost: 0, deliveryCost: 0, equipmentCost: 0, sales });
   assert.equal(result.contract.kg, 10);
   assert.equal(result.beanCost, 700);
   assert.equal(result.grossProfit, 950);
+});
+
+test("contract coffee follows actual orders, never the planned quantity", () => {
+  const agreement = {
+    model: "beans_only" as const, status: "active" as const,
+    monthlyBeanKg: 20, beanCostPerKg: 60, beanPricePerKg: 95,
+    packageCount: 1, packageMonthlyFee: 0, packageIncludedKgPerUnit: 0,
+    extraKgPrice: 0, monthlyRentalIncome: 0, monthlyServiceIncome: 0,
+    oneTimeEquipmentIncome: 0, updatedAt: "now",
+  };
+  assert.deepEqual(buildDefaultCompanySales(undefined, undefined, agreement), []);
+  const order = { id: "o", accountId: "a", month: "2026-10", defaultKg: 20, requestedKg: 20, approvedKg: 12, status: "אושר", blend: "DX", note: "" };
+  assert.deepEqual(buildDefaultCompanySales(undefined, order, agreement).map((line) => [line.quantityKg, line.costPerKg, line.pricePerKg]), [[12, 60, 95]]);
 });
 
 test("legacy company rows remain part of the contract channel", () => {
