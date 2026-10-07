@@ -1207,3 +1207,25 @@ body{background:
 @media(max-width:900px){.tasting-detail-grid{grid-template-columns:1fr}.tasting-kpis{grid-template-columns:1fr 1fr}}
 @media(max-width:760px){.tasting-session-list>button{grid-template-columns:1fr auto;gap:8px}.tasting-session-list>button>span:nth-of-type(n+2),.tasting-session-list>button>b{grid-column:1/-1}.tasting-session-list>button>b{display:none}}
 .tasting-admin .panel-head>button{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto}
+.profit-operations{gap:10px}.profit-operations .profit-kpis,.profit-operations .profit-insights{display:none}
+
+/* Customer overview: profitability chart */
+.customer-profit-overview{--profit-revenue:#1f8a66;--profit-cost:#d27a2c}
+.profit-overview-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}.profit-overview-stats>div{background:#f7f9f8;border-radius:10px;padding:13px 14px;display:flex;flex-direction:column;gap:4px}.profit-overview-stats small,.profit-overview-stats span{font-size:11px;color:var(--muted)}.profit-overview-stats strong{font-size:21px}
+.profit-overview-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;align-items:start}
+.profit-bars{margin:0}.profit-bars figcaption{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-bottom:10px}.profit-bars figcaption span{display:flex;align-items:center;gap:5px}.profit-bars figcaption i{width:10px;height:10px;border-radius:3px;display:inline-block}
+.profit-bars i.revenue,.profit-parts i.revenue{background:var(--profit-revenue)}.profit-bars i.cost,.profit-parts i.cost{background:var(--profit-cost)}.profit-bars figcaption i.estimate{background:#8a9892;opacity:.4}
+.profit-bars-plot{direction:ltr;display:grid;grid-template-columns:repeat(6,1fr);gap:8px;border-bottom:1px solid var(--line)}
+.profit-bars-month{display:grid;grid-template-rows:150px auto auto;justify-items:center;gap:5px;padding-bottom:6px}.profit-bars-month b{font-size:11px;white-space:nowrap}.profit-bars-month span{font-size:10px;color:var(--muted)}
+.profit-bars-pair{display:flex;align-items:flex-end;gap:2px;height:150px}.profit-bars-pair i{width:14px;min-height:2px;border-radius:4px 4px 0 0;cursor:default}
+.profit-bars-month.estimate .profit-bars-pair i{opacity:.4}
+.profit-bars-note{margin:8px 0 0;font-size:10px;color:var(--muted)}
+.profit-parts{display:grid;gap:16px}.profit-parts h4{margin:0 0 8px;font-size:12px}.profit-parts small{font-size:11px;color:var(--muted)}
+.profit-part{display:grid;grid-template-columns:110px 1fr 78px;gap:8px;align-items:center;font-size:11px;padding:4px 0}.profit-part span{color:#4d5b56}.profit-part>div{height:8px;background:#eef2f0;border-radius:99px;overflow:hidden}.profit-part i{display:block;height:100%;border-radius:99px}.profit-part b{text-align:left;font-weight:600}
+@media(max-width:900px){.profit-overview-grid{grid-template-columns:1fr}.profit-overview-stats{grid-template-columns:1fr 1fr}}
+@media(max-width:760px){.profit-bars-month{grid-template-rows:110px auto auto}.profit-bars-pair{height:110px}.profit-bars-pair i{width:9px}.profit-bars-month b{font-size:9px}}
+
+/* Pilot customers */
+.pilot-badge{display:inline-flex;align-items:center;border-radius:999px;background:#fff1e3;color:#b4520b;border:1px solid #f2b37c;font-weight:800;font-size:11px;padding:3px 10px;white-space:nowrap;letter-spacing:.01em}
+.pilot-badge.large{font-size:13px;padding:4px 12px}
+td .pilot-badge{margin-inline-start:6px}

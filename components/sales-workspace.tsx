@@ -69,6 +69,7 @@ const leadStatuses: LeadStatus[] = [
   "בהמתנה להצעת מחיר",
   "נשלחה הצעת מחיר",
   "לפנייה עתידית",
+  "פיילוט",
   "נסגר",
   "לא רלוונטי",
 ];
@@ -217,6 +218,7 @@ const quoteFromLead = (lead?: Lead): Quote => {
 };
 
 function tone(status: string) {
+  if (status === "פיילוט") return "orange";
   if (status.includes("אושר") || status === "נסגר") return "green";
   if (status.includes("נשלח") || status.includes("פגישה")) return "blue";
   if (status.includes("נדח") || status.includes("רלוונטי")) return "red";
@@ -244,7 +246,7 @@ function FlowStrip({
         <span className="flow-icon">
           <UsersRound size={18} />
         </span>
-        <b>{leads.filter((lead) => !lead.deleted && !["נסגר", "לא רלוונטי"].includes(lead.status)).length}</b>
+        <b>{leads.filter((lead) => !lead.deleted && !["נסגר", "פיילוט", "לא רלוונטי"].includes(lead.status)).length}</b>
         <small>לידים פעילים</small>
       </div>
       <ArrowLeft size={20} />
@@ -274,6 +276,7 @@ type LeadTab =
   | "פגישות"
   | "הצעות"
   | "לפנייה עתידית"
+  | "פיילוט"
   | "נסגר"
   | "לא רלוונטי"
   | "נמחקו";
@@ -285,6 +288,7 @@ const leadTabs: LeadTab[] = [
   "פגישות",
   "הצעות",
   "לפנייה עתידית",
+  "פיילוט",
   "נסגר",
   "לא רלוונטי",
   "נמחקו",
@@ -294,11 +298,11 @@ const today = () => new Date().toISOString().slice(0, 10);
 const isDue = (value: string) => Boolean(value && value <= today());
 const isActiveLead = (lead: Lead) =>
   !lead.deleted &&
-  !["נסגר", "לא רלוונטי", "לפנייה עתידית"].includes(lead.status);
+  !["נסגר", "פיילוט", "לא רלוונטי", "לפנייה עתידית"].includes(lead.status);
 
 const leadPipelineStages = ["פנייה", "שיחה", "פגישה", "הצעה", "סגירה"];
 function leadPipelineIndex(status: LeadStatus) {
-  if (status === "נסגר") return 4;
+  if (status === "נסגר" || status === "פיילוט") return 4;
   if (["בהמתנה להצעת מחיר", "נשלחה הצעת מחיר"].includes(status)) return 3;
   if (
     ["בהמתנה לקביעת פגישה", "נקבעה פגישה"].includes(status)
