@@ -89,6 +89,7 @@ import { createBusinessBackup } from "@/lib/system-backup";
 import { buildDefaultCompanySales, calculateActualProfitability } from "@/lib/profitability-engine";
 import { calculateQuote } from "@/lib/quote-engine";
 import { commercialAgreementFromQuote, commercialAgreementLabel, commercialAgreementMonthlyIncome, emptyCommercialAgreement } from "@/lib/commercial-agreement";
+import { backdropDismiss } from "@/lib/backdrop-dismiss";
 
 const SalesWorkspaceLoading = () => (
   <div className="workspace-loading" role="status" aria-live="polite">
@@ -937,7 +938,7 @@ function Reports({store,customers,users}:{store:Store;customers:Customer[];users
 function Contract({customer,machines}:{customer:Customer;machines:Machine[]}) {return <><SectionTitle title="פרטי אספקה וציוד"/><section className="panel contract"><div className="contract-head"><span className="contract-icon">▤</span><div><span>נתונים תפעוליים</span><h2>{customer.name}</h2></div></div><dl><div><dt>סיום התקופה</dt><dd>{formatDate(customer.contractEnd)}</dd></div><div><dt>כמות חודשית מוסכמת</dt><dd>{customer.monthlyKg||0} ק״ג</dd></div><div><dt>מכונות משויכות</dt><dd>{machines.length} פריטי ציוד</dd></div><div><dt>תערובות מאושרות</dt><dd>{customer.contractBlends?.join(", ")||"טרם הוגדרו"}</dd></div><div><dt>יום אספקה קבוע</dt><dd>{customer.deliveryDayOfMonth||1} בחודש</dd></div></dl></section></>}
 function Contact(){return <><SectionTitle title="יצירת קשר"/><section className="panel"><div className="panel-head"><div><h3>בר · שירות לקוחות</h3><p>לתיאום, עדכון או עזרה בקריאת שירות</p></div></div><a className="primary" href="https://wa.me/972523229511?text=שלום%20בר%2C%20אני%20צריך%20עזרה%20בשירות." target="_blank" rel="noopener noreferrer"><MessageCircle size={18}/> WhatsApp · 052-322-9511</a></section></>}
 
-function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {return <div className="modal-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><div className="modal"><header><h2>{title}</h2><button onClick={onClose}>×</button></header>{children}</div></div>}
+function Modal({title,onClose,children}:{title:string;onClose:()=>void;children:React.ReactNode}) {return <div className="modal-backdrop" {...backdropDismiss(onClose)}><div className="modal"><header><h2>{title}</h2><button onClick={onClose}>×</button></header>{children}</div></div>}
 function MachineEditorModal({machine,accountId,customers,onClose,onSave}:{machine?:Machine;accountId:string;customers:Customer[];onClose:()=>void;onSave:(machine:Machine)=>void}) {
   const [draft,setDraft]=useState<Machine>(()=>machine?{...machine}:{id:createId("machine"),accountId:accountId||customers[0]?.id||"",site:"",model:"",serial:"",status:"בהקמה",commercial:"השכרה",location:"",lastService:"",nextService:"",waterSystem:"none",monthlyRent:0});
   const update=<K extends keyof Machine>(key:K,value:Machine[K])=>setDraft(current=>({...current,[key]:value}));

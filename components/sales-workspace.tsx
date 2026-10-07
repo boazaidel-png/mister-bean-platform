@@ -46,6 +46,7 @@ import {
   type LegacyMigrationSnapshot,
 } from "@/lib/legacy-firebase";
 import { parseLegacyWorkspace } from "@/lib/legacy-migration";
+import { backdropDismiss } from "@/lib/backdrop-dismiss";
 import type {
   Lead,
   Customer,
@@ -2607,7 +2608,7 @@ function QuoteModal({
                 </button>
               </div>
               {draft.blends.map((blend, index) => (
-                <div className="quote-line package-blend" key={`${blend.name}-${index}`}>
+                <div className="quote-line package-blend" key={`blend-${index}`}>
                   <label>
                     <span>בלנד</span>
                     <input
@@ -3311,7 +3312,7 @@ function QuoteModal({
                     </label>
                     <div className="recommended-blend-prices">
                       {draft.blends.map((blend, index) => (
-                        <label key={`${blend.name}-price-${index}`}>
+                        <label key={`blend-price-${index}`}>
                           <span>{blend.name} · {blend.quantityKg} ק״ג · עלות {money(blend.costPerKg)}</span>
                           <input type="number" min="0" value={blend.pricePerKg} onChange={(event) => updateBlend(index, { pricePerKg: +event.target.value })} />
                         </label>
@@ -3855,13 +3856,12 @@ function SalesModal({
   }, []);
 
   return (
-    <div className="sales-modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div className="sales-modal-backdrop" role="presentation" {...backdropDismiss(onClose)}>
       <section
         className={`sales-modal ${wide ? "wide" : ""} ${className}`.trim()}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onMouseDown={(event) => event.stopPropagation()}
       >
         <header>
           <h2>{title}</h2>

@@ -124,6 +124,14 @@ function normalizeLeadRecord(value: Lead): Lead {
 function normalizeQuoteRecord(value: Quote): Quote {
   return {
     ...value,
+    // Older or partial records may lack these lists; the quote editor maps over them.
+    blends: (Array.isArray(value.blends) ? value.blends : []).map((blend) => ({
+      name: blend?.name || "",
+      quantityKg: Number(blend?.quantityKg) || 0,
+      costPerKg: Number(blend?.costPerKg) || 0,
+      pricePerKg: Number(blend?.pricePerKg) || 0,
+    })),
+    equipment: Array.isArray(value.equipment) ? value.equipment : [],
     autoSyncAccessories:
       value.autoSyncAccessories ?? (value.equipment || []).length === 0,
     equipmentCosts: value.equipmentCosts || {},
