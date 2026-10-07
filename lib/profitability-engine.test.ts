@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildDefaultCompanySales, calculateActualProfitability } from "./profitability-engine.ts";
 import type { MonthlyProfitability } from "./platform-types.ts";
+import { findKnownBlend, knownBlends } from "./blend-catalog.ts";
 
 const record: MonthlyProfitability = {
   id: "a:2026-10", accountId: "a", month: "2026-10", status: "draft",
@@ -139,4 +140,21 @@ test("legacy company rows remain part of the contract channel", () => {
   });
   assert.equal(result.contract.kg, 4);
   assert.equal(result.company.kg, 4);
+});
+
+test("a blend remembers our last cost and price for the customer, then falls back to quote and catalog", () => {
+  const customer = {
+    contractBlends: ["Office Mix"],
+    profitabilityBlends: [
+      { id: "company_extra:dx", channel: "company_extra" as const, name: "DX", costPerKg: 62, pricePerKg: 95, updatedAt: "2026-10-02" },
+      { id: "employees:dx", channel: "employees" as const, name: "DX", costPerKg: 62, pricePerKg: 120, updatedAt: "2026-10-03" },
+    ],
+  };
+  const quote = { blends: [{ name: "HB+", quantityKg: 5, costPerKg: 70, pricePerKg: 110 }] };
+  const company = knownBlends(customer, quote);
+  assert.deepEqual(findKnownBlend(company, "dx"), { name: "DX", costPerKg: 62, pricePerKg: 95 });
+  assert.deepEqual(findKnownBlend(company, "HB+"), { name: "HB+", costPerKg: 70, pricePerKg: 110 });
+  assert.deepEqual(findKnownBlend(company, "STRADIVARI"), { name: "STRADIVARI", costPerKg: 90, pricePerKg: 0 });
+  assert.ok(findKnownBlend(company, "Office Mix"));
+  assert.equal(findKnownBlend(knownBlends(customer, quote, "employees"), "DX")?.pricePerKg, 120);
 });
