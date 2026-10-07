@@ -1242,3 +1242,9 @@ td .pilot-badge{margin-inline-start:6px}
   /* The dialog never grows past the backdrop, so it scrolls inside and its sticky save bar stays on screen */
   .modal,.sales-modal,.sales-modal.wide{max-height:calc(100% - 8px)}
 }
+
+/* Phones: the bottom navigation bar was drawn over open dialogs on iPhone and hid their save buttons */
+@media(max-width:760px){
+  body.dialog-open,body:has(.modal-backdrop){overflow:hidden}
+  body.dialog-open .mobile-nav,body:has(.modal-backdrop) .mobile-nav,body:has(.sales-modal-backdrop) .mobile-nav{display:none}
+}
