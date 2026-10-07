@@ -1229,3 +1229,9 @@ body{background:
 .pilot-badge{display:inline-flex;align-items:center;border-radius:999px;background:#fff1e3;color:#b4520b;border:1px solid #f2b37c;font-weight:800;font-size:11px;padding:3px 10px;white-space:nowrap;letter-spacing:.01em}
 .pilot-badge.large{font-size:13px;padding:4px 12px}
 td .pilot-badge{margin-inline-start:6px}
+
+/* Orders: editable blend and approved quantity */
+.order-blend-input{width:150px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:#fff;font:inherit}
+.mobile-order-edit{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.mobile-order-edit label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.mobile-order-edit input{width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;background:#fff;padding:9px;font-size:16px}

@@ -59,46 +59,25 @@ export function buildDefaultCompanySales(
   order?: Order,
   agreement?: CommercialAgreement,
 ): ProfitabilitySaleLine[] {
-  let baseLines: ProfitabilitySaleLine[];
-  if (!quote) {
-    if (!agreement) return [];
-    const quantityKg = Math.max(0, order?.approvedKg || order?.requestedKg || order?.defaultKg || agreement.monthlyBeanKg || agreement.packageCount * agreement.packageIncludedKgPerUnit);
-    if (quantityKg <= 0) return [];
-    baseLines = [{
-      id: `contract-${order?.id || "agreement"}`,
-      channel: "contract",
-      blendName: order?.blend || "פולים בחוזה",
-      quantityKg,
-      costPerKg: agreement.beanCostPerKg,
-      pricePerKg: agreement.beanPricePerKg,
-    }];
-  } else if (order) {
-    const blends = quote.blends.filter((blend) => blend.name.trim());
-    const matchingBlend = blends.find(
-      (blend) => blend.name.trim().toLowerCase() === order.blend.trim().toLowerCase(),
-    );
-    const selected = matchingBlend || blends[0];
-    const quantityKg = Math.max(0, order.approvedKg || order.requestedKg || order.defaultKg);
-    if (!selected || quantityKg <= 0) return [];
-    baseLines = [{
-      id: `contract-${order.id}`,
-      channel: "contract",
-      blendName: matchingBlend ? order.blend : selected.name,
-      quantityKg,
-      costPerKg: selected.costPerKg,
-      pricePerKg: selected.pricePerKg,
-    }];
-  } else {
-    const blends = quote.blends.filter((blend) => blend.name.trim());
-    baseLines = blends.map((blend, index) => ({
-      id: `contract-${quote.id}-${index + 1}`,
-      channel: "contract" as const,
-      blendName: blend.name,
-      quantityKg: Math.max(0, blend.quantityKg || (index === 0 ? quote.knownKg : 0)),
-      costPerKg: blend.costPerKg,
-      pricePerKg: blend.pricePerKg,
-    })).filter((line) => line.quantityKg > 0);
-  }
+  // Sales follow actual consumption: the month's order is the only source of
+  // contract kilograms. Without an order nothing was sold yet, so the quote's
+  // or agreement's planned quantity is never counted. They only supply prices.
+  const quantityKg = Math.max(0, order?.approvedKg || order?.requestedKg || order?.defaultKg || 0);
+  if (!order || quantityKg <= 0) return [];
+  const blends = (quote?.blends || []).filter((blend) => blend.name.trim());
+  const matchingBlend = blends.find(
+    (blend) => blend.name.trim().toLowerCase() === order.blend.trim().toLowerCase(),
+  );
+  const selected = matchingBlend || blends[0];
+  if (!selected && !agreement) return [];
+  const baseLines: ProfitabilitySaleLine[] = [{
+    id: `contract-${order.id}`,
+    channel: "contract",
+    blendName: selected && !matchingBlend ? selected.name : order.blend || "פולים בחוזה",
+    quantityKg,
+    costPerKg: agreement?.beanCostPerKg || selected?.costPerKg || 0,
+    pricePerKg: agreement?.beanPricePerKg || selected?.pricePerKg || 0,
+  }];
   const isMonthlyPackage = agreement
     ? agreement.model === "monthly_package"
     : quote?.pricingModel === "monthly_package";

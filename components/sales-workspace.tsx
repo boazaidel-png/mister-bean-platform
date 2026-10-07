@@ -47,6 +47,7 @@ import {
 } from "@/lib/legacy-firebase";
 import { parseLegacyWorkspace } from "@/lib/legacy-migration";
 import { backdropDismiss } from "@/lib/backdrop-dismiss";
+import { BLEND_CATALOG } from "@/lib/blend-catalog";
 import type {
   Lead,
   Customer,
@@ -88,14 +89,7 @@ const quoteMatchesTab = (quote: Quote, tab: QuoteTab) => {
   if (tab === "נדחו") return quote.status === "נדחתה";
   return !["אושרה", "נדחתה"].includes(quote.status);
 };
-const blendCatalog = [
-  { name: "EMERALD", cost: 50 },
-  { name: "DX", cost: 60 },
-  { name: "HB+", cost: 70 },
-  { name: "TUSCANINI", cost: 70 },
-  { name: "PEGANINI", cost: 70 },
-  { name: "STRADIVARI", cost: 90 },
-];
+const blendCatalog = BLEND_CATALOG;
 const now = () => new Date().toISOString();
 const id = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildDefaultCompanySales, calculateActualProfitability } from "./profitability-engine.ts";
 import type { MonthlyProfitability } from "./platform-types.ts";
+import { findKnownBlend, knownBlends } from "./blend-catalog.ts";
 
 const record: MonthlyProfitability = {
   id: "a:2026-10", accountId: "a", month: "2026-10", status: "draft",
@@ -111,11 +112,25 @@ test("a manually created package can build its contract coffee cost without a qu
     extraKgPrice: 95, monthlyRentalIncome: 0, monthlyServiceIncome: 0,
     oneTimeEquipmentIncome: 0, updatedAt: "now",
   };
-  const sales = buildDefaultCompanySales(undefined, undefined, agreement);
+  const order = { id: "manual-order", accountId: "a", month: "2026-10", defaultKg: 10, requestedKg: 10, approvedKg: 10, status: "אושר", blend: "DX", note: "" };
+  const sales = buildDefaultCompanySales(undefined, order, agreement);
   const result = calculateActualProfitability({ ...record, fixedRevenue: 1650, serviceCost: 0, deliveryCost: 0, equipmentCost: 0, sales });
   assert.equal(result.contract.kg, 10);
   assert.equal(result.beanCost, 700);
   assert.equal(result.grossProfit, 950);
+});
+
+test("contract coffee follows actual orders, never the planned quantity", () => {
+  const agreement = {
+    model: "beans_only" as const, status: "active" as const,
+    monthlyBeanKg: 20, beanCostPerKg: 60, beanPricePerKg: 95,
+    packageCount: 1, packageMonthlyFee: 0, packageIncludedKgPerUnit: 0,
+    extraKgPrice: 0, monthlyRentalIncome: 0, monthlyServiceIncome: 0,
+    oneTimeEquipmentIncome: 0, updatedAt: "now",
+  };
+  assert.deepEqual(buildDefaultCompanySales(undefined, undefined, agreement), []);
+  const order = { id: "o", accountId: "a", month: "2026-10", defaultKg: 20, requestedKg: 20, approvedKg: 12, status: "אושר", blend: "DX", note: "" };
+  assert.deepEqual(buildDefaultCompanySales(undefined, order, agreement).map((line) => [line.quantityKg, line.costPerKg, line.pricePerKg]), [[12, 60, 95]]);
 });
 
 test("legacy company rows remain part of the contract channel", () => {
@@ -125,4 +140,21 @@ test("legacy company rows remain part of the contract channel", () => {
   });
   assert.equal(result.contract.kg, 4);
   assert.equal(result.company.kg, 4);
+});
+
+test("a blend remembers our last cost and price for the customer, then falls back to quote and catalog", () => {
+  const customer = {
+    contractBlends: ["Office Mix"],
+    profitabilityBlends: [
+      { id: "company_extra:dx", channel: "company_extra" as const, name: "DX", costPerKg: 62, pricePerKg: 95, updatedAt: "2026-10-02" },
+      { id: "employees:dx", channel: "employees" as const, name: "DX", costPerKg: 62, pricePerKg: 120, updatedAt: "2026-10-03" },
+    ],
+  };
+  const quote = { blends: [{ name: "HB+", quantityKg: 5, costPerKg: 70, pricePerKg: 110 }] };
+  const company = knownBlends(customer, quote);
+  assert.deepEqual(findKnownBlend(company, "dx"), { name: "DX", costPerKg: 62, pricePerKg: 95 });
+  assert.deepEqual(findKnownBlend(company, "HB+"), { name: "HB+", costPerKg: 70, pricePerKg: 110 });
+  assert.deepEqual(findKnownBlend(company, "STRADIVARI"), { name: "STRADIVARI", costPerKg: 90, pricePerKg: 0 });
+  assert.ok(findKnownBlend(company, "Office Mix"));
+  assert.equal(findKnownBlend(knownBlends(customer, quote, "employees"), "DX")?.pricePerKg, 120);
 });
