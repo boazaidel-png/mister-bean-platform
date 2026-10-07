@@ -367,6 +367,59 @@ service cloud.firestore {
         && data.action in ['created', 'updated', 'deleted'];
     }
 
+    function validTastingBlend(data, documentId) {
+      return data.keys().hasOnly([
+          'id', 'name', 'arabicaPercent', 'profile', 'active', 'sortOrder',
+          'createdAt', 'updatedAt'
+        ])
+        && data.id == documentId
+        && shortString(data.name, 120)
+        && data.name.size() > 0
+        && data.arabicaPercent is number
+        && data.arabicaPercent >= 0 && data.arabicaPercent <= 100
+        && shortString(data.profile, 600)
+        && data.active is bool
+        && data.sortOrder is number
+        && shortString(data.createdAt, 40)
+        && shortString(data.updatedAt, 40);
+    }
+
+    function validTastingSession(data, documentId) {
+      return data.keys().hasOnly([
+          'id', 'accountId', 'customerName', 'title', 'status', 'blends',
+          'createdAt', 'updatedAt', 'createdBy', 'closedAt'
+        ])
+        && data.id == documentId
+        && shortString(data.accountId, 160)
+        && exists(/databases/$(database)/documents/accounts/$(data.accountId))
+        && shortString(data.customerName, 300)
+        && shortString(data.title, 200)
+        && data.status in ['open', 'closed']
+        && data.blends is list
+        && data.blends.size() <= 30
+        && shortString(data.createdAt, 40)
+        && shortString(data.updatedAt, 40)
+        && shortString(data.createdBy, 320)
+        && shortString(data.get('closedAt', ''), 40);
+    }
+
+    // Tasters answer from a QR code without signing in. They may only add
+    // one well-formed answer to a session that is still open; they can never
+    // read, change or delete answers.
+    function validTastingResponse(data, sessionId, documentId) {
+      return data.keys().hasOnly([
+          'id', 'sessionId', 'ratings', 'favoriteBlendId', 'comment', 'createdAt'
+        ])
+        && data.id == documentId
+        && data.sessionId == sessionId
+        && data.ratings is map
+        && data.ratings.size() <= 30
+        && shortString(data.favoriteBlendId, 160)
+        && shortString(data.comment, 1000)
+        && shortString(data.createdAt, 40)
+        && (data.ratings.size() > 0 || data.favoriteBlendId.size() > 0);
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isStaff());
       allow create: if validSelfRegistration(userId) || validInvitedProfile(userId);
@@ -420,6 +473,30 @@ service cloud.firestore {
       allow read, delete: if isAdmin();
       allow create, update: if isAdmin()
         && validQuote(request.resource.data, quoteId);
+    }
+
+    match /tastingBlends/{blendId} {
+      allow read, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && validTastingBlend(request.resource.data, blendId);
+    }
+
+    match /{path=**}/tastingResponses/{documentId} { allow read: if isAdmin(); }
+
+    match /tastingSessions/{sessionId} {
+      // Anyone holding the QR link may read that single session (its blends
+      // and whether it is open); only administrators may list sessions.
+      allow get: if true;
+      allow list, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && validTastingSession(request.resource.data, sessionId);
+
+      match /tastingResponses/{documentId} {
+        allow read, delete: if isAdmin();
+        allow create: if get(/databases/$(database)/documents/tastingSessions/$(sessionId)).data.status == 'open'
+          && validTastingResponse(request.resource.data, sessionId, documentId);
+        allow update: if false;
+      }
     }
 
     match /{path=**}/machines/{documentId} { allow read: if isStaff(); }

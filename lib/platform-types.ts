@@ -57,7 +57,8 @@ export type View =
   | "reports"
   | "access"
   | "contract"
-  | "contact";
+  | "contact"
+  | "tastings";
 
 export type Customer = {
   id: string;
@@ -487,4 +488,43 @@ export type AccountIdentity = {
   legacyLeadId?: string;
   legacyQuoteClientKey?: string;
   firebaseUid?: string;
+};
+
+export type TastingBlend = {
+  id: string;
+  name: string;
+  arabicaPercent: number;
+  profile: string;
+  active: boolean;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type TastingSessionBlend = Pick<TastingBlend, "id" | "name" | "arabicaPercent" | "profile">;
+
+export type TastingSessionStatus = "open" | "closed";
+
+/** A tasting event at a customer. Blends are copied in, so later catalog edits never change past results. */
+export type TastingSession = {
+  id: string;
+  accountId: string;
+  customerName: string;
+  title: string;
+  status: TastingSessionStatus;
+  blends: TastingSessionBlend[];
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  closedAt?: string;
+};
+
+/** One anonymous taster's answers. Ratings are 1 (not my cup of coffee) to 5 (hell yes), keyed by blend id. */
+export type TastingResponse = {
+  id: string;
+  sessionId: string;
+  ratings: Record<string, number>;
+  favoriteBlendId: string;
+  comment: string;
+  createdAt: string;
 };

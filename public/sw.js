@@ -1,4 +1,4 @@
-const CACHE_NAME = "mister-bean-shell-v23";
+const CACHE_NAME = "mister-bean-shell-v24";
 const APP_ROOT = "/mister-bean-platform/";
 const STATIC_ASSETS = [
   APP_ROOT,
@@ -30,6 +30,10 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin || !url.pathname.startsWith(APP_ROOT)) return;
+
+  // Other pages (such as the public tasting survey) must never be served
+  // from, or saved as, the cached management app shell.
+  if (request.mode === "navigate" && url.pathname !== APP_ROOT) return;
 
   if (request.mode === "navigate") {
     event.respondWith(
