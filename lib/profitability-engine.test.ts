@@ -76,6 +76,48 @@ test("monthly package splits included and extra company kilograms without double
   assert.equal(result.beanCost, 400);
 });
 
+test("two approved packages count 1650 income against the cost of all 10 included kilograms", () => {
+  const quote = {
+    id: "package-two", clientName: "לקוח", versionName: "מאושרת", clientRank: "רגיל", status: "אושרה",
+    employees: 0, knownKg: 10, requestedMachines: 2, cupsPerEmployee: 1.5, gramsPerCup: 12,
+    workDaysMonth: 21, pricingModel: "monthly_package", packageCount: 2, packageIncludedKg: 5,
+    packageMonthlyFee: 825, packageExtraKgPrice: 95,
+    blends: [{ name: "+HB", quantityKg: 10, costPerKg: 70, pricePerKg: 95 }],
+    equipment: [], equipmentCosts: {}, allocation: [], supplierMonths: 8, leaseMonths: 24,
+    manualLeasePerSet: 0, saleMargin: 15, clientCostMonths: 36, extraMonthlyCost: 0,
+    clientPayTerm: 0, importerPayTerm: 0, coffeeSupplierPayTerm: 0, cashflowMonths: 36,
+    financingMonths: 0, financedAmount: 0, annualInterest: 0, applyVolumeDiscount: false,
+    owner: "בועז", notes: "", createdAt: "now", updatedAt: "now",
+  } as const;
+  const agreement = {
+    model: "monthly_package" as const, status: "active" as const, sourceQuoteId: quote.id,
+    monthlyBeanKg: 10, beanCostPerKg: 70, beanPricePerKg: 95, packageCount: 2, packageMonthlyFee: 825,
+    packageIncludedKgPerUnit: 5, extraKgPrice: 95, monthlyRentalIncome: 0,
+    monthlyServiceIncome: 0, oneTimeEquipmentIncome: 0, updatedAt: "now",
+  };
+  const order = { id: "package-two-order", accountId: "a", month: "2026-10", defaultKg: 10, requestedKg: 10, approvedKg: 10, status: "אושר", blend: "+HB", note: "" };
+  const sales = buildDefaultCompanySales(quote, order, agreement);
+  const result = calculateActualProfitability({ ...record, fixedRevenue: 1650, serviceCost: 0, deliveryCost: 0, equipmentCost: 0, sales });
+  assert.equal(result.revenue, 1650);
+  assert.equal(result.beanCost, 700);
+  assert.equal(result.grossProfit, 950);
+});
+
+test("a manually created package can build its contract coffee cost without a quote", () => {
+  const agreement = {
+    model: "monthly_package" as const, status: "active" as const,
+    monthlyBeanKg: 10, beanCostPerKg: 70, beanPricePerKg: 0,
+    packageCount: 2, packageMonthlyFee: 825, packageIncludedKgPerUnit: 5,
+    extraKgPrice: 95, monthlyRentalIncome: 0, monthlyServiceIncome: 0,
+    oneTimeEquipmentIncome: 0, updatedAt: "now",
+  };
+  const sales = buildDefaultCompanySales(undefined, undefined, agreement);
+  const result = calculateActualProfitability({ ...record, fixedRevenue: 1650, serviceCost: 0, deliveryCost: 0, equipmentCost: 0, sales });
+  assert.equal(result.contract.kg, 10);
+  assert.equal(result.beanCost, 700);
+  assert.equal(result.grossProfit, 950);
+});
+
 test("legacy company rows remain part of the contract channel", () => {
   const result = calculateActualProfitability({
     ...record,

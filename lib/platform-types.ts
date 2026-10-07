@@ -86,6 +86,34 @@ export type Customer = {
   slaResolutionHours?: number;
   notes?: CustomerNote[];
   profitabilityBlends?: ProfitabilityBlendPreset[];
+  commercialAgreement?: CommercialAgreement;
+};
+
+export type CommercialAgreementModel =
+  | "beans_only"
+  | "equipment_rental"
+  | "equipment_sale"
+  | "monthly_package"
+  | "mixed";
+
+export type CommercialAgreement = {
+  model: CommercialAgreementModel;
+  status: "draft" | "active";
+  sourceQuoteId?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  monthlyBeanKg: number;
+  beanCostPerKg: number;
+  beanPricePerKg: number;
+  packageCount: number;
+  packageMonthlyFee: number;
+  packageIncludedKgPerUnit: number;
+  extraKgPrice: number;
+  monthlyRentalIncome: number;
+  monthlyServiceIncome: number;
+  oneTimeEquipmentIncome: number;
+  oneTimeEquipmentIncomeMonth?: string;
+  updatedAt: string;
 };
 
 export type ProfitabilitySalesChannel = "contract" | "company_extra" | "employees" | "company";
