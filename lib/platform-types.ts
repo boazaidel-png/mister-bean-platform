@@ -107,6 +107,11 @@ export type ProfitabilitySaleLine = {
   costPerKg: number;
   pricePerKg: number;
   includedInFixedRevenue?: boolean;
+  deliveryStatus?: "ממתין להכנה" | "מוכן למשלוח" | "נשלח" | "סופק" | "בוטל";
+  deliveredAt?: string;
+  paid?: boolean;
+  invoiceSent?: boolean;
+  deliveryNoteSent?: boolean;
 };
 
 export type MonthlyProfitability = {
