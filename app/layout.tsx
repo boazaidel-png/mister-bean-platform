@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { ViewportSync } from "@/components/viewport-sync";
 
 export const metadata: Metadata = {
   title: "Mister Bean Service Hub",
@@ -33,8 +34,10 @@ export const viewport: Viewport = {
   initialScale: 1,
   viewportFit: "cover",
   themeColor: "#0f5a45",
+  // Android: let the keyboard shrink the layout so fixed dialogs stay above it.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="he" dir="rtl"><head><meta name="format-detection" content="telephone=no"/></head><body>{children}</body></html>;
+  return <html lang="he" dir="rtl"><head><meta name="format-detection" content="telephone=no"/></head><body><ViewportSync/>{children}</body></html>;
 }

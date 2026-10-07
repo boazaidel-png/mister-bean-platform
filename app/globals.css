@@ -1235,3 +1235,9 @@ td .pilot-badge{margin-inline-start:6px}
 .mobile-order-edit{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .mobile-order-edit label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
 .mobile-order-edit input{width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;background:#fff;padding:9px;font-size:16px}
+
+/* Phones: dialogs fit the area above the on-screen keyboard, so their save buttons stay reachable */
+@media(max-width:760px){
+  .modal-backdrop,.sales-modal-backdrop{top:var(--vv-top,0);bottom:auto;height:var(--vv-height,100dvh)}
+  .modal,.sales-modal,.sales-modal.wide{max-height:calc(var(--vv-height,100dvh) - 8px)}
+}
