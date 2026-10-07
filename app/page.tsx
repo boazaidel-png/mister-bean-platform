@@ -374,7 +374,8 @@ export default function Home() {
     const previous=salesWorkspace.leads.find(item=>item.id===lead.id);
     await saveLead(lead);
     // Marking a lead closed or as a pilot opens (or updates) its customer card.
-    if((lead.status!=="נסגר"&&lead.status!=="פיילוט")||previous?.status===lead.status){setToast("הליד נשמר");return;}
+    // Saving it again retries when an earlier conversion failed and left no card.
+    if((lead.status!=="נסגר"&&lead.status!=="פיילוט")||(previous?.status===lead.status&&(lead.convertedAccountId||previous?.convertedAccountId))){setToast("הליד נשמר");return;}
     const leadQuotes=salesWorkspace.quotes.filter(quote=>quote.leadId===lead.id);
     const quote=leadQuotes.find(item=>item.status==="אושרה")||[...leadQuotes].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))[0];
     try{

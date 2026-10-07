@@ -923,8 +923,10 @@ export async function convertQuoteToCustomer(
 
   const batch = writeBatch(db);
 
+  // A quote that was never approved has no approval month, and Firestore
+  // rejects undefined fields, so both writes drop them.
   if (isNewAccount) {
-    batch.set(accountRef, {
+    batch.set(accountRef, withoutUndefined({
       id: accountId,
       name: quote.clientName,
       status: "בהקמה",
@@ -934,7 +936,7 @@ export async function convertQuoteToCustomer(
       email: inviteEmail || quote.email || lead?.email || "",
       city: quote.location || lead?.location || "",
       address: lead?.meetingLocation || "",
-      owner: lead?.owner || quote.owner,
+      owner: lead?.owner || quote.owner || "",
       monthlyKg: quote.knownKg || mainBlend?.quantityKg || 0,
       contractEnd: "",
       serviceLevel: "",
@@ -950,11 +952,11 @@ export async function convertQuoteToCustomer(
       conversionType: options.manual ? "manual" : "approved-quote",
       commercialAgreement,
       createdAt: now,
-    });
+    }));
   } else {
     batch.set(
       accountRef,
-      {
+      withoutUndefined({
         name: quote.clientName,
         contactName: quote.contactName || lead?.contactName || "",
         phone: quote.phone || lead?.phone || "",
@@ -963,7 +965,7 @@ export async function convertQuoteToCustomer(
         sourceQuoteId: quote.id,
         contractBlends,
         commercialAgreement,
-      },
+      }),
       { merge: true },
     );
   }
