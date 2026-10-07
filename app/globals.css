@@ -1238,6 +1238,7 @@ td .pilot-badge{margin-inline-start:6px}
 
 /* Phones: dialogs fit the area above the on-screen keyboard, so their save buttons stay reachable */
 @media(max-width:760px){
-  .modal-backdrop,.sales-modal-backdrop{top:var(--vv-top,0);bottom:auto;height:var(--vv-height,100dvh)}
-  .modal,.sales-modal,.sales-modal.wide{max-height:calc(var(--vv-height,100dvh) - 8px)}
+  .modal-backdrop,.sales-modal-backdrop{top:var(--vv-top,0);bottom:var(--vv-bottom,0);height:auto}
+  /* The dialog never grows past the backdrop, so it scrolls inside and its sticky save bar stays on screen */
+  .modal,.sales-modal,.sales-modal.wide{max-height:calc(100% - 8px)}
 }
