@@ -1,4 +1,4 @@
-import type { MonthlyProfitability, Order, ProfitabilitySaleLine, ProfitabilitySalesChannel, Quote } from "./platform-types";
+import type { CommercialAgreement, MonthlyProfitability, Order, ProfitabilitySaleLine, ProfitabilitySalesChannel, Quote } from "./platform-types";
 
 const amount = (value: number) => Number.isFinite(value) ? Math.max(0, value) : 0;
 
@@ -57,11 +57,23 @@ export function calculateActualProfitability(record: MonthlyProfitability) {
 export function buildDefaultCompanySales(
   quote?: Quote,
   order?: Order,
+  agreement?: CommercialAgreement,
 ): ProfitabilitySaleLine[] {
-  if (!quote) return [];
-  const blends = quote.blends.filter((blend) => blend.name.trim());
   let baseLines: ProfitabilitySaleLine[];
-  if (order) {
+  if (!quote) {
+    if (!agreement) return [];
+    const quantityKg = Math.max(0, order?.approvedKg || order?.requestedKg || order?.defaultKg || agreement.monthlyBeanKg || agreement.packageCount * agreement.packageIncludedKgPerUnit);
+    if (quantityKg <= 0) return [];
+    baseLines = [{
+      id: `contract-${order?.id || "agreement"}`,
+      channel: "contract",
+      blendName: order?.blend || "פולים בחוזה",
+      quantityKg,
+      costPerKg: agreement.beanCostPerKg,
+      pricePerKg: agreement.beanPricePerKg,
+    }];
+  } else if (order) {
+    const blends = quote.blends.filter((blend) => blend.name.trim());
     const matchingBlend = blends.find(
       (blend) => blend.name.trim().toLowerCase() === order.blend.trim().toLowerCase(),
     );
@@ -77,6 +89,7 @@ export function buildDefaultCompanySales(
       pricePerKg: selected.pricePerKg,
     }];
   } else {
+    const blends = quote.blends.filter((blend) => blend.name.trim());
     baseLines = blends.map((blend, index) => ({
       id: `contract-${quote.id}-${index + 1}`,
       channel: "contract" as const,
@@ -86,9 +99,14 @@ export function buildDefaultCompanySales(
       pricePerKg: blend.pricePerKg,
     })).filter((line) => line.quantityKg > 0);
   }
-  if (quote.pricingModel !== "monthly_package") return baseLines;
+  const isMonthlyPackage = agreement
+    ? agreement.model === "monthly_package"
+    : quote?.pricingModel === "monthly_package";
+  if (!isMonthlyPackage) return baseLines;
 
-  let remainingIncludedKg = Math.max(0, (quote.packageCount || 1) * (quote.packageIncludedKg || 0));
+  let remainingIncludedKg = agreement
+    ? Math.max(0, agreement.packageCount * agreement.packageIncludedKgPerUnit)
+    : Math.max(0, (quote?.packageCount || 1) * (quote?.packageIncludedKg || 0));
   return baseLines.flatMap((line) => {
     const contractKg = Math.min(line.quantityKg, remainingIncludedKg);
     const extraKg = line.quantityKg - contractKg;
@@ -104,7 +122,7 @@ export function buildDefaultCompanySales(
         id: `${line.id}-extra`,
         channel: "company_extra" as const,
         quantityKg: extraKg,
-        pricePerKg: quote.packageExtraKgPrice || line.pricePerKg,
+        pricePerKg: agreement?.extraKgPrice || quote?.packageExtraKgPrice || line.pricePerKg,
         includedInFixedRevenue: false,
       }] : []),
     ];

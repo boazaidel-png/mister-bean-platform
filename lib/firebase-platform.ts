@@ -47,6 +47,7 @@ import {
   safeStorageFileName,
   ticketFileSecurityError,
 } from "./security";
+import { commercialAgreementFromQuote } from "./commercial-agreement";
 import type {
   AccessInvite,
   Activity,
@@ -883,6 +884,7 @@ export async function convertQuoteToCustomer(
   const accountSnapshot = await getDoc(accountRef);
   const isNewAccount = !accountSnapshot.exists();
   const now = new Date().toISOString();
+  const commercialAgreement = commercialAgreementFromQuote(quote);
   const mainBlend = quote.blends.find((blend) => blend.quantityKg > 0);
   const contractBlends = Array.from(
     new Set(
@@ -937,6 +939,7 @@ export async function convertQuoteToCustomer(
       sourceLeadId: quote.leadId || "",
       sourceQuoteId: quote.id,
       conversionType: options.manual ? "manual" : "approved-quote",
+      commercialAgreement,
       createdAt: now,
     });
   } else {
@@ -950,6 +953,7 @@ export async function convertQuoteToCustomer(
         sourceLeadId: quote.leadId || "",
         sourceQuoteId: quote.id,
         contractBlends,
+        commercialAgreement,
       },
       { merge: true },
     );
