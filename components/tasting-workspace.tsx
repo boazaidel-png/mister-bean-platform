@@ -434,6 +434,10 @@ function TastingModal({ title, onClose, children }: { title: string; onClose: ()
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [onClose]);
+  useEffect(() => {
+    document.body.classList.add("dialog-open");
+    return () => document.body.classList.remove("dialog-open");
+  }, []);
   return <div className="modal-backdrop" {...backdropDismiss(onClose)}>
     <div className="modal" role="dialog" aria-label={title}>
       <header><h2>{title}</h2><button onClick={onClose} aria-label="סגירה">×</button></header>
