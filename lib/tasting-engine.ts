@@ -100,6 +100,19 @@ export function summarizeTasting(blends: TastingSessionBlend[], responses: Tasti
   };
 }
 
+/**
+ * The blend the tasters chose: the one picked as favorite most often, with the
+ * higher average breaking a tie. When nobody picked a favorite, the best rated.
+ */
+export function chosenTastingBlend(summary: TastingSummary): (TastingBlendResult & { reason: "favorites" | "average" }) | null {
+  const byFavorites = summary.results
+    .filter((result) => result.favorites > 0)
+    .sort((left, right) => right.favorites - left.favorites || right.average - left.average);
+  if (byFavorites[0]) return { ...byFavorites[0], reason: "favorites" };
+  const best = summary.results[0];
+  return best?.votes ? { ...best, reason: "average" } : null;
+}
+
 /** Keeps only valid ratings for blends that are still in the session. */
 export function cleanTastingRatings(blends: TastingSessionBlend[], ratings: Record<string, number>) {
   const known = new Set(blends.map((blend) => blend.id));

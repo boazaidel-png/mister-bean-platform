@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { blendRatioLabel, cleanTastingRatings, DEFAULT_TASTING_BLENDS, summarizeTasting } from "./tasting-engine.ts";
+import { blendRatioLabel, chosenTastingBlend, cleanTastingRatings, DEFAULT_TASTING_BLENDS, summarizeTasting } from "./tasting-engine.ts";
 import type { TastingResponse } from "./platform-types.ts";
 
 const blends = DEFAULT_TASTING_BLENDS.slice(0, 3);
@@ -43,4 +43,26 @@ test("blends without votes are listed last and comments are kept in order", () =
 test("ratings are cleaned before they are sent", () => {
   assert.deepEqual(cleanTastingRatings(blends, { [espresso.id]: 4, [emerald.id]: 0, gone: 3 }), { [espresso.id]: 4 });
   assert.equal(blendRatioLabel(70), "70% ערביקה · 30% רובוסטה");
+});
+
+test("the chosen blend is the most picked favorite, then the best average", () => {
+  const picked = summarizeTasting(blends, [
+    response("1", { [espresso.id]: 5, [emerald.id]: 2 }, emerald.id),
+    response("2", { [espresso.id]: 5, [emerald.id]: 3 }, emerald.id),
+    response("3", { [espresso.id]: 4, [emerald.id]: 3 }, espresso.id),
+  ]);
+  assert.equal(chosenTastingBlend(picked)?.blend.id, emerald.id);
+  assert.equal(chosenTastingBlend(picked)?.reason, "favorites");
+
+  const tie = summarizeTasting(blends, [
+    response("1", { [espresso.id]: 5, [emerald.id]: 2 }, emerald.id),
+    response("2", { [espresso.id]: 5, [emerald.id]: 3 }, espresso.id),
+  ]);
+  assert.equal(chosenTastingBlend(tie)?.blend.id, espresso.id);
+
+  const noFavorites = summarizeTasting(blends, [response("1", { [dx.id]: 4, [espresso.id]: 2 })]);
+  assert.equal(chosenTastingBlend(noFavorites)?.blend.id, dx.id);
+  assert.equal(chosenTastingBlend(noFavorites)?.reason, "average");
+
+  assert.equal(chosenTastingBlend(summarizeTasting(blends, [])), null);
 });

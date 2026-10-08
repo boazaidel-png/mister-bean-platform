@@ -1,16 +1,19 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Copy, Download, Maximize2, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowRight, BarChart3, Copy, Download, Maximize2, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import QRCode from "qrcode";
 import type { Customer, TastingBlend, TastingResponse, TastingSession, TastingSessionBlend } from "@/lib/platform-types";
 import { backdropDismiss } from "@/lib/backdrop-dismiss";
 import {
   blendRatioLabel,
+  chosenTastingBlend,
   clampPercent,
   DEFAULT_TASTING_BLENDS,
   MAX_TASTING_BLENDS,
   summarizeTasting,
+  type TastingSummary,
   TASTING_HIGH_LABEL,
   TASTING_LOW_LABEL,
 } from "@/lib/tasting-engine";
@@ -209,6 +212,7 @@ function TastingSessionDetail({ session, responses, catalog, showCustomer, guard
   const summary = useMemo(() => summarizeTasting(session.blends, responses), [session.blends, responses]);
   const [qr, setQr] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
+  const [report, setReport] = useState(false);
   const [editingBlend, setEditingBlend] = useState<TastingSessionBlend | "new" | null>(null);
   const [busy, setBusy] = useState(false);
   const url = tastingPublicUrl(session.id);
@@ -254,6 +258,7 @@ function TastingSessionDetail({ session, responses, catalog, showCustomer, guard
           <p>{showCustomer && `${session.customerName} · `}נוצרה {formatDate(session.createdAt)}{session.closedAt && ` · הסתיימה ${formatDate(session.closedAt)}`}</p>
         </div>
         <div className="title-actions">
+          <button onClick={() => setReport(true)}><BarChart3 size={16} /> סיכום גרפי</button>
           {open
             ? <button className="primary" disabled={busy} onClick={() => void run(() => setTastingSessionStatus(session.id, "closed"), "הטעימה הסתיימה. הסקר כבר לא מקבל תשובות.")}>סיום טעימה</button>
             : <button disabled={busy} onClick={() => void run(() => setTastingSessionStatus(session.id, "open"), "הטעימה נפתחה מחדש")}>פתיחה מחדש</button>}
@@ -335,6 +340,8 @@ function TastingSessionDetail({ session, responses, catalog, showCustomer, guard
         }}
       />}
 
+      {report && <TastingSummaryReport session={session} summary={summary} onClose={() => setReport(false)} />}
+
       {fullscreen && <div className="tasting-fullscreen" onClick={() => setFullscreen(false)} role="dialog" aria-label="קוד QR במסך מלא">
         {/* eslint-disable-next-line @next/next/no-img-element -- generated data URL */}
         <img src="/mister-bean-platform/brands/dada-logo.png" alt="DAdA Fresh Coffee" className="tasting-fullscreen-logo" />
@@ -346,6 +353,106 @@ function TastingSessionDetail({ session, responses, catalog, showCustomer, guard
       </div>}
     </div>
   );
+}
+
+/**
+ * A one-page visual summary of a tasting: the chosen blend, every blend's
+ * average and number of tasters, the rating breakdown and comments. Rendered
+ * at the top of the page so it can be printed or saved as a PDF on its own.
+ */
+function TastingSummaryReport({ session, summary, onClose }: { session: TastingSession; summary: TastingSummary; onClose: () => void }) {
+  const chosen = chosenTastingBlend(summary);
+  const rated = summary.results.filter((result) => result.votes > 0);
+  const unrated = summary.results.filter((result) => !result.votes);
+  const maxFavorites = Math.max(1, ...summary.results.map((result) => result.favorites));
+  useEffect(() => {
+    document.body.classList.add("tasting-report-open");
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    window.addEventListener("keydown", close);
+    return () => { document.body.classList.remove("tasting-report-open"); window.removeEventListener("keydown", close); };
+  }, [onClose]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(<div className="tasting-report-overlay" role="dialog" aria-label="סיכום גרפי של הטעימה">
+    <div className="tasting-report-toolbar">
+      <button onClick={onClose}><X size={16} /> סגירה</button>
+      <button className="primary" onClick={() => window.print()}><Printer size={16} /> הדפסה / שמירה כ-PDF</button>
+    </div>
+    <article className="tasting-report" dir="rtl">
+      <header className="tasting-report-head">
+        {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset */}
+        <img src="/mister-bean-platform/brands/dada-logo.png" alt="DAdA Fresh Coffee" />
+        <div>
+          <small>סיכום סקר טעימות</small>
+          <h1><bdi>{session.title}</bdi></h1>
+          <p>{session.customerName} · {formatDate(session.createdAt)}{session.status === "open" ? " · הסקר עדיין פתוח" : ""}</p>
+        </div>
+        <div className="tasting-report-count"><strong>{summary.participants}</strong><span>משתתפים</span></div>
+      </header>
+
+      {chosen ? <section className="tasting-report-winner">
+        <span className="tasting-report-trophy" aria-hidden="true">🏆</span>
+        <div>
+          <small>הבלנד הנבחר</small>
+          <h2><bdi>{chosen.blend.name}</bdi></h2>
+          <p>{chosen.reason === "favorites"
+            ? `נבחר כמועדף על ידי ${chosen.favorites} מתוך ${summary.participants} משתתפים`
+            : "קיבל את הדירוג הממוצע הגבוה ביותר"}</p>
+        </div>
+        <dl>
+          <div><dt>ממוצע</dt><dd>{formatAverage(chosen.average)}<small>/5</small></dd></div>
+          <div><dt>מדרגים</dt><dd>{chosen.votes}</dd></div>
+          <div><dt>Hell yes</dt><dd>{chosen.hellYes}</dd></div>
+        </dl>
+      </section> : <section className="tasting-report-empty">עדיין אין דירוגים בטעימה הזו.</section>}
+
+      {rated.length > 0 && <section className="tasting-report-section">
+        <h3>ממוצע הדירוג לכל בלנד</h3>
+        <p className="tasting-report-note">סולם 1 ({TASTING_LOW_LABEL}) עד 5 ({TASTING_HIGH_LABEL})</p>
+        <div className="tasting-report-bars">
+          {rated.map((result, index) => <div className={`tasting-report-bar ${chosen?.blend.id === result.blend.id ? "chosen" : ""}`} key={result.blend.id}>
+            <span className="tasting-report-rank">{index + 1}</span>
+            <span className="tasting-report-name"><bdi>{result.blend.name}</bdi><small>{result.votes} הצביעו</small></span>
+            <span className="tasting-report-track"><i style={{ width: `${(result.average / 5) * 100}%` }} /></span>
+            <b>{formatAverage(result.average)}</b>
+          </div>)}
+        </div>
+      </section>}
+
+      {rated.length > 0 && <div className="tasting-report-grid">
+        <section className="tasting-report-section">
+          <h3>פילוח הדירוגים</h3>
+          <div className="tasting-report-dist">
+            {rated.map((result) => <div key={result.blend.id}>
+              <span><bdi>{result.blend.name}</bdi></span>
+              <span className="tasting-distribution">{result.distribution.map((count, level) => count ? <i key={level} className={`level-${level + 1}`} style={{ flexGrow: count }}>{count}</i> : null)}</span>
+            </div>)}
+          </div>
+          <div className="tasting-legend">{[1, 2, 3, 4, 5].map((level) => <span key={level}><i className={`level-${level}`} />{level}</span>)}</div>
+        </section>
+        <section className="tasting-report-section">
+          <h3>נבחר כמועדף</h3>
+          <div className="tasting-report-favorites">
+            {[...summary.results].sort((a, b) => b.favorites - a.favorites).filter((result) => result.favorites > 0).map((result) => <div key={result.blend.id}>
+              <span><bdi>{result.blend.name}</bdi></span>
+              <span className="tasting-report-track small"><i style={{ width: `${(result.favorites / maxFavorites) * 100}%` }} /></span>
+              <b>{result.favorites}</b>
+            </div>)}
+            {!summary.results.some((result) => result.favorites) && <p className="tasting-report-note">אף משתתף לא בחר בלנד מועדף.</p>}
+          </div>
+        </section>
+      </div>}
+
+      {unrated.length > 0 && <p className="tasting-report-note">ללא דירוגים: {unrated.map((result) => result.blend.name).join(", ")}</p>}
+
+      {summary.comments.length > 0 && <section className="tasting-report-section tasting-report-comments">
+        <h3>מה אמרו הטועמים</h3>
+        {summary.comments.map((comment) => <p key={comment.id}>„{comment.text}”</p>)}
+      </section>}
+
+      <footer className="tasting-report-foot">הופק ב-{formatDate(new Date().toISOString())} · DAdA Fresh Coffee</footer>
+    </article>
+  </div>, document.body);
 }
 
 function SessionBlendModal({ blend, catalog, onClose, onSave }: { blend?: TastingSessionBlend; catalog: TastingBlend[]; onClose: () => void; onSave: (blend: TastingSessionBlend) => void }) {
