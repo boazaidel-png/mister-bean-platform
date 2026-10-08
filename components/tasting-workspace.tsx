@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowRight, BarChart3, Copy, Download, Maximize2, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
+import { ArrowRight, BarChart3, Copy, Download, FileDown, Maximize2, Pencil, Plus, Printer, Trash2, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import QRCode from "qrcode";
 import type { Customer, TastingBlend, TastingResponse, TastingSession, TastingSessionBlend } from "@/lib/platform-types";
@@ -365,6 +365,28 @@ function TastingSummaryReport({ session, summary, onClose }: { session: TastingS
   const rated = summary.results.filter((result) => result.votes > 0);
   const unrated = summary.results.filter((result) => !result.votes);
   const maxFavorites = Math.max(1, ...summary.results.map((result) => result.favorites));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  /** Saves the summary as an A4 PDF file, without the print dialog. */
+  const downloadPdf = async () => {
+    if (saving) return;
+    setSaving(true);
+    setSaveError("");
+    try {
+      const [{ jsPDF }, { drawTastingReport }] = await Promise.all([import("jspdf"), import("./tasting-report-canvas")]);
+      const canvas = await drawTastingReport(session, summary, chosen, formatDate);
+      const pdf = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
+      const ratio = canvas.height / canvas.width;
+      const width = Math.min(210, 297 / ratio);
+      pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", (210 - width) / 2, 0, width, width * ratio);
+      const day = new Date().toISOString().slice(0, 10);
+      pdf.save(`סיכום טעימה - ${session.customerName} - ${day}.pdf`.replace(/[\\/:*?"<>|]/g, ""));
+    } catch {
+      setSaveError("השמירה נכשלה. אפשר לנסות שוב או להשתמש בהדפסה ושמירה כ-PDF.");
+    } finally {
+      setSaving(false);
+    }
+  };
   useEffect(() => {
     document.body.classList.add("tasting-report-open");
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
@@ -376,8 +398,12 @@ function TastingSummaryReport({ session, summary, onClose }: { session: TastingS
   return createPortal(<div className="tasting-report-overlay" role="dialog" aria-label="סיכום גרפי של הטעימה">
     <div className="tasting-report-toolbar">
       <button onClick={onClose}><X size={16} /> סגירה</button>
-      <button className="primary" onClick={() => window.print()}><Printer size={16} /> הדפסה / שמירה כ-PDF</button>
+      <div>
+        <button onClick={() => window.print()}><Printer size={16} /> הדפסה</button>
+        <button className="primary" disabled={saving} onClick={() => void downloadPdf()}><FileDown size={16} /> {saving ? "מכין PDF…" : "הורדת PDF"}</button>
+      </div>
     </div>
+    {saveError && <p className="tasting-report-error" role="alert">{saveError}</p>}
     <article className="tasting-report" dir="rtl">
       <header className="tasting-report-head">
         {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset */}
