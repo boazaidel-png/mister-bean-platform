@@ -46,6 +46,7 @@ import {
   type LegacyMigrationSnapshot,
 } from "@/lib/legacy-firebase";
 import { parseLegacyWorkspace } from "@/lib/legacy-migration";
+import { isSupersededQuote, supersedingQuote } from "@/lib/quote-lifecycle";
 import { backdropDismiss } from "@/lib/backdrop-dismiss";
 import { BLEND_CATALOG } from "@/lib/blend-catalog";
 import type {
@@ -84,10 +85,13 @@ const quoteStatuses: QuoteStatus[] = [
 ];
 const quoteTabs = ["פעילות", "נסגרו", "נדחו"] as const;
 type QuoteTab = (typeof quoteTabs)[number];
-const quoteMatchesTab = (quote: Quote, tab: QuoteTab) => {
-  if (tab === "נסגרו") return quote.status === "אושרה";
+// Open versions replaced by an approved version of the same client count as
+// closed, so they leave the active list once the deal is approved.
+const quoteMatchesTab = (quote: Quote, tab: QuoteTab, quotes: Quote[]) => {
+  const superseded = isSupersededQuote(quote, quotes);
+  if (tab === "נסגרו") return quote.status === "אושרה" || superseded;
   if (tab === "נדחו") return quote.status === "נדחתה";
-  return !["אושרה", "נדחתה"].includes(quote.status);
+  return !superseded && !["אושרה", "נדחתה"].includes(quote.status);
 };
 const blendCatalog = BLEND_CATALOG;
 const now = () => new Date().toISOString();
@@ -1174,9 +1178,9 @@ export function QuotesWorkspace({
         const haystack = `${group.name} ${group.quotes
           .map((quote) => quote.versionName)
           .join(" ")}`.toLowerCase();
-        return haystack.includes(query.toLowerCase()) && group.quotes.some((quote) => quoteMatchesTab(quote, status));
+        return haystack.includes(query.toLowerCase()) && group.quotes.some((quote) => quoteMatchesTab(quote, status, workspace.quotes));
       })
-      .map((group) => ({ ...group, quotes: group.quotes.filter((quote) => quoteMatchesTab(quote, status)) }))
+      .map((group) => ({ ...group, quotes: group.quotes.filter((quote) => quoteMatchesTab(quote, status, workspace.quotes)) }))
       .sort((left, right) =>
         (right.quotes[0]?.savedAt || right.quotes[0]?.updatedAt || "").localeCompare(
           left.quotes[0]?.savedAt || left.quotes[0]?.updatedAt || "",
@@ -1315,7 +1319,7 @@ export function QuotesWorkspace({
           </label>
           <div className="quote-tabs" aria-label="סינון הצעות מחיר">
             {quoteTabs.map((item) => {
-              const count = workspace.quotes.filter((quote) => quoteMatchesTab(quote, item)).length;
+              const count = workspace.quotes.filter((quote) => quoteMatchesTab(quote, item, workspace.quotes)).length;
               return <button key={item} className={status === item ? "active" : ""} onClick={() => setStatus(item)}>{item}<b>{count}</b></button>;
             })}
           </div>
@@ -1390,6 +1394,7 @@ export function QuotesWorkspace({
                   <div className="quote-version-list">
                     {group.quotes.map((quote, index) => {
                       const versionMetrics = quoteMetrics(quote);
+                      const replacedBy = supersedingQuote(quote, workspace.quotes);
                       return (
                         <section className="quote-version-row" key={quote.id}>
                           <div className="quote-version-name">
@@ -1401,7 +1406,12 @@ export function QuotesWorkspace({
                               </small>
                             </div>
                           </div>
-                          <Status>{quote.status}</Status>
+                          <div className="quote-version-status">
+                            <Status>{quote.status}</Status>
+                            {replacedBy && (
+                              <small>הוחלפה בגרסה שאושרה: {replacedBy.versionName}</small>
+                            )}
+                          </div>
                           <div className="quote-version-value">
                             <small>צריכה</small>
                             <strong>
@@ -1460,7 +1470,7 @@ export function QuotesWorkspace({
                               >
                                 <Trash2 size={15} />
                               </button>}
-                            {!quote.accountId && (
+                            {!quote.accountId && !replacedBy && (
                               <button
                                 className="convert-button"
                                 disabled={readOnly || busyId === quote.id}
