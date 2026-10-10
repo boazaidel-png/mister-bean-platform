@@ -27,7 +27,9 @@ import {
   query,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
+  type DocumentReference,
   type DocumentData,
   type Query,
   type Unsubscribe,
@@ -881,14 +883,17 @@ function accountIdForQuote(quote: Quote) {
 export async function convertQuoteToCustomer(
   quote: Quote,
   lead?: Lead,
-  options: { manual?: boolean } = {},
+  options: { manual?: boolean; existingAccountId?: string } = {},
 ): Promise<CustomerConversionResult> {
   if (quote.status !== "אושרה" && !options.manual) {
     throw new Error("הקמה אוטומטית מתבצעת רק לאחר אישור הצעה.");
   }
 
   const { auth, db } = getFirebaseServices();
-  const accountId = quote.accountId || accountIdForQuote(quote);
+  // Another version of the same client may already have opened a card; reuse
+  // it so a second approval updates that card instead of duplicating it.
+  const accountId =
+    options.existingAccountId || quote.accountId || accountIdForQuote(quote);
   const accountRef = doc(db, "accounts", accountId);
   const accountSnapshot = await getDoc(accountRef);
   const isNewAccount = !accountSnapshot.exists();
@@ -1074,6 +1079,119 @@ export async function convertQuoteToCustomer(
   };
 }
 
+export type CustomerDeletionResult = {
+  deletedRecords: number;
+  unlinkedQuotes: number;
+  unlinkedLeads: number;
+  updatedUsers: number;
+};
+
+const ACCOUNT_RECORD_KEYS = ["tickets", "orders", "tasks", "machines", "profitability"] as const;
+
+/**
+ * Deletes a customer card and everything stored under it: machines, service
+ * calls, coffee orders, tasks, profitability records, tastings and the
+ * customer's access invites. Quotes and leads are kept but unlinked, so the
+ * sales history stays and a later approval opens a fresh card. Users who were
+ * linked only to this customer lose access. The activity log is append-only by
+ * design and stays in the database without a card to show it.
+ */
+export async function deleteCustomerAccount(
+  accountId: string,
+): Promise<CustomerDeletionResult> {
+  if (!accountId) throw new Error("לא נבחר לקוח למחיקה.");
+  await requireRecentAdminLogin();
+  const { db } = getFirebaseServices();
+
+  const [recordSnapshots, tastingSnapshot, quotesSnapshot, leadsSnapshot, invitesSnapshot, usersSnapshot] =
+    await Promise.all([
+      Promise.all(
+        ACCOUNT_RECORD_KEYS.map((key) =>
+          getDocs(collection(db, "accounts", accountId, key)),
+        ),
+      ),
+      getDocs(query(collection(db, "tastingSessions"), where("accountId", "==", accountId))),
+      getDocs(query(collection(db, "quotes"), where("accountId", "==", accountId))),
+      getDocs(query(collection(db, "leads"), where("convertedAccountId", "==", accountId))),
+      getDocs(query(collection(db, "accessInvites"), where("accountId", "==", accountId))),
+      getDocs(query(collection(db, "users"), where("accountIds", "array-contains", accountId))),
+    ]);
+  const tastingResponses = await Promise.all(
+    tastingSnapshot.docs.map((session) =>
+      getDocs(collection(db, "tastingSessions", session.id, "tastingResponses")),
+    ),
+  );
+
+  const now = new Date().toISOString();
+  type Write =
+    | { kind: "delete"; ref: DocumentReference }
+    | { kind: "update"; ref: DocumentReference; data: DocumentData };
+  const writes: Write[] = [];
+  const remove = (ref: DocumentReference) => writes.push({ kind: "delete", ref });
+
+  recordSnapshots.forEach((snapshot) => snapshot.docs.forEach((item) => remove(item.ref)));
+  tastingResponses.forEach((snapshot) => snapshot.docs.forEach((item) => remove(item.ref)));
+  tastingSnapshot.docs.forEach((item) => remove(item.ref));
+  invitesSnapshot.docs.forEach((item) => remove(item.ref));
+  const deletedRecords = writes.length;
+
+  quotesSnapshot.docs.forEach((item) => {
+    const quote = item.data() as Quote;
+    writes.push({
+      kind: "update",
+      ref: item.ref,
+      data: {
+        accountId: deleteField(),
+        accessInviteEmail: deleteField(),
+        ...(quote.clientKey === accountId ? { clientKey: deleteField() } : {}),
+        updatedAt: now,
+      },
+    });
+  });
+  leadsSnapshot.docs.forEach((item) =>
+    writes.push({
+      kind: "update",
+      ref: item.ref,
+      data: { convertedAccountId: deleteField(), updatedAt: now },
+    }),
+  );
+  usersSnapshot.docs.forEach((item) => {
+    const user = item.data() as UserProfile;
+    const remaining = (user.accountIds || []).filter((id) => id !== accountId);
+    const loseAccess =
+      remaining.length === 0 &&
+      (user.role === "customer" || user.role === "multi") &&
+      user.status === "active";
+    writes.push({
+      kind: "update",
+      ref: item.ref,
+      data: {
+        accountIds: remaining,
+        ...(loseAccess ? { status: "revoked", revokedAt: now } : {}),
+      },
+    });
+  });
+
+  // The card itself goes last, so a failure part-way leaves it visible and
+  // the deletion can simply be run again.
+  for (let index = 0; index < writes.length; index += 400) {
+    const batch = writeBatch(db);
+    writes.slice(index, index + 400).forEach((write) => {
+      if (write.kind === "delete") batch.delete(write.ref);
+      else batch.update(write.ref, write.data);
+    });
+    await batch.commit();
+  }
+  await deleteDoc(doc(db, "accounts", accountId));
+
+  return {
+    deletedRecords,
+    unlinkedQuotes: quotesSnapshot.size,
+    unlinkedLeads: leadsSnapshot.size,
+    updatedUsers: usersSnapshot.size,
+  };
+}
+
 function accountIdForLead(lead: Lead) {
   const readable = lead.company
     .trim()
@@ -1110,6 +1228,7 @@ export async function convertLeadToCustomer(
     if (quote) {
       const result = await convertQuoteToCustomer(quote, lead, {
         manual: quote.status !== "אושרה",
+        existingAccountId: accountId || undefined,
       });
       accountId = result.accountId;
     } else {

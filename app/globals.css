@@ -1333,3 +1333,5 @@ body.tasting-report-open .mobile-nav{display:none}
   .tasting-report-bar{padding:6px 12px}
   .tasting-report-foot{margin-top:14px}
 }
+.quote-version-status{display:grid;gap:4px;justify-items:start;align-content:center;min-width:0}.quote-version-status small{color:#6f7f77;font-size:11px;line-height:1.35}
+.customer-delete-zone{display:grid;gap:10px;margin-top:22px;padding:14px;border:1px solid #edcfcc;border-radius:12px;background:#fff7f6}.customer-delete-zone h4{margin:0;color:#a6423c}.customer-delete-zone p{margin:0;color:#6f5f5d;font-size:12px;line-height:1.5}.customer-delete-zone label{display:grid;gap:6px}.customer-delete-zone input{width:100%;min-height:40px;border:1px solid #e3c9c6;border-radius:8px;padding:8px;font:inherit}.customer-delete-zone .danger-btn{justify-self:start}
