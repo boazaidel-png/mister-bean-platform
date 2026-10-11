@@ -27,6 +27,7 @@ import {
   Trash2,
   UserCog,
   ClipboardCheck,
+  ShoppingBag,
   UsersRound,
   X,
 } from "lucide-react";
@@ -89,6 +90,7 @@ import { reconcileFilterReplacementTask, updateTaskStatus } from "@/lib/maintena
 import { createBusinessBackup } from "@/lib/system-backup";
 import { buildDefaultCompanySales, calculateActualProfitability } from "@/lib/profitability-engine";
 import { BLEND_CATALOG, findKnownBlend, knownBlends } from "@/lib/blend-catalog";
+import { currentMonthKey, syncContractOrders } from "@/lib/order-sync";
 import { calculateQuote } from "@/lib/quote-engine";
 import { activeQuoteFor, customerUpdateForActiveQuote, existingAccountIdForQuote, isSupersededQuote } from "@/lib/quote-lifecycle";
 import { commercialAgreementFromQuote, commercialAgreementLabel, commercialAgreementMonthlyIncome, emptyCommercialAgreement } from "@/lib/commercial-agreement";
@@ -113,6 +115,11 @@ const TastingWorkspace = dynamic(
   { ssr: false, loading: SalesWorkspaceLoading },
 );
 
+const ShopWorkspace = dynamic(
+  () => import("@/components/shop-workspace").then((module) => module.ShopWorkspace),
+  { ssr: false, loading: SalesWorkspaceLoading },
+);
+
 const initialStore: Store = {tickets:[],orders:[],tasks:[],machines:[],activities:[],profitability:[]};
 
 const roleNames: Record<Role,string> = {customer:"לקוח רגיל",multi:"מנהל לקוח מרובה סניפים",service:"נציג שירות",admin:"מנהל מערכת"};
@@ -127,6 +134,7 @@ const adminNav = [
   {id:"tickets" as View,label:"שירות ותקלות",icon:Headphones},{id:"orders" as View,label:"הזמנות קפה",icon:Coffee},
   {id:"machines" as View,label:"צי מכונות",icon:MonitorCog},{id:"tasks" as View,label:"משימות צוות",icon:ListTodo},
   {id:"tastings" as View,label:"טעימות קפה",icon:ClipboardCheck},
+  {id:"shop" as View,label:"מכירה לעובדים",icon:ShoppingBag},
   {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},{id:"access" as View,label:"ניהול והרשאות",icon:UserCog},
 ];
 const serviceNav = [
@@ -339,6 +347,14 @@ export default function Home() {
     const timer=window.setInterval(reconcile,60*60*1000);
     return()=>window.clearInterval(timer);
   },[customers,isStaff,preview,storeReady]);
+  useEffect(()=>{
+    if(!storeReady||!isStaff||preview)return;
+    const sync=()=>setStore(current=>{const orders=syncContractOrders(current.orders,customers,currentMonthKey());return orders===current.orders?current:{...current,orders};});
+    sync();
+    // A new month starts while the app stays open.
+    const timer=window.setInterval(sync,60*60*1000);
+    return()=>window.clearInterval(timer);
+  },[customers,isStaff,preview,storeReady]);
   const clientId = customers.some(customer=>customer.id===selectedCustomer)?selectedCustomer:(customers[0]?.id||"");
   const scopedMachines = isStaff?store.machines:store.machines.filter(m=>m.accountId===clientId);
   const scopedTickets = isStaff?store.tickets:store.tickets.filter(t=>t.accountId===clientId);
@@ -448,6 +464,7 @@ export default function Home() {
     tasks:reconcileFilterReplacementTask(current.tasks,machine,customer?.owner||"מנהל המערכת"),
   }));setModal(null);setToast("פרטי המכונה נשמרו");};
   const updateOrder=(id:string,data:Partial<Order>)=>{if(!allowWrite())return;setStore(current=>({...current,orders:current.orders.map(order=>order.id===id?{...order,...data,updatedAt:new Date().toISOString()}:order)}));setToast(isStaff?"ההזמנה עודכנה":"השינוי נשמר וממתין לאישור הצוות");};
+  const updateAdditionalSale=(recordId:string,saleId:string,patch:Partial<ProfitabilitySaleLine>)=>{if(!allowWrite())return;setStore(current=>({...current,profitability:current.profitability.map(record=>record.id===recordId?{...record,sales:record.sales.map(sale=>sale.id===saleId?{...sale,...patch}:sale),updatedAt:new Date().toISOString()}:record)}));setToast("המכירה עודכנה");};
   const saveProfitability=(record:MonthlyProfitability)=>{if(!allowWrite())return;setStore(current=>({...current,profitability:current.profitability.some(item=>item.id===record.id)?current.profitability.map(item=>item.id===record.id?record:item):[record,...current.profitability]}));setToast("נתוני הרווחיות נשמרו");};
   const updateTask=(id:string,status:string)=>{if(!allowWrite())return;const changedAt=new Date().toISOString();setStore(current=>({...current,tasks:updateTaskStatus(current.tasks,id,status,changedAt)}));setToast("המשימה עודכנה");};
   const removeCustomer=async(customer:Customer)=>{
@@ -510,9 +527,10 @@ export default function Home() {
           {view==="machines"&&
             <Machines machines={scopedMachines} isStaff={isStaff} openTicket={openTicket} onStatus={updateMachine} onCommercial={updateMachineCommercial} onEdit={id=>openMachineEditor(id)} onAdd={()=>openMachineEditor("",clientId)}/>
           }
-          {view==="orders"&&<Orders orders={scopedOrders} isStaff={isStaff} onChange={updateOrder}/>}
+          {view==="orders"&&<Orders orders={scopedOrders} isStaff={isStaff} onChange={updateOrder} profitability={isStaff?store.profitability:[]} onAdditionalSaleChange={updateAdditionalSale}/>}
           {view==="tasks"&&<Tasks tasks={scopedTasks} onCreate={()=>{if(allowWrite())setModal("task");}} onStatus={updateTask}/>}
           {view==="tastings"&&role==="admin"&&<TastingWorkspace customers={customers} readOnly={readOnly} actor={profile.email} onToast={setToast}/>}
+          {view==="shop"&&role==="admin"&&<ShopWorkspace customers={customers} readOnly={readOnly} actor={profile.email} onToast={setToast}/>}
           {view==="reports"&&role==="admin"&&<Reports store={store} customers={customers} users={users}/>}
           {view==="access"&&profile.role==="admin"&&<AccessManagement currentUser={profile} customers={customers} users={users} readOnly={readOnly} onBackup={downloadBackup} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await updateUserAccess(user.uid,role,accountIds,status);setSyncError("");setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onRevoke={async user=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await revokeUserAccess(user);setSyncError("");setToast("הגישה הוסרה והמשתמש נותק מנתוני הלקוחות");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onPreview={next=>enterPreview(next)}/>}
           {view==="contract"&&(customers.find(c=>c.id===clientId)?<Contract customer={customers.find(c=>c.id===clientId)!} machines={scopedMachines}/>:<EmptyCustomerState/>)}
@@ -735,7 +753,7 @@ function CustomerCard({initialTab,customer,store,sales,canManageCustomer,openTic
   const onboardingChecks=[{label:"פרטי לקוח ואנשי קשר",done:Boolean(customer.contactName&&customer.phone)},{label:"הסכם מסחרי פעיל",done:commercialAgreement?.status==="active"},{label:"סניפים",done:customer.branches.length>0},{label:"מכונות ומספרים סידוריים",done:ms.length>0&&ms.every(machine=>machine.serial&&machine.serial!=="טרם הוגדר")},{label:"תקופת הסכם",done:Boolean(customer.contractStart&&customer.contractEnd)},{label:"הזמנה חודשית",done:os.length>0}];
   const saveNote=async()=>{if(!note.trim())return;setNoteSaving(true);try{await onSaveCustomer({...customer,notes:[...(customer.notes||[]),{id:createId("note"),text:note.trim(),createdAt:new Date().toISOString(),createdBy:"צוות Mister Bean"}]});setNote("");}finally{setNoteSaving(false);}};
   const deleteNote=async(id:string)=>{if(!window.confirm("למחוק את ההערה הזו?"))return;await onSaveCustomer({...customer,notes:(customer.notes||[]).filter(item=>item.id!==id)});};
-  const tabs=["סקירה","חוזה והצעות",...(canManageCustomer?["טעימות"]:[]),"שירות וציוד",...(canManageCustomer?["הזמנות קפה"]:[]),"משימות","הערות"];
+  const tabs=["סקירה","חוזה והצעות",...(canManageCustomer?["טעימות","מכירה לעובדים"]:[]),"שירות וציוד",...(canManageCustomer?["הזמנות קפה"]:[]),"משימות","הערות"];
   return <><div className="customer-header"><div className="customer-avatar xl">{customer.name.slice(0,2)}</div><div><div className="header-line"><h2>{customer.name}</h2>{customer.pilot&&<PilotBadge large/>}<Badge>{customer.status}</Badge><Badge>{customer.rank}</Badge></div><p>{value(customer.city)} · מנהל לקוח: {value(customer.owner)}{customer.pilot&&customer.pilotStartedAt&&<> · בפיילוט מ־{formatDate(customer.pilotStartedAt)}</>}</p></div><div className="title-actions">{canManageCustomer&&customer.pilot&&<button onClick={()=>{if(window.confirm(`לסיים את הפיילוט ולהפוך את ${customer.name} ללקוח קבוע?`))onEndPilot(customer);}}>✓ סיום פיילוט</button>}{canManageCustomer&&<button onClick={()=>onNewQuote(customer)}>＋ הצעת מחיר חדשה</button>}<button onClick={openTask}>＋ יצירת משימה</button><button className="primary" onClick={()=>openTicket()}>＋ פתיחת קריאה</button></div></div>
     <div className="tabs">{tabs.map(t=><button className={tab===t?"active":""} key={t} onClick={()=>setTab(t)}>{t}</button>)}</div>
     {tab==="סקירה"&&<><div className="kpi-grid"><Kpi label="ק״ג חודשי מוסכם" value={customer.monthlyKg||0} meta="לפי הכרטיס"/><Kpi label="מכונות פעילות" value={ms.filter(m=>m.status==="פעילה").length} meta={`מתוך ${ms.length}`}/><Kpi label="קריאות פתוחות" value={ts.filter(t=>!closed(t.status)).length} meta="דורשות מעקב" tone="blue"/><Kpi label="סיום הסכם" value={contractEnd} meta="מעקב חידוש"/></div><div className="dashboard-grid"><section className="panel"><div className="panel-head"><h3>פרטי לקוח</h3><button className="row-action" onClick={onEdit}>עריכה</button></div><dl><div><dt>איש קשר</dt><dd>{value(customer.contactName)}</dd></div><div><dt>טלפון</dt><dd>{value(customer.phone)}</dd></div><div><dt>דוא״ל</dt><dd>{value(customer.email)}</dd></div><div><dt>כתובת</dt><dd>{[customer.address,customer.city].filter(Boolean).join(", ")||"טרם הוגדרה"}</dd></div><div><dt>תערובות בחוזה</dt><dd>{customer.contractBlends?.join(", ")||"טרם הוגדרו"}</dd></div><div><dt>יום אספקה</dt><dd>{customer.deliveryDayOfMonth||1} בחודש</dd></div></dl></section><section className="panel onboarding-panel"><div className="panel-head"><div><h3>קליטת לקוח</h3><p>{customer.onboardingStatus||"בהקמה"}</p></div><Badge>{onboardingChecks.filter(item=>item.done).length}/{onboardingChecks.length}</Badge></div>{onboardingChecks.map(item=><div className={item.done?"onboarding-check done":"onboarding-check"} key={item.label}><i>{item.done?"✓":"○"}</i><span>{item.label}</span></div>)}</section></div>{canManageCustomer&&<CustomerProfitOverview customer={customer} orders={os} records={profitabilityRecords} approvedQuote={approvedQuote} agreement={commercialAgreement} onEdit={()=>setTab("הזמנות קפה")}/>}</>}
@@ -745,6 +763,7 @@ function CustomerCard({initialTab,customer,store,sales,canManageCustomer,openTic
     }
     {tab==="חוזה והצעות"&&<><CommercialAgreementCard key={`${commercialAgreement?.sourceQuoteId||""}-${commercialAgreement?.updatedAt||""}`} customer={customer} agreement={commercialAgreement} sourceQuote={approvedQuote} onSave={onSaveCustomer}/><div className="section-spacer"/><div className="dashboard-grid"><div><Contract customer={customer} machines={ms}/></div><section className="panel customer-history-panel"><header><div><h3>הצעות מחיר</h3><p>ההצעה הפעילה היא זו שממנה נלקחים ההסכם, הרווחיות והחישובים בכרטיס.</p></div><button className="primary" onClick={()=>onNewQuote(customer)}>＋ הצעה חדשה</button></header>{quotes.length?<div className="customer-history-list">{quotes.map(quote=>{const isActive=approvedQuote?.id===quote.id;return <div className={`customer-quote-row${isActive?" active":""}`} key={quote.id}><button onClick={()=>onOpenQuote(quote)}><div><strong>{quote.versionName}</strong><small>{formatDate(quote.savedAt||quote.updatedAt)}</small></div><Badge>{quote.status}</Badge><span>{quote.knownKg||0} ק״ג</span><b>פתיחה ←</b></button>{isActive?<span className="active-quote-label">✓ ההצעה הפעילה{customer.activeQuoteId?"":" (אחרונה שאושרה)"}</span>:canManageCustomer&&<button className="row-action" disabled={Boolean(activating)} onClick={()=>void chooseActiveQuote(quote)}>{activating===quote.id?"מעדכן…":"עבודה מול הצעה זו"}</button>}</div>;})}</div>:<div className="inline-empty">אין עדיין הצעות משויכות.</div>}</section></div><div className="section-spacer"/><div className="card-grid">{customer.branches.map((branch,index)=><div className="info-card" key={`${branch}-${index}`}><span>סניף {index+1}</span><h3>{branch}</h3><p>{customer.address}, {customer.city}</p><small>{customer.contactName} · {customer.phone}</small></div>)}</div></>}
     {tab==="טעימות"&&canManageCustomer&&<TastingWorkspace customers={customers} customer={customer} readOnly={readOnly} actor={actor} onToast={onToast}/>}
+    {tab==="מכירה לעובדים"&&canManageCustomer&&<ShopWorkspace customers={customers} customer={customer} readOnly={readOnly} actor={actor} onToast={onToast}/>}
     {tab==="משימות"&&<Tasks tasks={store.tasks.filter(task=>task.accountId===customer.id)} onCreate={openTask} onStatus={onTaskStatus}/>}
     {tab==="הערות"&&<div className="dashboard-grid"><section className="panel notes"><h3>הערות פנימיות</h3>{customer.notes?.length?<div className="note-list">{[...customer.notes].reverse().map(item=><article key={item.id}><div><p>{item.text}</p><small>{item.createdBy} · {formatDateTime(item.createdAt)}</small></div>{canManageCustomer&&<button aria-label="מחיקת הערה" onClick={()=>void deleteNote(item.id)}><Trash2 size={14}/></button>}</article>)}</div>:<div className="inline-empty">עדיין לא נוספו הערות.</div>}{canManageCustomer&&<><textarea value={note} onChange={event=>setNote(event.target.value)} placeholder="הוספת הערה פנימית…"/><button className="primary" disabled={!note.trim()||noteSaving} onClick={()=>void saveNote()}>{noteSaving?"שומר…":"שמירת הערה"}</button></>}</section><section className="panel activity-panel"><h3>פעילות אחרונה</h3>{store.activities.filter(item=>item.accountId===customer.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20).map(item=><div className="activity-row" key={item.id}><i/><div><strong>{item.summary}</strong><small>{item.actorName} · {formatDateTime(item.createdAt)}</small></div></div>)}</section></div>}
   </>;
@@ -922,7 +941,7 @@ function Machines({machines,isStaff,openTicket,onStatus,onCommercial,onEdit,onAd
   </>;
 }
 
-function Orders({orders,isStaff,onChange}:{orders:Order[];isStaff:boolean;onChange:(id:string,data:Partial<Order>)=>void}) {
+function Orders({orders,isStaff,onChange,profitability=[],onAdditionalSaleChange}:{orders:Order[];isStaff:boolean;onChange:(id:string,data:Partial<Order>)=>void;profitability?:MonthlyProfitability[];onAdditionalSaleChange?:(recordId:string,saleId:string,patch:Partial<ProfitabilitySaleLine>)=>void}) {
   const customerName=useCustomerName();
   const customers=useContext(CustomerDirectoryContext);
   const rows=[...orders].sort((a,b)=>b.month.localeCompare(a.month));
@@ -930,13 +949,23 @@ function Orders({orders,isStaff,onChange}:{orders:Order[];isStaff:boolean;onChan
   const statuses=["לפי חוזה","ממתין לעדכון לקוח","ממתין לאישור","אושר","סופק","בוטל"];
   const monthName=(month:string)=>{const [year,value]=month.split("-");return `${value}/${year}`;};
   const changeStatus=(order:Order,status:string)=>onChange(order.id,{status,...(status==="סופק"&&!order.deliveredAt?{deliveredAt:new Date().toISOString().slice(0,10)}:{})});
-  if(!orders.length)return <><SectionTitle title="הזמנות קפה"/><section className="panel inline-empty">אין הזמנות קפה פעילות.</section></>;
+  // Company extras and employee orders are entered in the customer card; listed here so both screens show the same sales.
+  const additionalSales=profitability.flatMap(record=>record.sales.filter(sale=>(sale.channel==="company_extra"||sale.channel==="employees")&&!sale.id.startsWith("contract-")).map(sale=>({record,sale}))).sort((a,b)=>b.record.month.localeCompare(a.record.month));
+  const additionalSection=onAdditionalSaleChange&&additionalSales.length>0&&<section className="panel additional-orders">
+    <div className="panel-head"><div><h3>מכירות נוספות</h3><p>אקסטרה לחברה והזמנות עובדים מכרטיסי הלקוחות. עדכון כאן מתעדכן גם בכרטיס הלקוח.</p></div><Badge>{additionalSales.length} שורות</Badge></div>
+    <div className="additional-orders-list">{additionalSales.map(({record,sale})=><article key={`${record.id}:${sale.id}`}>
+      <div><strong>{monthName(record.month)} · {customerName(record.accountId)}</strong><small><Badge>{profitabilityChannelLabel(sale.channel)}</Badge> <bdi>{sale.blendName}</bdi> · {Math.round(sale.quantityKg)} ק״ג · {Math.round(sale.quantityKg*sale.pricePerKg).toLocaleString("he-IL")} ₪</small></div>
+      <AdditionalSaleFulfillment sale={sale} locked={record.status==="closed"} onChange={patch=>onAdditionalSaleChange(record.id,sale.id,patch)}/>
+    </article>)}</div>
+  </section>;
+  if(!orders.length)return <><SectionTitle title="הזמנות קפה"/>{additionalSection||<section className="panel inline-empty">אין הזמנות קפה פעילות.</section>}</>;
   if(!isStaff){const o=rows[0],customer=customers.find(item=>item.id===o.accountId)!;return <><SectionTitle title="הזמנת קפה" sub={`הזמנה לחודש ${monthName(o.month)}`}/><section className="order-hero"><div><span>{o.status==="סופק"?"תאריך אספקה":"מועד האספקה הבא"}</span><h2>{o.deliveredAt?formatDate(o.deliveredAt):customer?formatDate(nextDeliveryDate(customer,o)):formatDate(`${o.month}-01`)}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{Math.round(o.requestedKg)}</strong><span>ק״ג</span></div></section><OrderEditor order={o} blends={customer?.contractBlends||[]} onSave={onChange}/>{rows.length>1&&<section className="panel customer-order-history"><h3>הזמנות קודמות</h3>{rows.slice(1).map(item=><div key={item.id}><strong>{monthName(item.month)}</strong><span>{Math.round(item.approvedKg||item.requestedKg)} ק״ג · {item.blend}{item.deliveredAt?` · סופק ${formatDate(item.deliveredAt)}`:""}</span><Badge>{item.status}</Badge></div>)}</section>}</>}
   return <>
     <SectionTitle title="מכירות והזמנות קפה" sub={`${rows.length} רשומות חודשיות`} action={<button onClick={()=>{const csv="חודש,לקוח,כמות,תערובת,סטטוס,תאריך אספקה,שולם,חשבונית,תעודת משלוח\n"+rows.map(o=>`${o.month},${customerName(o.accountId)},${o.requestedKg},${o.blend},${o.status},${o.deliveredAt||""},${o.paid?"כן":"לא"},${o.invoiceSent?"כן":"לא"},${o.deliveryNoteSent?"כן":"לא"}`).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv"}));a.download="coffee-orders.csv";a.click();}}>ייצוא CSV</button>}/>
     <div className="kpi-grid"><Kpi label="סה״כ ברשומות" value={`${Math.round(total)} ק״ג`} meta="לפי הכמות המאושרת"/><Kpi label="ממתינות לאישור" value={rows.filter(o=>o.status==="ממתין לאישור").length} meta="דורשות החלטה" tone="orange"/><Kpi label="סופקו ולא שולמו" value={rows.filter(o=>o.status==="סופק"&&!o.paid).length} meta="דורשות מעקב גבייה" tone="red"/></div>
     <div className="table-wrap order-table"><table><thead><tr><th>חודש</th><th>לקוח</th><th>לפי חוזה</th><th>מבוקש</th><th>מאושר</th><th>תערובת</th><th>סטטוס</th><th>אספקה</th><th>תשלום ומסמכים</th></tr></thead><tbody>{rows.map(o=><tr key={o.id}><td><strong>{monthName(o.month)}</strong></td><td><strong>{customerName(o.accountId)}</strong></td><td>{Math.round(o.defaultKg)} ק״ג</td><td>{Math.round(o.requestedKg)} ק״ג</td><td><input className="kg-input small" type="number" step="1" value={Math.round(o.approvedKg||o.requestedKg)} onChange={e=>onChange(o.id,{approvedKg:Math.round(+e.target.value)})}/></td><td><OrderBlendInput order={o} onChange={onChange}/></td><td><select className="status-select" value={o.status} onChange={event=>changeStatus(o,event.target.value)}>{Array.from(new Set([...statuses,o.status])).map(status=><option key={status}>{status}</option>)}</select></td><td>{o.status==="סופק"?<input className="delivery-date-input" type="date" value={(o.deliveredAt||"").slice(0,10)} onChange={event=>onChange(o.id,{deliveredAt:event.target.value})}/>:<span className="muted-cell">לא סופק</span>}</td><td><OrderFulfillmentControls order={o} onChange={onChange}/></td></tr>)}</tbody></table></div>
     <div className="mobile-cards order-mobile-cards">{rows.map(o=><article className="mobile-card order-mobile-card" key={o.id}><div className="mobile-card-head"><div><strong>{monthName(o.month)} · {customerName(o.accountId)}</strong><small>{o.blend}</small></div><Badge>{o.status}</Badge></div><div className="mobile-order-metrics"><span><small>לפי חוזה</small><strong>{Math.round(o.defaultKg)} ק״ג</strong></span><span><small>מבוקש</small><strong>{Math.round(o.requestedKg)} ק״ג</strong></span><span><small>מאושר</small><strong>{Math.round(o.approvedKg||o.requestedKg)} ק״ג</strong></span></div><div className="mobile-order-edit"><label><span>כמות מאושרת (ק״ג)</span><input className="kg-input" type="number" inputMode="numeric" min="0" step="1" value={Math.round(o.approvedKg||o.requestedKg)} onChange={e=>onChange(o.id,{approvedKg:Math.round(+e.target.value)})}/></label><label><span>תערובת</span><OrderBlendInput order={o} onChange={onChange}/></label></div><label><span>שינוי סטטוס</span><select value={o.status} onChange={event=>changeStatus(o,event.target.value)}>{Array.from(new Set([...statuses,o.status])).map(status=><option key={status}>{status}</option>)}</select></label>{o.status==="סופק"&&<label><span>תאריך אספקה</span><input type="date" value={(o.deliveredAt||"").slice(0,10)} onChange={event=>onChange(o.id,{deliveredAt:event.target.value})}/></label>}<OrderFulfillmentControls order={o} onChange={onChange}/></article>)}</div>
+    {additionalSection}
     {Array.from(new Set(rows.map(o=>o.accountId))).map(accountId=>{const customer=customers.find(item=>item.id===accountId);return <datalist id={`order-blends-${accountId}`} key={accountId}>{(customer?knownBlends(customer):BLEND_CATALOG.map(item=>({name:item.name}))).map(item=><option value={item.name} key={item.name}/>)}</datalist>;})}
   </>;
 }
