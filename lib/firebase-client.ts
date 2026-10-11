@@ -1,4 +1,5 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import { getAuth } from "firebase/auth";
 import {
   getFirestore,
@@ -19,6 +20,12 @@ const firebaseConfig = {
 
 export const isFirebaseConfigured = Object.values(firebaseConfig).every(Boolean);
 let persistentDb: Firestore | null = null;
+let appCheckStarted = false;
+
+// App Check proves requests come from this site, not from a script holding
+// the public API key. It turns on once the reCAPTCHA Enterprise site key is
+// set in the build; enforcement is switched on separately in the console.
+const appCheckSiteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
 
 export function getFirebaseServices() {
   if (!isFirebaseConfigured) {
@@ -26,6 +33,13 @@ export function getFirebaseServices() {
   }
 
   const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  if (appCheckSiteKey && !appCheckStarted && typeof window !== "undefined") {
+    appCheckStarted = true;
+    initializeAppCheck(app, {
+      provider: new ReCaptchaEnterpriseProvider(appCheckSiteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  }
   if (!persistentDb) {
     try {
       persistentDb = initializeFirestore(app, {

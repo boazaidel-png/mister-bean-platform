@@ -454,6 +454,12 @@ service cloud.firestore {
       allow delete: if isAdmin() && request.auth.uid != userId;
     }
 
+    // Written only by Cloud Functions (functions/audit.js, functions/password.js).
+    match /auditLog/{entryId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /accessInvites/{inviteEmail} {
       allow read: if isAdmin()
         || (signedIn() && request.auth.token.email == inviteEmail);
