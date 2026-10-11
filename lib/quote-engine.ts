@@ -161,6 +161,27 @@ export function normalizeAllocationForQuantity(
   return { ...allocation, free, lease, sale };
 }
 
+/**
+ * Updates one column of a machine's split between free, rental and sale.
+ * Setting rental or sale takes the units from the free column, so a machine
+ * that starts as free (every newly added machine does) moves to rental
+ * without leaving a stale free unit behind and over-counting the split.
+ */
+export function setAllocationField(
+  allocation: QuoteAllocation,
+  quantity: number,
+  field: "free" | "lease" | "sale",
+  value: number,
+): QuoteAllocation {
+  const total = positive(quantity);
+  const next = { ...allocation, [field]: positive(value) };
+  if (field !== "free") {
+    const paid = positive(next.lease) + positive(next.sale);
+    next.free = Math.max(0, total - paid);
+  }
+  return next;
+}
+
 export function recommendedEquipment(dailyCups: number) {
   let best:
     | { f15: number; c12: number; emilio: number; capacity: number; cost: number; score: number }
@@ -265,6 +286,19 @@ export function calculateQuote(quote: Quote) {
   let saleIncome = 0;
   let saleProfit = 0;
   let uncoveredCost = 0;
+  const machineLines: Array<{
+    key: string;
+    model: string;
+    quantity: number;
+    free: number;
+    lease: number;
+    sale: number;
+    unitCost: number;
+    leasePerUnit: number;
+    leasePriceSource: "machine" | "default" | "automatic";
+    monthlyLeaseIncome: number;
+    saleIncome: number;
+  }> = [];
   for (const { item, allocation } of allocations) {
     const catalog = equipmentCatalog.find(
       (entry) => entry.key === (item.key || item.model),
@@ -287,6 +321,23 @@ export function calculateQuote(quote: Quote) {
     const salePrice = packageCost * (1 + positive(quote.saleMargin) / 100);
     saleIncome += allocation.sale * salePrice;
     saleProfit += allocation.sale * (salePrice - packageCost);
+    machineLines.push({
+      key: item.key || item.model,
+      model: item.model,
+      quantity: positive(item.quantity),
+      free: positive(allocation.free),
+      lease: positive(allocation.lease),
+      sale: positive(allocation.sale),
+      unitCost: packageCost,
+      leasePerUnit: leasePerSet,
+      leasePriceSource: positive(item.monthlyPrice)
+        ? "machine"
+        : positive(quote.manualLeasePerSet)
+          ? "default"
+          : "automatic",
+      monthlyLeaseIncome: isMonthlyPackage ? 0 : positive(allocation.lease) * leasePerSet,
+      saleIncome: isMonthlyPackage ? 0 : positive(allocation.sale) * salePrice,
+    });
   }
   if (isMonthlyPackage) {
     leaseIncome = 0;
@@ -642,6 +693,7 @@ export function calculateQuote(quote: Quote) {
       leaseIncome,
       saleIncome,
       saleProfit,
+      lines: machineLines,
     },
     package: {
       active: isMonthlyPackage,
