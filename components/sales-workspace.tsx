@@ -2948,11 +2948,14 @@ function QuoteModal({
                             type="number"
                             min="0"
                             value={item.monthlyPrice || 0}
-                            onChange={(event) =>
-                              updateCustomMachine(item.key || item.model, {
-                                monthlyPrice: +event.target.value,
-                              })
-                            }
+                            onChange={(event) => {
+                              const monthlyPrice = +event.target.value;
+                              updateCustomMachine(item.key || item.model, { monthlyPrice });
+                              // A rental price only earns income for units in the rental column.
+                              // When every unit is still free, entering a price means renting them.
+                              if (monthlyPrice > 0 && allocation.lease === 0 && allocation.sale === 0 && allocation.free > 0)
+                                updateAllocation(item, "lease", allocation.free);
+                            }}
                           />
                         </label>
                         <small className={remaining < 0 ? "negative" : ""}>
@@ -2960,6 +2963,9 @@ function QuoteModal({
                             ? `חריגה של ${Math.abs(remaining)} — יש לתקן את החלוקה`
                             : [
                                 remaining > 0 ? `נותרו לחלוקה: ${remaining}` : "",
+                                (item.monthlyPrice || 0) > 0 && allocation.lease === 0
+                                  ? "הוזן מחיר שכירות, אבל אין יחידות בעמודת השכרה ולכן הוא לא נספר כהכנסה"
+                                  : "",
                                 line && allocation.lease > 0
                                   ? `שכירות: ${money(line.monthlyLeaseIncome)} לחודש (${money(line.leasePerUnit)} ליחידה${line.leasePriceSource === "automatic" ? ", מחושב לפי עלות ותקופה" : line.leasePriceSource === "default" ? ", לפי ברירת המחדל" : ""})`
                                   : "",
