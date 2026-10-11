@@ -284,7 +284,9 @@ service cloud.firestore {
     // minimum they can confirm themselves (approved as requested); a lower
     // quantity only asks the office, leaving the approved quantity as is.
     function validCustomerOrderUpdate(documentId, accountId) {
-      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      // Top-ups are approved by the office only.
+      return resource.data.get('kind', 'contract') != 'extra'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'requestedKg', 'approvedKg', 'blend', 'note', 'status', 'updatedAt', 'customerConfirmedAt'
         ])
         && resource.data.status in ['לפי חוזה', 'ממתין לעדכון לקוח', 'ממתין לאישור', 'אושר']
@@ -301,6 +303,30 @@ service cloud.firestore {
           )
         )
         && validOrder(request.resource.data, documentId, accountId);
+    }
+
+    // A customer who ran out of coffee orders a top-up during the month. It
+    // waits for the office: nothing approved, delivered or paid, at most 500 kg.
+    function validCustomerExtraOrderCreate(data, documentId, accountId) {
+      return documentId.matches('^extra-.+$')
+        && documentId.size() <= 200
+        && data.keys().hasOnly([
+          'id', 'accountId', 'month', 'kind', 'defaultKg', 'requestedKg', 'approvedKg', 'status',
+          'blend', 'note', 'deliveryPreference', 'requestedDeliveryDate', 'customerConfirmedAt',
+          'createdAt', 'updatedAt'
+        ])
+        && data.kind == 'extra'
+        && data.status == 'ממתין לאישור'
+        && data.defaultKg == 0
+        && data.approvedKg == 0
+        && data.requestedKg is int
+        && data.requestedKg >= 1 && data.requestedKg <= 500
+        && data.month.matches('^[0-9]{4}-[0-9]{2}$')
+        && data.deliveryPreference in ['asap', 'tomorrow', 'date']
+        && shortString(data.get('requestedDeliveryDate', ''), 10)
+        && shortString(data.get('createdAt', ''), 40)
+        && shortString(data.get('updatedAt', ''), 40)
+        && validOrder(data, documentId, accountId);
     }
 
     function validTask(data, documentId, accountId) {
@@ -562,6 +588,8 @@ service cloud.firestore {
         allow read: if isStaff() || belongsToAccount(accountId);
         allow create, update: if isStaff()
           && validOrder(request.resource.data, documentId, accountId);
+        allow create: if belongsToAccount(accountId)
+          && validCustomerExtraOrderCreate(request.resource.data, documentId, accountId);
         allow update: if belongsToAccount(accountId)
           && validCustomerOrderUpdate(documentId, accountId);
         allow delete: if isAdmin();

@@ -1381,3 +1381,24 @@ body.tasting-report-open .mobile-nav{display:none}
 .audit-panel{margin-top:18px}.audit-list{list-style:none;margin:0;padding:0;display:grid;gap:8px;max-height:420px;overflow:auto}.audit-list li{display:grid;gap:3px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}.audit-list li>div{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}.audit-list strong{font-size:13px}.audit-list span{font-size:12px;color:#4d5f58}.audit-list small{font-size:11px;color:#7b8a84}
 .push-toggle.on{color:#bfe8d5;border-color:rgba(127,214,174,.35)}.push-toggle:disabled{opacity:.6;cursor:wait}
 .order-confirm-state{margin-bottom:14px;padding:11px 13px;border-radius:10px;font-size:13px;font-weight:700;line-height:1.5}.order-confirm-state.todo{background:#fff6e5;border:1px solid #f1d49a;color:#7a5410}.order-confirm-state.pending{background:#eef3ff;border:1px solid #c9d6f5;color:#30477a}.order-confirm-state.done{background:#eaf6ef;border:1px solid #bfe0cc;color:#1d5c3f}
+
+/* Customer: "נגמר לי הקפה" top-up orders */
+.out-of-coffee{display:inline-flex;align-items:center;gap:6px;min-height:42px;padding:0 16px;border-radius:12px;font-weight:700}
+.extra-order-pending{display:grid;gap:8px;margin-bottom:14px;background:#fff8ef;border:1px solid #f3d9b8}
+.extra-order-pending>div{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.extra-order-pending span{color:var(--muted);font-size:13px}
+.extra-order-facts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.extra-order-facts>div{display:flex;flex-direction:column;gap:3px;padding:12px 14px;border-radius:12px;background:#f3f7f5}
+.extra-order-facts small,.extra-order-facts span{font-size:12px;color:var(--muted)}
+.extra-order-facts strong{font-size:20px}
+.extra-order-when{border:0;margin:14px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+.extra-order-when legend{font-size:12px;font-weight:bold;margin-bottom:7px;padding:0}
+.extra-order-when label{display:inline-flex;align-items:center;gap:6px;min-height:42px;padding:0 14px;border:1px solid var(--line);border-radius:10px;background:#fff;cursor:pointer;font-size:14px}
+.extra-order-when label.active{border-color:var(--green);background:#eef6f2;font-weight:700}
+.extra-order-when input{accent-color:var(--green)}
+.extra-order-date,.extra-order-note{display:flex;flex-direction:column;gap:7px;margin-top:12px;font-size:12px;font-weight:bold}
+.extra-order-date input,.extra-order-note textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:11px;background:#fff;font:inherit;font-weight:400}
+.extra-order-warning{margin:0 0 12px;padding:10px 12px;border-radius:10px;background:#fff8ef;color:#8a5a1f;font-size:13px}
+.extra-order-error{margin:10px 0 0;color:#b03a2e;font-size:13px}
+.extra-order-tag{display:block;margin-top:4px;color:#b06a1e;font-size:11px;font-weight:700}
+@media(max-width:430px){.extra-order-facts{grid-template-columns:1fr}}

@@ -46,6 +46,22 @@ export function buildNotifications(input: {
       const confirmed = Boolean(order.customerConfirmedAt) && order.status === "אושר";
       const at = order.customerConfirmedAt || order.updatedAt || order.createdAt || "";
       if ((order.status !== "ממתין לאישור" && !confirmed) || at < since) continue;
+      if (order.kind === "extra") {
+        // A top-up the customer asked for because they ran out.
+        if (order.status !== "ממתין לאישור") continue;
+        const when = order.deliveryPreference === "date" && order.requestedDeliveryDate
+          ? `אספקה ב-${order.requestedDeliveryDate.split("-").reverse().join("/")}`
+          : order.deliveryPreference === "tomorrow" ? "אספקה מחר" : "אספקה בהקדם";
+        list.push({
+          id: `order:${order.id}:${at}`,
+          kind: "order",
+          title: `נגמר הקפה · הזמנת השלמה · ${customerName(order.accountId)}`,
+          detail: `${Math.round(order.requestedKg)} ק״ג · ${order.blend} · ${when}`,
+          at,
+          target: { type: "order", id: order.id, accountId: order.accountId },
+        });
+        continue;
+      }
       const low = order.defaultKg > 0 && order.requestedKg < order.defaultKg;
       list.push({
         id: `order:${order.id}:${at}`,

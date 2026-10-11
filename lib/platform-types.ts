@@ -262,9 +262,17 @@ export type Order = {
   deliveryNoteSent?: boolean;
   /** When the customer last confirmed or changed the order themselves. */
   customerConfirmedAt?: string;
+  /** "extra": a top-up the customer asked for during the month, on top of the contract order. */
+  kind?: "contract" | "extra";
+  /** For a top-up: when the customer wants it delivered. */
+  deliveryPreference?: DeliveryPreference;
+  /** For a top-up delivered on a chosen date (yyyy-mm-dd). */
+  requestedDeliveryDate?: string;
   createdAt?: string;
   updatedAt?: string;
 };
+
+export type DeliveryPreference = "asap" | "tomorrow" | "date";
 
 export type Task = {
   id: string;

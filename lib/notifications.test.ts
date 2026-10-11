@@ -55,3 +55,11 @@ test("administrators see orders customers confirmed themselves", () => {
   assert.match(list[0].title, /אישר/);
   assert.equal(list[0].at, confirmed.customerConfirmedAt);
 });
+
+test("a top-up order shows as the customer running out, with the delivery they asked for", () => {
+  const list = buildNotifications({ ...input, role: "admin", orders: [order("x", { kind: "extra", status: "ממתין לאישור", defaultKg: 0, requestedKg: 5, approvedKg: 0, deliveryPreference: "tomorrow", customerConfirmedAt: "2026-10-11T08:00:00Z" })] });
+  const item = list.find((entry) => entry.target.id === "x")!;
+  assert.equal(item.kind, "order");
+  assert.match(item.title, /הזמנת השלמה/);
+  assert.match(item.detail, /5 ק״ג · DX · אספקה מחר/);
+});
