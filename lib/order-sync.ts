@@ -1,10 +1,15 @@
-import type { Customer, Order } from "./platform-types";
+import type { CommercialAgreement, Customer, Order } from "./platform-types";
 
 const UNSET_BLEND = "טרם הוגדרה תערובת";
+const CLOSED_STATUSES = ["סופק", "בוטל"];
 
-/** Kilograms a customer's contract covers each month: the package's included coffee or the agreed monthly quantity. */
-export function contractMonthlyKg(customer: Pick<Customer, "commercialAgreement" | "monthlyKg">) {
-  const agreement = customer.commercialAgreement;
+/**
+ * Kilograms the contract covers each month: the package's included coffee or
+ * the agreed monthly quantity. `agreement` is the one the customer card works
+ * with (saved on the card, or built from the active quote); without one, the
+ * card's monthly quantity.
+ */
+export function contractMonthlyKg(customer: Pick<Customer, "monthlyKg">, agreement?: CommercialAgreement) {
   if (agreement?.model === "monthly_package") {
     return Math.max(0, Math.round(agreement.packageCount * agreement.packageIncludedKgPerUnit));
   }
@@ -20,16 +25,26 @@ function latestOrder(orders: Order[], accountId: string) {
 }
 
 /**
- * Keeps the monthly orders in step with the customer cards: every customer
- * that is not paused gets an order for the month from its contract quantity,
- * and an order still "לפי חוזה" that nobody changed follows a changed
- * contract. Returns the same array when nothing changed.
+ * Keeps the month's orders in step with the contract chosen in each customer
+ * card:
+ * - every customer that is not paused gets an order for the month;
+ * - an open order's contract quantity ("לפי חוזה") always follows the
+ *   contract, and its requested and approved quantities follow too unless
+ *   someone changed them;
+ * - delivered and cancelled orders are history and stay as they are.
+ * Returns the same array when nothing changed.
  */
-export function syncContractOrders(orders: Order[], customers: Customer[], month: string, now = new Date().toISOString()): Order[] {
+export function syncContractOrders(
+  orders: Order[],
+  customers: Customer[],
+  month: string,
+  agreementFor: (customer: Customer) => CommercialAgreement | undefined = (customer) => customer.commercialAgreement,
+  now = new Date().toISOString(),
+): Order[] {
   let next = orders;
   for (const customer of customers) {
     if (customer.status === "בהשהיה") continue;
-    const kg = contractMonthlyKg(customer);
+    const kg = contractMonthlyKg(customer, agreementFor(customer));
     if (kg <= 0) continue;
     const existing = next.find((order) => order.accountId === customer.id && order.month === month);
     if (!existing) {
@@ -42,14 +57,17 @@ export function syncContractOrders(orders: Order[], customers: Customer[], month
       }, ...next];
       continue;
     }
-    const untouched = existing.status === "לפי חוזה"
-      && existing.requestedKg === existing.defaultKg
-      && (existing.approvedKg || existing.defaultKg) === existing.defaultKg;
-    if (untouched && existing.defaultKg !== kg) {
-      next = next.map((order) => order.id === existing.id
-        ? { ...order, defaultKg: kg, requestedKg: kg, approvedKg: kg, updatedAt: now }
-        : order);
-    }
+    if (CLOSED_STATUSES.includes(existing.status) || existing.paid || existing.defaultKg === kg) continue;
+    const previousDefault = existing.defaultKg;
+    next = next.map((order) => order.id === existing.id
+      ? {
+          ...order,
+          defaultKg: kg,
+          requestedKg: order.requestedKg === previousDefault ? kg : order.requestedKg,
+          approvedKg: !order.approvedKg || order.approvedKg === previousDefault ? kg : order.approvedKg,
+          updatedAt: now,
+        }
+      : order);
   }
   return next;
 }
