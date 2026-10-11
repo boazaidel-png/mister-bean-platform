@@ -386,6 +386,8 @@ export default function Home() {
   // A tapped push notification opens the app on its screen: "?view=" on a
   // fresh start, or a message from the service worker when already open.
   useEffect(()=>{
+    // Wait for the user's role: until then the menu is not the user's own.
+    if(!role)return;
     const allowed=new Set<string>(nav.map(item=>item.id));
     const open=(value:unknown)=>{if(typeof value==="string"&&allowed.has(value)){setView(value as View);setMobileOpen(false);}};
     const params=new URLSearchParams(window.location.search);
@@ -393,7 +395,7 @@ export default function Home() {
     const onMessage=(event:MessageEvent)=>{if(event.data?.type==="open-view")open(event.data.view);};
     navigator.serviceWorker?.addEventListener("message",onMessage);
     return()=>navigator.serviceWorker?.removeEventListener("message",onMessage);
-  },[nav]);
+  },[nav,role]);
   const [push,setPush]=useState<PushState>("unsupported");
   const [pushBusy,setPushBusy]=useState(false);
   useEffect(()=>{
