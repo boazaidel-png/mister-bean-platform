@@ -1371,3 +1371,10 @@ body.tasting-report-open .mobile-nav{display:none}
 .notification-panel time{font-size:11px;color:var(--muted);white-space:nowrap}
 .notification-empty{margin:0;padding:24px;text-align:center;color:var(--muted);font-size:13px}
 @media(max-width:760px){.notification-panel{position:fixed;top:calc(64px + env(safe-area-inset-top));left:12px;right:12px;width:auto}}
+
+/* Orders: status tabs */
+.order-buckets{display:flex;gap:6px;margin:16px 0 12px;padding:4px;background:#eef3f1;border-radius:12px;overflow-x:auto}
+.order-buckets button{flex:1 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;padding:0 14px;border:0;border-radius:9px;background:none;color:var(--muted);font-weight:600;cursor:pointer;white-space:nowrap}
+.order-buckets button b{min-width:22px;height:22px;padding:0 6px;border-radius:99px;background:#fff;color:var(--ink);font-size:12px;display:grid;place-items:center}
+.order-buckets button.active{background:#fff;color:var(--ink);box-shadow:0 2px 8px rgba(15,40,32,.08)}
+.order-buckets button.active b{background:var(--green);color:#fff}
