@@ -90,6 +90,8 @@ import { createBusinessBackup } from "@/lib/system-backup";
 import { buildDefaultCompanySales, calculateActualProfitability } from "@/lib/profitability-engine";
 import { BLEND_CATALOG, findKnownBlend, knownBlends } from "@/lib/blend-catalog";
 import { currentMonthKey, syncContractOrders } from "@/lib/order-sync";
+import { buildNotifications, type AppNotification } from "@/lib/notifications";
+import { NotificationBell } from "@/components/notification-bell";
 import { calculateQuote } from "@/lib/quote-engine";
 import { activeQuoteFor, customerUpdateForActiveQuote, existingAccountIdForQuote, isSupersededQuote } from "@/lib/quote-lifecycle";
 import { commercialAgreementFromQuote, commercialAgreementLabel, commercialAgreementMonthlyIncome, emptyCommercialAgreement } from "@/lib/commercial-agreement";
@@ -358,6 +360,14 @@ export default function Home() {
   const selectedCustomerName = customers.find(customer=>customer.id===clientId)?.name || "—";
 
   const navigate=(next:View)=>{setView(next);setMobileOpen(false);};
+  // The bell: customer orders, low orders and access requests for administrators; service calls for all staff.
+  const notifications=preview?[]:buildNotifications({role,orders:store.orders,tickets:store.tickets,users,customerName:(accountId:string)=>customers.find(customer=>customer.id===accountId)?.name||"לקוח"});
+  const openNotification=(item:AppNotification)=>{
+    setMobileOpen(false);
+    if(item.target.type==="ticket"){setSelectedTicket(item.target.id);setModal("detail");return;}
+    if(item.target.type==="access"){setView("access");return;}
+    if(item.target.accountId){setSelectedCustomer(item.target.accountId);setCustomerTab("הזמנות קפה");setView("customer");}
+  };
   const allowWrite=()=>{if(readOnly){setToast("מצב התצוגה הוא לקריאה בלבד");return false;}return true;};
   const openTicket=(machineId="")=>{if(!allowWrite())return;if(!customers.length){setToast("יש להקים לקוח לפני פתיחת קריאת שירות");return;}setSelectedTicket(machineId);setModal("ticket");};
   const openTicketForCustomer=(accountId:string)=>{if(!allowWrite())return;setSelectedCustomer(accountId);setSelectedTicket("");setModal("ticket");};
@@ -499,6 +509,7 @@ export default function Home() {
           <div className="top-actions">
             {!isStaff&&role==="multi"&&<select value={selectedCustomer} onChange={e=>setSelectedCustomer(e.target.value)}>{customers.map(customer=><option key={customer.id} value={customer.id}>{customer.name}</option>)}</select>}
             {profile.role==="admin"&&!preview&&<button className="preview-button" onClick={()=>setPreviewOpen(true)}><Eye size={17}/> תצוגת מערכת</button>}
+            {isStaff&&!preview&&<NotificationBell uid={profile.uid} notifications={notifications} onOpen={openNotification} onToast={setToast}/>}
             {isStaff&&<button className="top-create" onClick={()=>openTicket()}><Plus size={17}/> קריאה חדשה</button>}
           </div>
         </header>
