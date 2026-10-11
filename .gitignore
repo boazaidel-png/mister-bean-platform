@@ -42,3 +42,6 @@ firebase-debug.log*
 /outputs/
 /work/
 *.tsbuildinfo
+
+# firebase functions
+/functions/node_modules/
