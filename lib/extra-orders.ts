@@ -63,9 +63,28 @@ export function deliveredThisMonthKg(orders: Order[], today = new Date()) {
 export const openExtraOrders = (orders: Order[]) =>
   orders.filter((order) => isExtraOrder(order) && !CLOSED_ORDER_STATUSES.includes(order.status));
 
-export function validateExtraOrder(input: { kg: number; preference: DeliveryPreference; date?: string }, today = new Date()) {
+/** Top-ups in a month may add up to this share of the contract; more needs a word with the office. */
+export const EXTRA_ORDER_SHARE = 0.2;
+
+/** Kilograms the customer may still top up this month: 20% of the contract, less top-ups already ordered. */
+export function extraAllowanceKg(orders: Order[], contractKg: number, month: string) {
+  const limit = Math.floor(Math.max(0, contractKg) * EXTRA_ORDER_SHARE);
+  const used = orders
+    .filter((order) => isExtraOrder(order) && order.month === month && order.status !== "בוטל")
+    .reduce((sum, order) => sum + Math.max(0, order.approvedKg || order.requestedKg || 0), 0);
+  return { limit, used, left: Math.max(0, limit - used) };
+}
+
+export const CONTACT_OFFICE_MESSAGE = "לכמות גדולה יותר יש ליצור קשר ישירות עם המשרד.";
+
+export function validateExtraOrder(input: { kg: number; preference: DeliveryPreference; date?: string; allowanceKg?: number }, today = new Date()) {
   if (!Number.isInteger(input.kg) || input.kg <= 0) return "יש להזין כמות בק״ג";
   if (input.kg > MAX_EXTRA_ORDER_KG) return `אפשר להזמין עד ${MAX_EXTRA_ORDER_KG} ק״ג בהזמנה אחת`;
+  if (input.allowanceKg !== undefined && input.kg > input.allowanceKg) {
+    return input.allowanceKg > 0
+      ? `אפשר להשלים עד ${input.allowanceKg} ק״ג החודש (20% מהכמות בחוזה). ${CONTACT_OFFICE_MESSAGE}`
+      : `מכסת ההשלמה החודשית (20% מהכמות בחוזה) נוצלה. ${CONTACT_OFFICE_MESSAGE}`;
+  }
   if (input.preference === "date") {
     if (!input.date) return "יש לבחור תאריך לאספקה";
     const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
@@ -102,4 +121,35 @@ export function newExtraOrder(input: {
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+/** Consumption of at least this share above the contract, two months running, suggests a bigger contract. */
+export const HIGH_USAGE_RATIO = 1.2;
+export const HIGH_USAGE_MONTHS = 2;
+
+const shiftMonth = (month: string, by: number) => {
+  const [year, value] = month.split("-").map(Number);
+  const date = new Date(Date.UTC(year, value - 1 + by, 1));
+  return date.toISOString().slice(0, 7);
+};
+
+/** Coffee a customer took in a month: the contract order and top-ups, cancelled orders left out. */
+export function monthTotalKg(orders: Order[], month: string) {
+  return orders
+    .filter((order) => order.month === month && order.status !== "בוטל")
+    .reduce((sum, order) => sum + Math.max(0, order.approvedKg || order.requestedKg || 0), 0);
+}
+
+/**
+ * Whether the last two full months (before `month`) each went 20% or more
+ * over the contract quantity. Returns the months and totals, or null.
+ */
+export function highConsumption(orders: Order[], contractKg: number, month: string) {
+  if (contractKg <= 0) return null;
+  const months = Array.from({ length: HIGH_USAGE_MONTHS }, (_, index) => shiftMonth(month, -(HIGH_USAGE_MONTHS - index)));
+  const totals = months.map((item) => monthTotalKg(orders, item));
+  // Top-ups stop at 20% of the contract, so reaching it counts.
+  if (!totals.every((total) => total >= contractKg * HIGH_USAGE_RATIO)) return null;
+  const average = totals.reduce((sum, total) => sum + total, 0) / totals.length;
+  return { months, totals, contractKg, average, overPercent: Math.round((average / contractKg - 1) * 100) };
 }

@@ -95,7 +95,7 @@ import { createBusinessBackup } from "@/lib/system-backup";
 import { buildDefaultCompanySales, calculateActualProfitability } from "@/lib/profitability-engine";
 import { BLEND_CATALOG, findKnownBlend, knownBlends } from "@/lib/blend-catalog";
 import { contractMonthlyKg, currentMonthKey, syncContractOrders } from "@/lib/order-sync";
-import { contractOrdersOnly, DELIVERY_PREFERENCES, deliveredThisMonthKg, deliveryPreferenceLabel, isExtraOrder, MAX_EXTRA_ORDER_KG, newExtraOrder, nextContractDelivery, openExtraOrders, validateExtraOrder } from "@/lib/extra-orders";
+import { CONTACT_OFFICE_MESSAGE, contractOrdersOnly, DELIVERY_PREFERENCES, extraAllowanceKg, highConsumption, deliveredThisMonthKg, deliveryPreferenceLabel, isExtraOrder, MAX_EXTRA_ORDER_KG, newExtraOrder, nextContractDelivery, openExtraOrders, validateExtraOrder } from "@/lib/extra-orders";
 import { buildNotifications, type AppNotification } from "@/lib/notifications";
 import { NotificationBell } from "@/components/notification-bell";
 import { disablePush, enablePush, pushState, refreshPush, type PushState } from "@/lib/push";
@@ -416,11 +416,12 @@ export default function Home() {
   const pushLabel=push==="on"?"התראות בנייד פעילות":push==="needs-install"?"התראות: הוספה למסך הבית":push==="denied"?"התראות חסומות בדפדפן":"הפעלת התראות בנייד";
   const logout=async()=>{await disablePush().catch(()=>undefined);await signOutUser();};
   // The bell: customer orders, low orders and access requests for administrators; service calls for all staff.
-  const notifications=preview?[]:buildNotifications({role,orders:store.orders,tickets:store.tickets,users,customerName:(accountId:string)=>customers.find(customer=>customer.id===accountId)?.name||"לקוח"});
+  const notifications=preview?[]:buildNotifications({role,orders:store.orders,tickets:store.tickets,users,highUsage:customers.flatMap(customer=>{const high=highConsumption(store.orders.filter(order=>order.accountId===customer.id),contractMonthlyKg(customer,customerAgreement(customer,salesWorkspace.quotes)),currentMonthKey());return high?[{accountId:customer.id,...high}]:[];}),customerName:(accountId:string)=>customers.find(customer=>customer.id===accountId)?.name||"לקוח"});
   const openNotification=(item:AppNotification)=>{
     setMobileOpen(false);
     if(item.target.type==="ticket"){setSelectedTicket(item.target.id);setModal("detail");return;}
     if(item.target.type==="access"){setView("access");return;}
+    if(item.target.type==="customer"&&item.target.accountId){setSelectedCustomer(item.target.accountId);setCustomerTab("חוזה והצעות");setView("customer");return;}
     if(item.target.accountId){setSelectedCustomer(item.target.accountId);setCustomerTab("הזמנות קפה");setView("customer");}
   };
   const allowWrite=()=>{if(readOnly){setToast("מצב התצוגה הוא לקריאה בלבד");return false;}return true;};
@@ -521,7 +522,7 @@ export default function Home() {
     machines:current.machines.some(item=>item.id===machine.id)?current.machines.map(item=>item.id===machine.id?machine:item):[machine,...current.machines],
     tasks:reconcileFilterReplacementTask(current.tasks,machine,customer?.owner||"מנהל המערכת"),
   }));setModal(null);setToast("פרטי המכונה נשמרו");};
-  const updateOrder=(id:string,data:Partial<Order>)=>{if(!allowWrite())return;setStore(current=>({...current,orders:current.orders.map(order=>order.id===id?{...order,...data,updatedAt:new Date().toISOString()}:order)}));setToast(isStaff?"ההזמנה עודכנה":data.status==="אושר"?"ההזמנה אושרה, תודה!":"הבקשה נשלחה לאישור המנהל");};
+  const updateOrder=(id:string,data:Partial<Order>)=>{if(!allowWrite())return;setStore(current=>({...current,orders:current.orders.map(order=>order.id===id?{...order,...data,updatedAt:new Date().toISOString()}:order)}));setToast(isStaff?"ההזמנה עודכנה":data.status==="בוטל"?"ההזמנה בוטלה":data.status==="אושר"?"ההזמנה אושרה, תודה!":"הבקשה נשלחה לאישור המנהל");};
   const createExtraOrder=(order:Order)=>{if(!allowWrite())return;setStore(current=>({...current,orders:[order,...current.orders]}));setToast("ההזמנה נשלחה. נעדכן אותך כשתאושר.");};
   const updateAdditionalSale=(recordId:string,saleId:string,patch:Partial<ProfitabilitySaleLine>)=>{if(!allowWrite())return;setStore(current=>({...current,profitability:current.profitability.map(record=>record.id===recordId?{...record,sales:record.sales.map(sale=>sale.id===saleId?{...sale,...patch}:sale),updatedAt:new Date().toISOString()}:record)}));setToast("המכירה עודכנה");};
   const saveProfitability=(record:MonthlyProfitability)=>{if(!allowWrite())return;setStore(current=>({...current,profitability:current.profitability.some(item=>item.id===record.id)?current.profitability.map(item=>item.id===record.id?record:item):[record,...current.profitability]}));setToast("נתוני הרווחיות נשמרו");};
@@ -1096,7 +1097,7 @@ function Orders({orders,isStaff,onChange,profitability=[],onAdditionalSaleChange
     const pendingExtras=openExtraOrders(orders);
     const outOfCoffee=customer&&onCreateExtra&&<button className="primary out-of-coffee" onClick={()=>setExtraOpen(true)}>☕ נגמר לי הקפה</button>;
     return <><SectionTitle title="הזמנת קפה" sub={o?`הזמנה לחודש ${monthName(o.month)}`:"הזמנות קפה"} action={outOfCoffee||undefined}/>
-      {pendingExtras.length>0&&<section className="panel extra-order-pending">{pendingExtras.map(item=><div key={item.id}><strong>הזמנת השלמה · {Math.round(item.approvedKg||item.requestedKg)} ק״ג · <bdi>{item.blend}</bdi></strong><span>{item.status==="אושר"?"אושרה":"ממתינה לאישור"}{deliveryPreferenceLabel(item)?` · אספקה ${deliveryPreferenceLabel(item)}`:""}</span></div>)}</section>}
+      {pendingExtras.length>0&&<section className="panel extra-order-pending">{pendingExtras.map(item=><div key={item.id}><div><strong>הזמנת השלמה · {Math.round(item.approvedKg||item.requestedKg)} ק״ג · <bdi>{item.blend}</bdi></strong><span>{item.status==="אושר"?"אושרה":"ממתינה לאישור"}{deliveryPreferenceLabel(item)?` · אספקה ${deliveryPreferenceLabel(item)}`:""}</span></div>{item.status==="ממתין לאישור"&&<button className="extra-order-cancel" onClick={()=>{if(window.confirm(`לבטל את הזמנת ההשלמה של ${Math.round(item.requestedKg)} ק״ג?`))onChange(item.id,{status:"בוטל"});}}>ביטול ההזמנה</button>}</div>)}</section>}
       {o?<><section className="order-hero"><div><span>{o.status==="סופק"?"תאריך אספקה":"מועד האספקה הבא"}</span><h2>{o.deliveredAt?formatDate(o.deliveredAt):customer?formatDate(nextDeliveryDate(customer,o)):formatDate(`${o.month}-01`)}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{Math.round(o.requestedKg)}</strong><span>ק״ג</span></div></section><OrderEditor key={o.id} order={o} blends={customer?.contractBlends||[]} deliveryDate={customer?nextDeliveryDate(customer,o):`${o.month}-01`} onSave={onChange}/></>:<section className="panel inline-empty">אין עדיין הזמנה חודשית.</section>}
       {others.length>0&&<section className="panel customer-order-history"><h3>הזמנות נוספות</h3>{others.map(item=><div key={item.id}><strong>{isExtraOrder(item)?`השלמה · ${formatDate(item.createdAt||`${item.month}-01`)}`:monthName(item.month)}</strong><span>{Math.round(item.approvedKg||item.requestedKg)} ק״ג · {item.blend}{isExtraOrder(item)&&deliveryPreferenceLabel(item)&&!item.deliveredAt?` · אספקה ${deliveryPreferenceLabel(item)}`:""}{item.deliveredAt?` · סופק ${formatDate(item.deliveredAt)}`:""}</span><Badge>{item.status}</Badge></div>)}</section>}
       {extraOpen&&customer&&onCreateExtra&&<ExtraOrderModal customer={customer} orders={orders} onClose={()=>setExtraOpen(false)} onSubmit={order=>{onCreateExtra(order);setExtraOpen(false);}}/>}
@@ -1139,19 +1140,22 @@ function ExtraOrderModal({customer,orders,onClose,onSubmit}:{customer:Customer;o
   const delivered=deliveredThisMonthKg(orders);
   const contractKg=Math.round(customer.monthlyKg||0);
   const blends=Array.from(new Set([...(customer.contractBlends||[]),...contractOrdersOnly(orders).map(item=>item.blend)].map(item=>item.trim()).filter(item=>item&&item!=="טרם הוגדרה תערובת")));
-  const [kg,setKg]=useState(Math.max(1,Math.round(contractKg/2)||5)),[blend,setBlend]=useState(blends[0]||""),[note,setNote]=useState("");
+  const allowance=extraAllowanceKg(orders,contractKg,currentMonthKey());
+  const [kg,setKg]=useState(Math.max(1,allowance.left)),[blend,setBlend]=useState(blends[0]||""),[note,setNote]=useState("");
   const [preference,setPreference]=useState<DeliveryPreference>("asap"),[date,setDate]=useState("");
   const tomorrow=(()=>{const d=new Date();d.setDate(d.getDate()+1);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);})();
-  const error=validateExtraOrder({kg,preference,date});
+  const error=validateExtraOrder({kg,preference,date,allowanceKg:allowance.left});
   const pending=openExtraOrders(orders);
   return <Modal title="נגמר לי הקפה" onClose={onClose}><form className="modal-form extra-order-form" onSubmit={event=>{event.preventDefault();if(error)return;onSubmit(newExtraOrder({accountId:customer.id,kg,blend,note,preference,date}));}}>
     <div className="extra-order-facts">
       <div><small>האספקה הבאה לפי החוזה</small><strong>{formatDate(next.date)}</strong><span>{next.days===0?"היום":next.days===1?"מחר":`בעוד ${next.days} ימים`}</span></div>
       <div><small>קיבלת החודש</small><strong>{Math.round(delivered)} ק״ג</strong><span>{contractKg?`מתוך ${contractKg} ק״ג בחוזה החודשי`:"לפי אספקות החודש"}</span></div>
     </div>
-    {pending.length>0&&<p className="extra-order-warning">כבר יש לך הזמנת השלמה פתוחה של {Math.round(pending[0].requestedKg)} ק״ג. הזמנה נוספת תתווסף אליה.</p>}
+    {pending.length>0&&<p className="extra-order-warning">כבר יש לך הזמנת השלמה פתוחה של {Math.round(pending[0].requestedKg)} ק״ג.</p>}
+    {allowance.left<=0?<><p className="extra-order-limit">{allowance.limit>0?`מכסת ההשלמה החודשית (${allowance.limit} ק״ג, 20% מהכמות בחוזה) נוצלה.`:"לחשבון שלך אין כמות חודשית בחוזה, ולכן אין אפשרות להזמין השלמה מכאן."} {CONTACT_OFFICE_MESSAGE}</p><footer><button type="button" className="primary" onClick={onClose}>הבנתי</button></footer></>:<>
+    <p className="extra-order-allowance">אפשר להשלים עד <b>{allowance.left} ק״ג</b> החודש (20% מהכמות בחוזה). {CONTACT_OFFICE_MESSAGE}</p>
     <div className="form-grid">
-      <label><span>כמה ק״ג להזמין?</span><div className="input-suffix"><input type="number" inputMode="numeric" min="1" max={MAX_EXTRA_ORDER_KG} step="1" value={kg||""} onChange={event=>setKg(Math.round(Number(event.target.value)))}/><b>ק״ג</b></div></label>
+      <label><span>כמה ק״ג להזמין?</span><div className="input-suffix"><input type="number" inputMode="numeric" min="1" max={Math.min(MAX_EXTRA_ORDER_KG,allowance.left)} step="1" value={kg||""} onChange={event=>setKg(Math.round(Number(event.target.value)))}/><b>ק״ג</b></div></label>
       <label><span>תערובת</span>{blends.length?<select value={blend} onChange={event=>setBlend(event.target.value)}>{blends.map(item=><option key={item}>{item}</option>)}</select>:<input value={blend} onChange={event=>setBlend(event.target.value)} placeholder="כמו בהזמנה הרגילה"/>}</label>
     </div>
     <fieldset className="extra-order-when"><legend>מתי לספק?</legend>{DELIVERY_PREFERENCES.map(([value,label])=><label key={value} className={preference===value?"active":""}><input type="radio" name="when" value={value} checked={preference===value} onChange={()=>setPreference(value)}/>{label}</label>)}</fieldset>
@@ -1159,6 +1163,7 @@ function ExtraOrderModal({customer,orders,onClose,onSubmit}:{customer:Customer;o
     <label className="extra-order-note"><span>הערה (לא חובה)</span><textarea rows={2} maxLength={500} value={note} onChange={event=>setNote(event.target.value)} placeholder="למשל: להשאיר בקבלה"/></label>
     {error&&kg>0&&<p className="extra-order-error">{error}</p>}
     <footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" disabled={Boolean(error)}>שליחת הזמנה</button></footer>
+    </>}
   </form></Modal>;
 }
 

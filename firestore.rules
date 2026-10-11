@@ -321,12 +321,25 @@ service cloud.firestore {
         && data.approvedKg == 0
         && data.requestedKg is int
         && data.requestedKg >= 1 && data.requestedKg <= 500
+        // At most 20% of the contract's monthly quantity per order; the site
+        // also counts the month's earlier top-ups.
+        && data.requestedKg * 5 <= get(/databases/$(database)/documents/accounts/$(accountId)).data.get('monthlyKg', 0)
         && data.month.matches('^[0-9]{4}-[0-9]{2}$')
         && data.deliveryPreference in ['asap', 'tomorrow', 'date']
         && shortString(data.get('requestedDeliveryDate', ''), 10)
         && shortString(data.get('createdAt', ''), 40)
         && shortString(data.get('updatedAt', ''), 40)
         && validOrder(data, documentId, accountId);
+    }
+
+    // A customer cancels their own top-up while the office has not handled it yet.
+    function validCustomerExtraOrderCancel(documentId, accountId) {
+      return resource.data.get('kind', 'contract') == 'extra'
+        && resource.data.status == 'ממתין לאישור'
+        && request.resource.data.status == 'בוטל'
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && shortString(request.resource.data.get('updatedAt', ''), 40)
+        && validOrder(request.resource.data, documentId, accountId);
     }
 
     function validTask(data, documentId, accountId) {
@@ -591,7 +604,8 @@ service cloud.firestore {
         allow create: if belongsToAccount(accountId)
           && validCustomerExtraOrderCreate(request.resource.data, documentId, accountId);
         allow update: if belongsToAccount(accountId)
-          && validCustomerOrderUpdate(documentId, accountId);
+          && (validCustomerOrderUpdate(documentId, accountId)
+            || validCustomerExtraOrderCancel(documentId, accountId));
         allow delete: if isAdmin();
       }
 
