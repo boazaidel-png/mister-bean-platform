@@ -88,6 +88,12 @@ export type Customer = {
   notes?: CustomerNote[];
   profitabilityBlends?: ProfitabilityBlendPreset[];
   commercialAgreement?: CommercialAgreement;
+  /**
+   * The quote we currently work with for this customer, chosen on the card
+   * from all the quotes built for it. The card's agreement and calculations
+   * come from it. Without a choice, the latest approved quote is used.
+   */
+  activeQuoteId?: string;
   /** A trial customer: managed like any customer (orders, service, profitability) but clearly marked. */
   pilot?: boolean;
   pilotStartedAt?: string;
