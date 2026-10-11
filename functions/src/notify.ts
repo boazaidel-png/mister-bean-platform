@@ -74,10 +74,26 @@ export const onOrderWritten = onDocumentWrittenWithAuthContext(
   async (event) => {
     const before = event.data?.before.data() as Order | undefined;
     const after = event.data?.after.data() as Order | undefined;
-    if (!before || !after) return;
     const { accountId } = event.params;
     const path = event.document;
     const kg = (value: number) => `${Math.round(value)} ק״ג`;
+
+    // A customer who ran out of coffee ordered a top-up during the month.
+    if (!before && after?.kind === "extra") {
+      const users = await activeUsers();
+      const name = await customerName(accountId);
+      const when = after.deliveryPreference === "date" && after.requestedDeliveryDate
+        ? `אספקה ב-${after.requestedDeliveryDate.split("-").reverse().join("/")}`
+        : after.deliveryPreference === "tomorrow" ? "אספקה מחר" : "אספקה בהקדם";
+      await notifyOnce(`order-extra:${path}`, adminsOf(users), {
+        title: `נגמר הקפה · ${name}`,
+        body: `הזמנת השלמה: ${kg(after.requestedKg)} · ${after.blend} · ${when}`,
+        view: "orders",
+        tag: `order:${event.params.orderId}`,
+      }, actorOf(event));
+      return;
+    }
+    if (!before || !after) return;
 
     if (after.customerConfirmedAt && after.customerConfirmedAt !== before.customerConfirmedAt) {
       const users = await activeUsers();

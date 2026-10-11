@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildNotifications, isUnread } from "./notifications.ts";
+import { highConsumption } from "./extra-orders.ts";
 import type { Order, Ticket, UserProfile } from "./platform-types.ts";
 
 const now = new Date("2026-10-11T12:00:00Z");
@@ -54,4 +55,25 @@ test("administrators see orders customers confirmed themselves", () => {
   assert.equal(list.length, 1);
   assert.match(list[0].title, /אישר/);
   assert.equal(list[0].at, confirmed.customerConfirmedAt);
+});
+
+test("a top-up order shows as the customer running out, with the delivery they asked for", () => {
+  const list = buildNotifications({ ...input, role: "admin", orders: [order("x", { kind: "extra", status: "ממתין לאישור", defaultKg: 0, requestedKg: 5, approvedKg: 0, deliveryPreference: "tomorrow", customerConfirmedAt: "2026-10-11T08:00:00Z" })] });
+  const item = list.find((entry) => entry.target.id === "x")!;
+  assert.equal(item.kind, "order");
+  assert.match(item.title, /הזמנת השלמה/);
+  assert.match(item.detail, /5 ק״ג · DX · אספקה מחר/);
+});
+
+test("two months well over the contract raise a high-consumption alert for administrators", () => {
+  const months = ["2026-08", "2026-09"].flatMap((month) => [
+    order(`c-${month}`, { month, approvedKg: 10, status: "סופק" }),
+    order(`e-${month}`, { month, kind: "extra", defaultKg: 0, requestedKg: 3, approvedKg: 3, status: "סופק" }),
+  ]);
+  const highUsage = [{ accountId: "a", ...highConsumption(months, 10, "2026-10")! }];
+  const list = buildNotifications({ ...input, role: "admin", orders: months, highUsage });
+  const item = list.find((entry) => entry.kind === "high-usage")!;
+  assert.equal(item.id, "high-usage:a:2026-10");
+  assert.match(item.detail, /13 ו-13 ק״ג מול 10 בחוזה \(\+30%\)/);
+  assert.equal(buildNotifications({ ...input, role: "service", orders: months, highUsage }).some((entry) => entry.kind === "high-usage"), false);
 });

@@ -55,3 +55,11 @@ test("customers without a contract quantity get no order", () => {
   const orders: Order[] = [];
   assert.equal(syncContractOrders(orders, [customer("a", { monthlyKg: 0 })], "2026-10"), orders);
 });
+
+test("a top-up order in the month does not stand in for the contract order", () => {
+  const extra = order("a", "2026-10", { id: "extra-a-1", kind: "extra", defaultKg: 0, requestedKg: 4, approvedKg: 0, status: "ממתין לאישור" });
+  const next = syncContractOrders([extra], [customer("a")], "2026-10");
+  assert.equal(next.length, 2);
+  assert.equal(next.find((o) => o.id === "extra-a-1"), extra);
+  assert.equal(next.find((o) => o.kind !== "extra")?.defaultKg, 10);
+});

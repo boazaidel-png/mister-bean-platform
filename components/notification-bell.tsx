@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Bell, ClipboardList, Headphones, TrendingDown, UserPlus } from "lucide-react";
+import { Bell, ClipboardList, Headphones, TrendingDown, TrendingUp, UserPlus } from "lucide-react";
 import { type AppNotification, isUnread, type NotificationReadState } from "@/lib/notifications";
 
 const storageKey = (uid: string) => `mister-bean-notifications:${uid}`;
@@ -19,7 +19,7 @@ function saveReadState(uid: string, state: NotificationReadState) {
   try { window.localStorage.setItem(storageKey(uid), JSON.stringify(state)); } catch { /* storage unavailable */ }
 }
 
-const icons = { order: ClipboardList, "low-order": TrendingDown, ticket: Headphones, access: UserPlus };
+const icons = { order: ClipboardList, "low-order": TrendingDown, ticket: Headphones, access: UserPlus, "high-usage": TrendingUp };
 
 const timeAgo = (value: string) => {
   const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60000);

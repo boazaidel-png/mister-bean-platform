@@ -1,6 +1,8 @@
 import { getFirestore, type DocumentReference } from "firebase-admin/firestore";
 import { logger } from "firebase-functions";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { highConsumption } from "../../lib/extra-orders";
+import { contractMonthlyKg } from "../../lib/order-sync";
 import type { Customer, Machine, Order, Task } from "../../lib/platform-types";
 import { planDailyRun } from "./daily-plan";
 import { formatShortDate } from "./dates";
@@ -72,6 +74,20 @@ export const dailyOperations = onSchedule(
         title: `${reminded.length + unreachable.length} לקוחות טרם אישרו הזמנה`,
         body: parts.join(" · "),
         view: "orders",
+      });
+    }
+
+    // Two full months running at 20% or more over the contract: once a month, suggest a bigger contract.
+    const month = today.slice(0, 7);
+    for (const customer of customers) {
+      if (customer.status === "בהשהיה") continue;
+      const high = highConsumption(orders.filter((order) => order.accountId === customer.id), contractMonthlyKg(customer, customer.commercialAgreement), month);
+      if (!high) continue;
+      await notifyOnce(`high-usage:${customer.id}:${month}`, adminsOf(users), {
+        title: `צריכה גבוהה מהחוזה · ${customer.name}`,
+        body: `חודשיים ברצף: ${high.totals.map((total) => Math.round(total)).join(" ו-")} ק״ג מול ${high.contractKg} בחוזה (+${high.overPercent}%). כדאי להציע הגדלת חוזה.`,
+        view: "customers",
+        tag: `high-usage:${customer.id}`,
       });
     }
 

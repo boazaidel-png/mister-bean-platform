@@ -1,6 +1,6 @@
 import type { Order, Role, Ticket, UserProfile } from "./platform-types";
 
-export type NotificationKind = "order" | "low-order" | "ticket" | "access";
+export type NotificationKind = "order" | "low-order" | "ticket" | "access" | "high-usage";
 
 export type AppNotification = {
   /** Changes when the underlying event changes, so a re-sent order shows up again. */
@@ -9,7 +9,7 @@ export type AppNotification = {
   title: string;
   detail: string;
   at: string;
-  target: { type: "order" | "ticket" | "access"; id: string; accountId?: string };
+  target: { type: "order" | "ticket" | "access" | "customer"; id: string; accountId?: string };
 };
 
 /** How far back the bell looks; older events are history, not news. */
@@ -32,6 +32,8 @@ export function buildNotifications(input: {
   tickets: Ticket[];
   users: UserProfile[];
   customerName: (accountId: string) => string;
+  /** Customers two full months at 20% or more over the contract (see highConsumption in extra-orders). */
+  highUsage?: Array<{ accountId: string; totals: number[]; contractKg: number; overPercent: number }>;
   now?: Date;
 }): AppNotification[] {
   const { role, customerName } = input;
@@ -46,6 +48,22 @@ export function buildNotifications(input: {
       const confirmed = Boolean(order.customerConfirmedAt) && order.status === "אושר";
       const at = order.customerConfirmedAt || order.updatedAt || order.createdAt || "";
       if ((order.status !== "ממתין לאישור" && !confirmed) || at < since) continue;
+      if (order.kind === "extra") {
+        // A top-up the customer asked for because they ran out.
+        if (order.status !== "ממתין לאישור") continue;
+        const when = order.deliveryPreference === "date" && order.requestedDeliveryDate
+          ? `אספקה ב-${order.requestedDeliveryDate.split("-").reverse().join("/")}`
+          : order.deliveryPreference === "tomorrow" ? "אספקה מחר" : "אספקה בהקדם";
+        list.push({
+          id: `order:${order.id}:${at}`,
+          kind: "order",
+          title: `נגמר הקפה · הזמנת השלמה · ${customerName(order.accountId)}`,
+          detail: `${Math.round(order.requestedKg)} ק״ג · ${order.blend} · ${when}`,
+          at,
+          target: { type: "order", id: order.id, accountId: order.accountId },
+        });
+        continue;
+      }
       const low = order.defaultKg > 0 && order.requestedKg < order.defaultKg;
       list.push({
         id: `order:${order.id}:${at}`,
@@ -83,6 +101,22 @@ export function buildNotifications(input: {
       at: ticket.openedAt,
       target: { type: "ticket", id: ticket.id, accountId: ticket.accountId },
     });
+  }
+
+  if (role === "admin") {
+    // Two full months running at 20% or more over the contract: time to talk about a bigger contract.
+    const month = (input.now || new Date()).toISOString().slice(0, 7);
+    for (const high of input.highUsage || []) {
+      const { accountId } = high;
+      list.push({
+        id: `high-usage:${accountId}:${month}`,
+        kind: "high-usage",
+        title: `צריכה גבוהה מהחוזה · ${customerName(accountId)}`,
+        detail: `חודשיים ברצף: ${high.totals.map((total) => Math.round(total)).join(" ו-")} ק״ג מול ${high.contractKg} בחוזה (+${high.overPercent}%). כדאי להציע הגדלת חוזה.`,
+        at: `${month}-01T06:00:00.000Z`,
+        target: { type: "customer", id: accountId, accountId },
+      });
+    }
   }
 
   return list.sort((left, right) => right.at.localeCompare(left.at));

@@ -67,3 +67,12 @@ test("filter and periodic service tasks are created ahead of their dates, once",
   assert.equal(run("2026-10-12", { machines, tasks: first }).newTasks.length, 0);
   assert.equal(run("2026-10-11", { machines: [machine({ status: "הוחזרה", nextService: "2026-10-12" })] }).newTasks.length, 0);
 });
+
+test("a delivered top-up is not this month's contract delivery", () => {
+  const a = customer("a", { deliveryDayOfMonth: 20 });
+  const topUp = order("a", "2026-10", { id: "extra-a-1", kind: "extra", defaultKg: 0, requestedKg: 3, approvedKg: 3, status: "סופק" });
+  assert.equal(upcomingDelivery(a, [topUp], "2026-10-11").date, "2026-10-20");
+  const plan = planDailyRun({ customers: [a], orders: [topUp], tasks: [], machines: [], today: "2026-10-11", now: "now" });
+  assert.equal(plan.newOrders.length, 1);
+  assert.notEqual(plan.newOrders[0].kind, "extra");
+});

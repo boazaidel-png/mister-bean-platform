@@ -20,7 +20,7 @@ export const currentMonthKey = (date = new Date()) => date.toISOString().slice(0
 
 function latestOrder(orders: Order[], accountId: string) {
   return orders
-    .filter((order) => order.accountId === accountId)
+    .filter((order) => order.accountId === accountId && order.kind !== "extra")
     .sort((left, right) => right.month.localeCompare(left.month) || (right.updatedAt || "").localeCompare(left.updatedAt || ""))[0];
 }
 
@@ -46,7 +46,8 @@ export function syncContractOrders(
     if (customer.status === "בהשהיה") continue;
     const kg = contractMonthlyKg(customer, agreementFor(customer));
     if (kg <= 0) continue;
-    const existing = next.find((order) => order.accountId === customer.id && order.month === month);
+    // Top-ups the customer ordered during the month are not the contract order.
+    const existing = next.find((order) => order.accountId === customer.id && order.month === month && order.kind !== "extra");
     if (!existing) {
       const previous = latestOrder(next, customer.id);
       const blend = previous?.blend && previous.blend !== UNSET_BLEND ? previous.blend : customer.contractBlends?.[0] || UNSET_BLEND;
