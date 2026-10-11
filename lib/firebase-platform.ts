@@ -34,6 +34,7 @@ import {
   type Query,
   type Unsubscribe,
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import { getFirebaseServices } from "./firebase-client";
 import {
   defaultProfileAccess,
@@ -578,6 +579,29 @@ export async function updateUserAccess(
       role === "service" ? serviceDetails?.serviceRegion || "" : deleteField(),
     skills: role === "service" ? serviceDetails?.skills || [] : deleteField(),
   });
+}
+
+// Runs on the server (functions/index.js): only the Admin SDK can set a
+// password on someone else's account.
+export async function adminSetUserPassword(email: string, password: string) {
+  await requireRecentAdminLogin();
+  if (!isValidInviteEmail(email)) throw new Error("access/invalid-email");
+  if (passwordSecurityError(password)) throw new Error("auth/weak-password");
+  const { app } = getFirebaseServices();
+  const setUserPassword = httpsCallable<
+    { email: string; password: string },
+    { uid: string; created: boolean }
+  >(getFunctions(app, "europe-west1"), "setUserPassword");
+  try {
+    const result = await setUserPassword({ email: normalizeEmail(email), password });
+    return result.data;
+  } catch (error) {
+    // Server errors carry our "auth/…" or "access/…" key as the message;
+    // anything else (e.g. the function is not deployed) only has a code.
+    const { code, message } = error as { code?: string; message?: string };
+    if (message?.includes("/")) throw error;
+    throw new Error(code || message || "functions/internal");
+  }
 }
 
 export async function revokeUserAccess(user: UserProfile) {

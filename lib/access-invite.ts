@@ -6,6 +6,17 @@ export const BOOTSTRAP_ADMIN_EMAILS = [
   "boaz@pacifictrade.co",
 ] as const;
 
+// Bot accounts that must stay signed in; they skip the inactivity sign-out.
+export const PERSISTENT_SESSION_EMAILS = [
+  "danielle.clientmanager@gmail.com",
+] as const;
+
+export function hasPersistentSession(email?: string | null) {
+  return PERSISTENT_SESSION_EMAILS.includes(
+    normalizeInviteEmail(email) as (typeof PERSISTENT_SESSION_EMAILS)[number],
+  );
+}
+
 export function isBootstrapAdminEmail(email?: string | null) {
   return BOOTSTRAP_ADMIN_EMAILS.includes(
     normalizeInviteEmail(email) as (typeof BOOTSTRAP_ADMIN_EMAILS)[number],
