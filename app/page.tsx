@@ -30,6 +30,7 @@ import {
   UsersRound,
   X,
   History,
+  BellRing,
 } from "lucide-react";
 import {
   convertLeadToCustomer,
@@ -96,6 +97,7 @@ import { BLEND_CATALOG, findKnownBlend, knownBlends } from "@/lib/blend-catalog"
 import { contractMonthlyKg, currentMonthKey, syncContractOrders } from "@/lib/order-sync";
 import { buildNotifications, type AppNotification } from "@/lib/notifications";
 import { NotificationBell } from "@/components/notification-bell";
+import { disablePush, enablePush, pushState, refreshPush, type PushState } from "@/lib/push";
 import { calculateQuote } from "@/lib/quote-engine";
 import { activeQuoteFor, customerUpdateForActiveQuote, existingAccountIdForQuote, isSupersededQuote } from "@/lib/quote-lifecycle";
 import { commercialAgreementFromQuote, commercialAgreementLabel, commercialAgreementMonthlyIncome, emptyCommercialAgreement } from "@/lib/commercial-agreement";
@@ -380,6 +382,36 @@ export default function Home() {
   const selectedCustomerName = customers.find(customer=>customer.id===clientId)?.name || "—";
 
   const navigate=(next:View)=>{setView(next);setMobileOpen(false);};
+  // A tapped push notification opens the app on its screen: "?view=" on a
+  // fresh start, or a message from the service worker when already open.
+  useEffect(()=>{
+    const allowed=new Set<string>(nav.map(item=>item.id));
+    const open=(value:unknown)=>{if(typeof value==="string"&&allowed.has(value)){setView(value as View);setMobileOpen(false);}};
+    const params=new URLSearchParams(window.location.search);
+    if(params.has("view")){open(params.get("view"));params.delete("view");window.history.replaceState(null,"",`${window.location.pathname}${params.size?`?${params}`:""}`);}
+    const onMessage=(event:MessageEvent)=>{if(event.data?.type==="open-view")open(event.data.view);};
+    navigator.serviceWorker?.addEventListener("message",onMessage);
+    return()=>navigator.serviceWorker?.removeEventListener("message",onMessage);
+  },[nav]);
+  const [push,setPush]=useState<PushState>("unsupported");
+  const [pushBusy,setPushBusy]=useState(false);
+  useEffect(()=>{
+    if(!profile||profile.status!=="active"||preview)return;
+    void pushState().then(setPush);
+    void refreshPush().catch(()=>undefined);
+  },[profile,preview]);
+  const togglePush=async()=>{
+    if(push==="needs-install"){setToast("באייפון: שיתוף ← \"הוספה למסך הבית\", ואז להפעיל התראות מתוך האפליקציה");return;}
+    if(push==="denied"){setToast("ההתראות חסומות. יש לאפשר אותן בהגדרות הדפדפן לאתר הזה");return;}
+    setPushBusy(true);
+    try{
+      if(push==="on"){await disablePush();setToast("ההתראות בנייד הזה כובו");}
+      else{await enablePush();setToast("ההתראות הופעלו בנייד הזה");}
+    }catch(error){setToast(error instanceof Error&&error.message==="push/denied"?"ההתראות נחסמו. אפשר לאפשר אותן בהגדרות הדפדפן":firebaseMessage(error));}
+    finally{setPush(await pushState());setPushBusy(false);}
+  };
+  const pushLabel=push==="on"?"התראות בנייד פעילות":push==="needs-install"?"התראות: הוספה למסך הבית":push==="denied"?"התראות חסומות בדפדפן":"הפעלת התראות בנייד";
+  const logout=async()=>{await disablePush().catch(()=>undefined);await signOutUser();};
   // The bell: customer orders, low orders and access requests for administrators; service calls for all staff.
   const notifications=preview?[]:buildNotifications({role,orders:store.orders,tickets:store.tickets,users,customerName:(accountId:string)=>customers.find(customer=>customer.id===accountId)?.name||"לקוח"});
   const openNotification=(item:AppNotification)=>{
@@ -486,7 +518,7 @@ export default function Home() {
     machines:current.machines.some(item=>item.id===machine.id)?current.machines.map(item=>item.id===machine.id?machine:item):[machine,...current.machines],
     tasks:reconcileFilterReplacementTask(current.tasks,machine,customer?.owner||"מנהל המערכת"),
   }));setModal(null);setToast("פרטי המכונה נשמרו");};
-  const updateOrder=(id:string,data:Partial<Order>)=>{if(!allowWrite())return;setStore(current=>({...current,orders:current.orders.map(order=>order.id===id?{...order,...data,updatedAt:new Date().toISOString()}:order)}));setToast(isStaff?"ההזמנה עודכנה":"השינוי נשמר וממתין לאישור הצוות");};
+  const updateOrder=(id:string,data:Partial<Order>)=>{if(!allowWrite())return;setStore(current=>({...current,orders:current.orders.map(order=>order.id===id?{...order,...data,updatedAt:new Date().toISOString()}:order)}));setToast(isStaff?"ההזמנה עודכנה":data.status==="אושר"?"ההזמנה אושרה, תודה!":"הבקשה נשלחה לאישור המנהל");};
   const updateAdditionalSale=(recordId:string,saleId:string,patch:Partial<ProfitabilitySaleLine>)=>{if(!allowWrite())return;setStore(current=>({...current,profitability:current.profitability.map(record=>record.id===recordId?{...record,sales:record.sales.map(sale=>sale.id===saleId?{...sale,...patch}:sale),updatedAt:new Date().toISOString()}:record)}));setToast("המכירה עודכנה");};
   const saveProfitability=(record:MonthlyProfitability)=>{if(!allowWrite())return;setStore(current=>({...current,profitability:current.profitability.some(item=>item.id===record.id)?current.profitability.map(item=>item.id===record.id?record:item):[record,...current.profitability]}));setToast("נתוני הרווחיות נשמרו");};
   const updateTask=(id:string,status:string)=>{if(!allowWrite())return;const changedAt=new Date().toISOString();setStore(current=>({...current,tasks:updateTaskStatus(current.tasks,id,status,changedAt)}));setToast("המשימה עודכנה");};
@@ -503,7 +535,7 @@ export default function Home() {
 
   if(!authReady) return <LoadingScreen/>;
   if(!profile) return <Login onGoogle={loginGoogle} onEmail={loginEmail} onReset={sendReset} busy={authBusy} error={authError}/>;
-  if(profile.status!=="active") return <PendingAccess profile={profile} onLogout={()=>void signOutUser()}/>;
+  if(profile.status!=="active") return <PendingAccess profile={profile} onLogout={()=>void logout()}/>;
   if(!role) return <LoadingScreen/>;
 
   return (
@@ -518,7 +550,8 @@ export default function Home() {
           <div className="avatar">{roleNames[role].slice(0,2)}</div>
           <div><strong>{preview?roleNames[role]:profile.displayName}</strong><small>{preview?"מצב תצוגה":profile.email}</small></div>
           {!preview&&<button className="account-password" onClick={()=>setModal("password")}><KeyRound size={17}/><span>הגדרת כניסה עם סיסמה</span></button>}
-          <button className="logout" onClick={()=>void signOutUser()} aria-label="התנתקות"><LogOut size={17}/><span>התנתקות</span></button>
+          {!preview&&push!=="unsupported"&&<button className={`account-password push-toggle ${push==="on"?"on":""}`} disabled={pushBusy} onClick={()=>void togglePush()}><BellRing size={17}/><span>{pushBusy?"רגע…":pushLabel}</span></button>}
+          <button className="logout" onClick={()=>void logout()} aria-label="התנתקות"><LogOut size={17}/><span>התנתקות</span></button>
         </div>
       </aside>
       {mobileOpen&&<button className="mobile-scrim" onClick={()=>setMobileOpen(false)} aria-label="סגירת התפריט"/>}
@@ -1023,7 +1056,7 @@ function Orders({orders,isStaff,onChange,profitability=[],onAdditionalSaleChange
   const total=rows.reduce((s,o)=>s+(o.approvedKg||o.requestedKg),0);
   const statuses=["לפי חוזה","ממתין לעדכון לקוח","ממתין לאישור","אושר","סופק","בוטל"];
   const monthName=(month:string)=>{const [year,value]=month.split("-");return `${value}/${year}`;};
-  const changeStatus=(order:Order,status:string)=>onChange(order.id,{status,...(status==="סופק"&&!order.deliveredAt?{deliveredAt:new Date().toISOString().slice(0,10)}:{})});
+  const changeStatus=(order:Order,status:string)=>onChange(order.id,{status,...(status==="אושר"&&order.status==="ממתין לאישור"&&order.customerConfirmedAt?{approvedKg:order.requestedKg}:{}),...(status==="סופק"&&!order.deliveredAt?{deliveredAt:new Date().toISOString().slice(0,10)}:{})});
   // Company extras and employee orders are entered in the customer card; listed here so both screens show the same sales.
   const allAdditionalSales=profitability.flatMap(record=>record.sales.filter(sale=>(sale.channel==="company_extra"||sale.channel==="employees")&&!sale.id.startsWith("contract-")).map(sale=>({record,sale}))).sort((a,b)=>b.record.month.localeCompare(a.record.month));
   const additionalSales=allAdditionalSales.filter(({sale})=>saleBucket(sale)===bucket);
@@ -1038,7 +1071,7 @@ function Orders({orders,isStaff,onChange,profitability=[],onAdditionalSaleChange
     </article>)}</div>
   </section>;
   if(!orders.length)return <><SectionTitle title="הזמנות קפה"/>{allAdditionalSales.length?<>{bucketTabs}{additionalSection||<section className="panel inline-empty">אין רשומות בלשונית הזו.</section>}</>:<section className="panel inline-empty">אין הזמנות קפה פעילות.</section>}</>;
-  if(!isStaff){const o=rows[0],customer=customers.find(item=>item.id===o.accountId)!;return <><SectionTitle title="הזמנת קפה" sub={`הזמנה לחודש ${monthName(o.month)}`}/><section className="order-hero"><div><span>{o.status==="סופק"?"תאריך אספקה":"מועד האספקה הבא"}</span><h2>{o.deliveredAt?formatDate(o.deliveredAt):customer?formatDate(nextDeliveryDate(customer,o)):formatDate(`${o.month}-01`)}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{Math.round(o.requestedKg)}</strong><span>ק״ג</span></div></section><OrderEditor order={o} blends={customer?.contractBlends||[]} onSave={onChange}/>{rows.length>1&&<section className="panel customer-order-history"><h3>הזמנות קודמות</h3>{rows.slice(1).map(item=><div key={item.id}><strong>{monthName(item.month)}</strong><span>{Math.round(item.approvedKg||item.requestedKg)} ק״ג · {item.blend}{item.deliveredAt?` · סופק ${formatDate(item.deliveredAt)}`:""}</span><Badge>{item.status}</Badge></div>)}</section>}</>}
+  if(!isStaff){const o=[...rows].reverse().find(item=>!["סופק","בוטל"].includes(item.status))||rows[0],others=rows.filter(item=>item.id!==o.id),customer=customers.find(item=>item.id===o.accountId)!;return <><SectionTitle title="הזמנת קפה" sub={`הזמנה לחודש ${monthName(o.month)}`}/><section className="order-hero"><div><span>{o.status==="סופק"?"תאריך אספקה":"מועד האספקה הבא"}</span><h2>{o.deliveredAt?formatDate(o.deliveredAt):customer?formatDate(nextDeliveryDate(customer,o)):formatDate(`${o.month}-01`)}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{Math.round(o.requestedKg)}</strong><span>ק״ג</span></div></section><OrderEditor key={o.id} order={o} blends={customer?.contractBlends||[]} deliveryDate={customer?nextDeliveryDate(customer,o):`${o.month}-01`} onSave={onChange}/>{others.length>0&&<section className="panel customer-order-history"><h3>הזמנות נוספות</h3>{others.map(item=><div key={item.id}><strong>{monthName(item.month)}</strong><span>{Math.round(item.approvedKg||item.requestedKg)} ק״ג · {item.blend}{item.deliveredAt?` · סופק ${formatDate(item.deliveredAt)}`:""}</span><Badge>{item.status}</Badge></div>)}</section>}</>}
   return <>
     <SectionTitle title="מכירות והזמנות קפה" sub={`${rows.length} רשומות חודשיות`} action={<button onClick={()=>{const csv="חודש,לקוח,כמות,תערובת,סטטוס,תאריך אספקה,שולם,חשבונית,תעודת משלוח\n"+rows.map(o=>`${o.month},${customerName(o.accountId)},${o.requestedKg},${o.blend},${o.status},${o.deliveredAt||""},${o.paid?"כן":"לא"},${o.invoiceSent?"כן":"לא"},${o.deliveryNoteSent?"כן":"לא"}`).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\uFEFF"+csv],{type:"text/csv"}));a.download="coffee-orders.csv";a.click();}}>ייצוא CSV</button>}/>
     <div className="kpi-grid"><Kpi label="סה״כ ברשומות" value={`${Math.round(total)} ק״ג`} meta="לפי הכמות המאושרת"/><Kpi label="ממתינות לאישור" value={rows.filter(o=>o.status==="ממתין לאישור").length} meta="דורשות החלטה" tone="orange"/><Kpi label="סופקו ולא שולמו" value={rows.filter(o=>o.status==="סופק"&&!o.paid).length} meta="דורשות מעקב גבייה" tone="red"/></div>
@@ -1065,11 +1098,29 @@ function OrderFulfillmentControls({order,onChange}:{order:Order;onChange:(id:str
   </div>;
 }
 
-function OrderEditor({order,blends,onSave}:{order:Order;blends:string[];onSave:(id:string,d:Partial<Order>)=>void}) {
-  const [kg,setKg]=useState(order.requestedKg),[blend,setBlend]=useState(order.blend),[note,setNote]=useState(order.note);
+/**
+ * The customer confirms the month's order. The contract quantity is the
+ * minimum: the same or more is confirmed right away; less goes to the office
+ * for approval. Delivered and cancelled orders are read-only.
+ */
+function OrderEditor({order,blends,deliveryDate,onSave}:{order:Order;blends:string[];deliveryDate:string;onSave:(id:string,d:Partial<Order>)=>void}) {
+  const [kg,setKg]=useState(Math.round(order.requestedKg)),[blend,setBlend]=useState(order.blend),[note,setNote]=useState(order.note);
   const allowedBlends=Array.from(new Set([...blends,order.blend].map(item=>item.trim()).filter(item=>item&&item!=="טרם הוגדרה תערובת")));
-  const unusual=Math.abs(kg-order.defaultKg)/order.defaultKg>.3;
-  return <section className="panel form-panel"><div className="form-grid"><label><span>כמות ברירת מחדל</span><div className="readonly">{order.defaultKg} ק״ג</div></label><label><span>כמות מבוקשת</span><div className="input-suffix"><input type="number" value={kg} onChange={e=>setKg(+e.target.value)}/><b>ק״ג</b></div></label><label><span>תערובת לפי החוזה</span>{allowedBlends.length?<select value={blend} onChange={e=>setBlend(e.target.value)}>{allowedBlends.map(b=><option key={b}>{b}</option>)}</select>:<div className="readonly">יש לפנות למנהל לעדכון התערובות בחוזה</div>}</label><label className="full"><span>הערה להזמנה</span><textarea placeholder="הערה לחלוקה, אספקה או תערובת" value={note} onChange={e=>setNote(e.target.value)}/></label></div>{unusual&&<div className="warning">⚠ השינוי יועבר לאישור הצוות — קיימת חריגה של יותר מ־30% מהכמות הרגילה.</div>}<div className="form-actions"><button className="primary" disabled={!allowedBlends.length} onClick={()=>onSave(order.id,{requestedKg:kg,blend,note,status:"ממתין לאישור"})}>שמירת ההזמנה</button></div></section>
+  const contract=Math.round(order.defaultKg);
+  const below=contract>0&&kg<contract;
+  const closed=["סופק","בוטל"].includes(order.status);
+  const valid=Number.isInteger(kg)&&kg>0&&kg<=10000;
+  const save=()=>{
+    const customerConfirmedAt=new Date().toISOString();
+    onSave(order.id,below
+      ?{requestedKg:kg,blend,note,status:"ממתין לאישור",customerConfirmedAt}
+      :{requestedKg:kg,approvedKg:kg,blend,note,status:"אושר",customerConfirmedAt});
+  };
+  const state=closed?null
+    :order.status==="ממתין לאישור"?<div className="order-confirm-state pending">⏳ הבקשה ל־{Math.round(order.requestedKg)} ק״ג נשלחה לאישור המנהל, כי היא נמוכה מהחוזה.</div>
+    :order.customerConfirmedAt&&order.status==="אושר"?<div className="order-confirm-state done">✓ ההזמנה אושרה: {Math.round(order.approvedKg||order.requestedKg)} ק״ג. אפשר לעדכן עד מועד האספקה.</div>
+    :<div className="order-confirm-state todo">יש לאשר את ההזמנה לאספקה ב־{formatDate(deliveryDate)}. לפי החוזה {contract} ק״ג; אפשר להזמין יותר.</div>;
+  return <section className="panel form-panel">{state}<div className="form-grid"><label><span>כמות לפי החוזה (מינימום)</span><div className="readonly">{contract} ק״ג</div></label><label><span>כמות להזמנה</span><div className="input-suffix"><input type="number" inputMode="numeric" min={1} step={1} value={kg} disabled={closed} onChange={e=>setKg(Math.round(+e.target.value))}/><b>ק״ג</b></div></label><label><span>תערובת לפי החוזה</span>{allowedBlends.length?<select value={blend} disabled={closed} onChange={e=>setBlend(e.target.value)}>{allowedBlends.map(b=><option key={b}>{b}</option>)}</select>:<div className="readonly">יש לפנות למנהל לעדכון התערובות בחוזה</div>}</label><label className="full"><span>הערה להזמנה</span><textarea placeholder="הערה לחלוקה, אספקה או תערובת" value={note} disabled={closed} onChange={e=>setNote(e.target.value)}/></label></div>{below&&!closed&&<div className="warning">⚠ הכמות נמוכה מהחוזה ({contract} ק״ג). ההזמנה תעבור לאישור המנהל.</div>}{!closed&&<div className="form-actions"><button className="primary" disabled={!allowedBlends.length||!valid} onClick={save}>{below?"שליחה לאישור המנהל":order.customerConfirmedAt?"עדכון ההזמנה":"אישור ההזמנה"}</button></div>}</section>
 }
 
 function Tasks({tasks,onCreate,onStatus}:{tasks:Task[];onCreate:()=>void;onStatus:(id:string,s:string)=>void}) {

@@ -47,3 +47,11 @@ test("a re-sent order is new again, and read state hides what was seen", () => {
   assert.equal(isUnread(resent, { since: "2026-10-01T00:00:00Z", read: [first.id] }), true);
   assert.equal(isUnread(resent, { since: "2026-10-11T09:00:00Z", read: [] }), false);
 });
+
+test("administrators see orders customers confirmed themselves", () => {
+  const confirmed = { id: "o9", accountId: "a", month: "2026-10", defaultKg: 10, requestedKg: 14, approvedKg: 14, status: "אושר", blend: "DX", note: "", customerConfirmedAt: "2026-10-10T08:00:00.000Z" };
+  const list = buildNotifications({ role: "admin", orders: [confirmed], tickets: [], users: [], customerName: () => "לקוח", now: new Date("2026-10-11T08:00:00.000Z") });
+  assert.equal(list.length, 1);
+  assert.match(list[0].title, /אישר/);
+  assert.equal(list[0].at, confirmed.customerConfirmedAt);
+});

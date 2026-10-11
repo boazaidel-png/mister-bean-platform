@@ -276,14 +276,30 @@ service cloud.firestore {
         && shortString(data.get('deliveredAt', ''), 40)
         && data.get('paid', false) is bool
         && data.get('invoiceSent', false) is bool
-        && data.get('deliveryNoteSent', false) is bool;
+        && data.get('deliveryNoteSent', false) is bool
+        && shortString(data.get('customerConfirmedAt', ''), 40);
     }
 
+    // A customer confirms the open order. The contract quantity is the
+    // minimum they can confirm themselves (approved as requested); a lower
+    // quantity only asks the office, leaving the approved quantity as is.
     function validCustomerOrderUpdate(documentId, accountId) {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'requestedKg', 'blend', 'note', 'status', 'updatedAt'
+          'requestedKg', 'approvedKg', 'blend', 'note', 'status', 'updatedAt', 'customerConfirmedAt'
         ])
-        && request.resource.data.status == 'ממתין לאישור'
+        && resource.data.status in ['לפי חוזה', 'ממתין לעדכון לקוח', 'ממתין לאישור', 'אושר']
+        && shortString(request.resource.data.get('customerConfirmedAt', ''), 40)
+        && (
+          (
+            request.resource.data.status == 'ממתין לאישור'
+            && request.resource.data.approvedKg == resource.data.approvedKg
+          )
+          || (
+            request.resource.data.status == 'אושר'
+            && request.resource.data.requestedKg >= resource.data.defaultKg
+            && request.resource.data.approvedKg == request.resource.data.requestedKg
+          )
+        )
         && validOrder(request.resource.data, documentId, accountId);
     }
 
