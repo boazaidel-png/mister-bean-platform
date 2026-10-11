@@ -1,4 +1,4 @@
-const CACHE_NAME = "mister-bean-shell-v24";
+const CACHE_NAME = "mister-bean-shell-v25";
 const APP_ROOT = "/mister-bean-platform/";
 const STATIC_ASSETS = [
   APP_ROOT,
@@ -68,6 +68,46 @@ self.addEventListener("fetch", (event) => {
         })
         .catch(() => cached);
       return cached || refreshed;
+    }),
+  );
+});
+
+// Push notifications from the server (functions/src/push.ts). Messages are
+// data-only, so this is the one place that shows them.
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    const message = event.data ? event.data.json() : {};
+    payload = message.data || message;
+  } catch {
+    payload = { body: event.data ? event.data.text() : "" };
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title || "Mister Bean", {
+      body: payload.body || "",
+      tag: payload.tag || undefined,
+      renotify: Boolean(payload.tag),
+      dir: "rtl",
+      lang: "he",
+      icon: `${APP_ROOT}app-icon-192.png`,
+      badge: `${APP_ROOT}app-icon-192.png`,
+      data: { link: payload.link || APP_ROOT },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const link = new URL(event.notification.data?.link || APP_ROOT, self.location.origin);
+  if (link.origin !== self.location.origin || !link.pathname.startsWith(APP_ROOT)) return;
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((client) => new URL(client.url).pathname === APP_ROOT);
+      if (open) {
+        open.postMessage({ type: "open-view", view: link.searchParams.get("view") || "" });
+        return open.focus();
+      }
+      return self.clients.openWindow(link.href);
     }),
   );
 });

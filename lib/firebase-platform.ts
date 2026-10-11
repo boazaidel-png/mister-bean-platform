@@ -23,7 +23,9 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   setDoc,
   updateDoc,
@@ -447,6 +449,22 @@ export function subscribeToUserProfiles(
     },
     (error) => onError(error),
   );
+}
+
+export type AuditEntry = {
+  id: string;
+  at: string;
+  action: "password-set" | "password-user-created" | "user-created" | "user-deleted" | "access-changed";
+  actorEmail?: string;
+  targetEmail: string;
+  before?: { role: string; status: string; accountIds: string[] } | null;
+  after?: { role: string; status: string; accountIds: string[] } | null;
+};
+
+export async function loadAuditLog(count = 50) {
+  const { db } = getFirebaseServices();
+  const snapshot = await getDocs(query(collection(db, "auditLog"), orderBy("at", "desc"), limit(count)));
+  return snapshot.docs.map((entry) => ({ id: entry.id, ...entry.data() }) as AuditEntry);
 }
 
 export function subscribeToCustomers(

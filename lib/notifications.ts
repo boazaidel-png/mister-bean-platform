@@ -20,8 +20,8 @@ const UNASSIGNED = "טרם הוקצה";
 /**
  * Builds the bell's list from data the app already loads. Administrators get
  * every kind; service staff only service calls; customers nothing.
- * - A customer saving an order marks it "ממתין לאישור" (the database only
- *   lets customers write that status), so those orders are customer orders.
+ * - A customer confirming an order sets customerConfirmedAt: at or above the
+ *   contract it is approved at once ("אושר"), below it waits ("ממתין לאישור").
  * - An order below the contract quantity is flagged as low.
  * - New, still-unassigned service calls are calls customers opened.
  * - Pending user profiles are access requests.
@@ -41,16 +41,21 @@ export function buildNotifications(input: {
 
   if (role === "admin") {
     for (const order of input.orders) {
-      const at = order.updatedAt || order.createdAt || "";
-      if (order.status !== "ממתין לאישור" || at < since) continue;
+      // A customer's own confirmation: approved when at least the contract
+      // quantity, otherwise waiting for the office.
+      const confirmed = Boolean(order.customerConfirmedAt) && order.status === "אושר";
+      const at = order.customerConfirmedAt || order.updatedAt || order.createdAt || "";
+      if ((order.status !== "ממתין לאישור" && !confirmed) || at < since) continue;
       const low = order.defaultKg > 0 && order.requestedKg < order.defaultKg;
       list.push({
         id: `order:${order.id}:${at}`,
         kind: low ? "low-order" : "order",
-        title: low ? `הזמנה נמוכה מהחוזה · ${customerName(order.accountId)}` : `הזמנה חדשה · ${customerName(order.accountId)}`,
+        title: low ? `הזמנה נמוכה מהחוזה · ${customerName(order.accountId)}`
+          : confirmed ? `הלקוח אישר הזמנה · ${customerName(order.accountId)}`
+          : `הזמנה חדשה · ${customerName(order.accountId)}`,
         detail: low
           ? `${Math.round(order.requestedKg)} ק״ג במקום ${Math.round(order.defaultKg)} ק״ג בחוזה · ${order.blend}`
-          : `${Math.round(order.requestedKg)} ק״ג · ${order.blend} · ממתינה לאישור`,
+          : `${Math.round(order.requestedKg)} ק״ג · ${order.blend} · ${confirmed ? "אושרה" : "ממתינה לאישור"}`,
         at,
         target: { type: "order", id: order.id, accountId: order.accountId },
       });

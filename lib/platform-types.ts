@@ -260,6 +260,8 @@ export type Order = {
   paid?: boolean;
   invoiceSent?: boolean;
   deliveryNoteSent?: boolean;
+  /** When the customer last confirmed or changed the order themselves. */
+  customerConfirmedAt?: string;
   createdAt?: string;
   updatedAt?: string;
 };

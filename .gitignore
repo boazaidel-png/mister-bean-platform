@@ -45,3 +45,4 @@ firebase-debug.log*
 
 # firebase functions
 /functions/node_modules/
+/functions/dist/
