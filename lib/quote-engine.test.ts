@@ -8,6 +8,7 @@ import {
   normalizeAllocationForQuantity,
   recommendQuotePricing,
   recommendedConsumptionKg,
+  setAllocationField,
   syncAutomaticAddons,
 } from "./quote-engine.ts";
 
@@ -477,4 +478,66 @@ test("every cashflow row exposes the running cumulative balance", () => {
     result.cashflow.contractEndingBalance,
     result.cashflow.rows[35].cumulative,
   );
+});
+
+const manualMachine = (quantity: number, monthlyPrice = 0): QuoteEquipment => ({
+  key: "custom-machine-test",
+  model: "מכונה ידנית",
+  quantity,
+  unitCost: 6000,
+  importer: "manual",
+  commercialModel: "ללא עלות",
+  monthlyPrice,
+});
+
+test("a manually added machine on rental earns its monthly rent", () => {
+  const metrics = calculateQuote({
+    ...baseQuote([manualMachine(2, 350)]),
+    allocation: [{ key: "custom-machine-test", free: 0, lease: 2, sale: 0 }],
+  });
+  assert.equal(metrics.equipment.total, 12000);
+  assert.equal(metrics.equipment.leaseIncome, 700);
+  assert.equal(metrics.profitability.monthlyClientRevenue, 3800 + 700);
+  const line = metrics.equipment.lines.find((row) => row.key === "custom-machine-test");
+  assert.equal(line?.monthlyLeaseIncome, 700);
+  assert.equal(line?.leasePriceSource, "machine");
+});
+
+test("a manual machine on rental without a price gets the automatic rent", () => {
+  const metrics = calculateQuote({
+    ...baseQuote([manualMachine(1)]),
+    allocation: [{ key: "custom-machine-test", free: 0, lease: 1, sale: 0 }],
+  });
+  assert.equal(metrics.equipment.leaseIncome, 6000 / 24);
+});
+
+test("a manually added machine that is sold counts as one-time income", () => {
+  const metrics = calculateQuote({
+    ...baseQuote([manualMachine(1)]),
+    allocation: [{ key: "custom-machine-test", free: 0, lease: 0, sale: 1 }],
+  });
+  assert.equal(Math.round(metrics.equipment.saleIncome), 6900);
+  assert.equal(Math.round(metrics.profitability.totalClientRevenue), 3800 * 36 + 6900);
+});
+
+test("a loan on a manual machine is repaid while its rent comes in", () => {
+  const metrics = calculateQuote({
+    ...baseQuote([manualMachine(2, 350)]),
+    allocation: [{ key: "custom-machine-test", free: 0, lease: 2, sale: 0 }],
+    financingType: "loan",
+    financingMonths: 24,
+    financedAmount: 12000,
+    annualInterest: 0,
+  });
+  assert.equal(metrics.financing.payment, 500);
+  assert.equal(metrics.cashflow.rows[0].income, 4500);
+  assert.equal(metrics.cashflow.rows[0].loanPayment, 500);
+});
+
+test("moving units to rental takes them from the free column", () => {
+  const start = { key: "m", free: 1, lease: 0, sale: 0 };
+  assert.deepEqual(setAllocationField(start, 1, "lease", 1), { key: "m", free: 0, lease: 1, sale: 0 });
+  const mixed = setAllocationField({ key: "m", free: 3, lease: 0, sale: 0 }, 3, "sale", 1);
+  assert.deepEqual(setAllocationField(mixed, 3, "lease", 2), { key: "m", free: 0, lease: 2, sale: 1 });
+  assert.deepEqual(setAllocationField(start, 1, "free", 0), { key: "m", free: 0, lease: 0, sale: 0 });
 });

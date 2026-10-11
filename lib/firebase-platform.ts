@@ -842,13 +842,30 @@ export async function saveLead(lead: Lead) {
   });
 }
 
+// Lead statuses past the quote stage; editing a quote must not move them back.
+const LEAD_STATUSES_AFTER_QUOTE = new Set(["נסגר", "פיילוט", "לא רלוונטי"]);
+
 export async function saveQuote(quote: Quote) {
   const { db } = getFirebaseServices();
+  const leadSnapshot = quote.leadId
+    ? await getDoc(doc(db, "leads", quote.leadId))
+    : null;
+  const leadStatus = leadSnapshot?.exists()
+    ? String((leadSnapshot.data() as Lead).status || "")
+    : "";
   const batch = writeBatch(db);
   batch.set(doc(db, "quotes", quote.id), withoutUndefined(quote), {
     merge: true,
   });
-  if (quote.leadId) {
+  if (quote.leadId && leadSnapshot?.exists() && LEAD_STATUSES_AFTER_QUOTE.has(leadStatus)) {
+    batch.set(
+      doc(db, "leads", quote.leadId),
+      { quoteIds: arrayUnion(quote.id), updatedAt: quote.updatedAt },
+      { merge: true },
+    );
+  } else if (quote.leadId && leadSnapshot?.exists()) {
+    // A lead that no longer exists is skipped: writing a stub for it would be
+    // rejected by the database rules and take the quote save down with it.
     batch.set(
       doc(db, "leads", quote.leadId),
       {

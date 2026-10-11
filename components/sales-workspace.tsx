@@ -34,6 +34,7 @@ import {
   equipmentTotalCost,
   equipmentCatalog,
   isMachineEquipment,
+  setAllocationField,
   importers,
   normalizeAllocationForQuantity,
   recommendQuotePricing,
@@ -2227,8 +2228,16 @@ function QuoteModal({
       }));
     setAutoSyncAccessories(true);
     setDraft((current) => {
-      const equipment = syncAutomaticAddons(machineItems);
-      const allocation = machineItems.map((item) => {
+      // Machines added by hand are not part of the recommendation; keep them
+      // with their split and rental price.
+      const customMachines = current.equipment.filter((item) =>
+        (item.key || "").startsWith("custom-machine-"),
+      );
+      const customAllocation = current.allocation.filter((row) =>
+        customMachines.some((item) => item.key === row.key),
+      );
+      const equipment = [...syncAutomaticAddons(machineItems), ...customMachines];
+      const allocation = [...customAllocation, ...machineItems.map((item) => {
         const previousItem = current.equipment.find(
           (row) => (row.key || row.model) === item.key,
         );
@@ -2240,7 +2249,7 @@ function QuoteModal({
           ),
           key: item.key,
         };
-      });
+      })];
       return {
         ...current,
         equipment,
@@ -2271,7 +2280,7 @@ function QuoteModal({
   ) => {
     const key = item.key || item.model;
     const current = allocationFor(item);
-    const next = { ...current, [field]: Math.max(0, value) };
+    const next = setAllocationField(current, item.quantity, field, value);
     update("allocation", [
       ...draft.allocation.filter((row) => row.key !== key),
       next,
@@ -2899,8 +2908,9 @@ function QuoteModal({
                   )
                   .map((item) => {
                     const allocation = allocationFor(item);
-                    const explicitRentalPrice =
-                      item.monthlyPrice || draft.manualLeasePerSet || 0;
+                    const line = metrics.equipment.lines.find(
+                      (row) => row.key === (item.key || item.model),
+                    );
                     const remaining =
                       item.quantity -
                       allocation.free -
@@ -2947,12 +2957,39 @@ function QuoteModal({
                         </label>
                         <small className={remaining < 0 ? "negative" : ""}>
                           {remaining < 0
-                            ? `חריגה של ${Math.abs(remaining)}`
-                            : `נותרו לחלוקה: ${remaining} · ${explicitRentalPrice ? `שכירות מחושבת: ${money(allocation.lease * explicitRentalPrice)}` : "השכירות תחושב אוטומטית לפי העלות והתקופה"}`}
+                            ? `חריגה של ${Math.abs(remaining)} — יש לתקן את החלוקה`
+                            : [
+                                remaining > 0 ? `נותרו לחלוקה: ${remaining}` : "",
+                                line && allocation.lease > 0
+                                  ? `שכירות: ${money(line.monthlyLeaseIncome)} לחודש (${money(line.leasePerUnit)} ליחידה${line.leasePriceSource === "automatic" ? ", מחושב לפי עלות ותקופה" : line.leasePriceSource === "default" ? ", לפי ברירת המחדל" : ""})`
+                                  : "",
+                                line && allocation.sale > 0
+                                  ? `מכירה: ${money(line.saleIncome)} חד־פעמי`
+                                  : "",
+                              ].filter(Boolean).join(" · ") || "כל היחידות ללא עלות ללקוח"}
                         </small>
                       </div>
                     );
                   })}
+              </div>
+              <div className="machine-income-summary">
+                <span>
+                  <small>עלות המכונות והציוד</small>
+                  <b>{money(metrics.equipment.total)}</b>
+                </span>
+                <span>
+                  <small>הכנסה חודשית משכירות מכונות</small>
+                  <b>{money(metrics.equipment.leaseIncome)}</b>
+                </span>
+                <span>
+                  <small>הכנסה חד־פעמית ממכירת מכונות</small>
+                  <b>{money(metrics.equipment.saleIncome)}</b>
+                </span>
+                {draft.pricingModel === "monthly_package" && (
+                  <p>
+                    המסלול שנבחר הוא חבילה חודשית, ולכן השכירות והמכירה לא נספרות בנפרד. ההכנסה מגיעה מדמי החבילה.
+                  </p>
+                )}
               </div>
               <div className="sales-form-grid">
                 <label>
@@ -3354,6 +3391,8 @@ function QuoteModal({
                   <span><small>תקופת חוזה</small><b>{draft.clientCostMonths} חודשים</b></span>
                   <span><small>מספר מכונות</small><b>{draft.equipment.filter(isMachineEquipment).reduce((sum, item) => sum + item.quantity, 0)}</b></span>
                   <span><small>עלות ציוד כוללת</small><b>{money(metrics.equipment.total)}</b></span>
+                  {draft.pricingModel !== "monthly_package" && <span><small>הכנסה חודשית משכירות מכונות</small><b>{money(metrics.equipment.leaseIncome)}</b></span>}
+                  {draft.pricingModel !== "monthly_package" && metrics.equipment.saleIncome > 0 && <span><small>הכנסה ממכירת מכונות</small><b>{money(metrics.equipment.saleIncome)}</b></span>}
                   <span><small>צריכת קפה חודשית</small><b>{metrics.beans.totalKg} ק״ג</b></span>
                   <span><small>{draft.pricingModel === "monthly_package" ? "הכנסה אפקטיבית לק״ג" : "מחיר מכירה ממוצע לק״ג"}</small><b>{money(draft.pricingModel === "monthly_package" ? metrics.package.effectiveIncomePerKg : metrics.beans.averageSalePrice)}</b></span>
                   <span><small>עלות ממוצעת לק״ג</small><b>{money(metrics.beans.averageCostPerKg)}</b></span>
@@ -3563,6 +3602,12 @@ function QuoteModal({
               <dt>עלות ציוד כוללת</dt>
               <dd>{money(metrics.equipment.total)}</dd>
             </div>
+            {draft.pricingModel !== "monthly_package" && metrics.equipment.leaseIncome > 0 && (
+              <div>
+                <dt>שכירות מכונות (כלולה בהכנסה)</dt>
+                <dd>{money(metrics.equipment.leaseIncome)}</dd>
+              </div>
+            )}
             <div>
               <dt>{draft.pricingModel === "monthly_package" ? "הכנסה מהחבילה" : "הכנסה חודשית"}</dt>
               <dd>{money(metrics.profitability.monthlyClientRevenue)}</dd>

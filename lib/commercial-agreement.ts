@@ -79,3 +79,4 @@ export function commercialAgreementMonthlyIncome(agreement: CommercialAgreement,
     totalIncome: packageIncome + beanIncome + agreement.monthlyRentalIncome + agreement.monthlyServiceIncome + equipmentSaleIncome,
   };
 }
+
