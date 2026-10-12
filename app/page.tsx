@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, FormEvent, useContext, useEffect, useState } from "react";
+import { createContext, FormEvent, useContext, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import {
@@ -357,22 +357,32 @@ export default function Home() {
     const timer=window.setInterval(reconcile,60*60*1000);
     return()=>window.clearInterval(timer);
   },[customers,isStaff,preview,storeReady]);
+  // What this session already synced, so two open screens that see the contract differently cannot keep
+  // overwriting each other (on 11.10 two screens rewrote the same orders some 2,000 times in four minutes).
+  const contractSyncApplied=useRef(new Set<string>());
   useEffect(()=>{
-    if(!storeReady||!isStaff||preview)return;
+    // Only administrators: they see the quotes the contract may come from, and one role doing it is enough.
+    if(!storeReady||role!=="admin"||preview)return;
     const agreementFor=(customer:Customer)=>customerAgreement(customer,salesWorkspace.quotes);
-    const sync=()=>setStore(current=>{const orders=syncContractOrders(current.orders,customers,currentMonthKey(),agreementFor);return orders===current.orders?current:{...current,orders};});
+    const once=(key:string)=>{if(contractSyncApplied.current.has(key))return false;contractSyncApplied.current.add(key);return true;};
+    const sync=()=>{
+      const month=currentMonthKey();
+      const due=customers.filter(customer=>once(`order:${customer.id}:${month}:${contractMonthlyKg(customer,agreementFor(customer))}`));
+      if(!due.length)return;
+      setStore(current=>{const orders=syncContractOrders(current.orders,due,month,agreementFor);return orders===current.orders?current:{...current,orders};});
+    };
     // The card's monthly quantity is shown on many screens; keep it equal to the contract it works with.
     for(const customer of customers){
       const agreement=agreementFor(customer);
       if(!agreement)continue;
       const kg=contractMonthlyKg(customer,agreement);
-      if(kg>0&&kg!==customer.monthlyKg)void saveCustomer({...customer,monthlyKg:kg}).then(()=>setCustomers(list=>list.map(item=>item.id===customer.id?{...item,monthlyKg:kg}:item))).catch(error=>setSyncError(firebaseMessage(error)));
+      if(kg>0&&kg!==customer.monthlyKg&&once(`kg:${customer.id}:${kg}`))void saveCustomer({...customer,monthlyKg:kg}).then(()=>setCustomers(list=>list.map(item=>item.id===customer.id?{...item,monthlyKg:kg}:item))).catch(error=>setSyncError(firebaseMessage(error)));
     }
     sync();
     // A new month starts while the app stays open.
     const timer=window.setInterval(sync,60*60*1000);
     return()=>window.clearInterval(timer);
-  },[customers,isStaff,preview,storeReady,salesWorkspace.quotes]);
+  },[customers,role,preview,storeReady,salesWorkspace.quotes]);
   const clientId = customers.some(customer=>customer.id===selectedCustomer)?selectedCustomer:(customers[0]?.id||"");
   const scopedMachines = isStaff?store.machines:store.machines.filter(m=>m.accountId===clientId);
   const scopedTickets = isStaff?store.tickets:store.tickets.filter(t=>t.accountId===clientId);
@@ -765,7 +775,8 @@ function firebaseMessage(error:unknown){
   if(message.includes("access/admin-required"))return "רק מנהל מאושר יכול להגדיר סיסמה למשתמשים.";
   if(message.startsWith("functions/"))return "שירות הסיסמאות עדיין לא הופעל בשרת. יש לפנות לתמיכה.";
   if(message.includes("access/email-assigned-to-another-customer"))return "כתובת המייל כבר משויכת לכרטיס לקוח אחר.";
-  if(message.includes("permission-denied")||message.includes("Missing or insufficient permissions"))return "כללי הגישה למסד הנתונים עדיין לא פורסמו.";
+  if(message.startsWith("platform/partial-save:"))return `חלק מהשינויים לא נשמרו (${message.slice("platform/partial-save:".length)}). שאר השינויים נשמרו. רעננו את הדף ונסו שוב; אם זה חוזר, פנו לתמיכה.`;
+  if(message.includes("permission-denied")||message.includes("Missing or insufficient permissions"))return "אין הרשאה לשמור את השינוי. רעננו את הדף ונסו שוב; אם זה חוזר, פנו לתמיכה.";
   return message.replace("Firebase: ","");
 }
 

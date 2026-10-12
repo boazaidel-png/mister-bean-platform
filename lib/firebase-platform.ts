@@ -694,13 +694,19 @@ const activityEntityNames = {
 
 let platformSaveQueue: Promise<void> = Promise.resolve();
 
+/** A save that some changes could not make; the rest were saved. */
+export class PartialSaveError extends Error {
+  constructor(readonly failed: string[], readonly cause?: unknown) {
+    super(`platform/partial-save:${failed.join(", ")}`);
+  }
+}
+
 async function persistPlatformStore(next: PlatformStore, actor?: UserProfile) {
   const changes = changedEntities(next, lastSyncedStore);
   if (!changes.length) return;
 
   const { db } = getFirebaseServices();
-  const batch = writeBatch(db);
-  for (const { key, entity, action } of changes) {
+  const writeChange = (batch: ReturnType<typeof writeBatch>, { key, entity, action }: (typeof changes)[number]) => {
     const entityRef = doc(db, "accounts", entity.accountId, key, entity.id);
     if (action === "deleted") batch.delete(entityRef);
     else batch.set(entityRef, withoutUndefined(entity));
@@ -720,9 +726,36 @@ async function persistPlatformStore(next: PlatformStore, actor?: UserProfile) {
         createdAt: new Date().toISOString(),
       });
     }
+  };
+
+  try {
+    const batch = writeBatch(db);
+    changes.forEach((change) => writeChange(batch, change));
+    await batch.commit();
+    lastSyncedStore = next;
+    return;
+  } catch (error) {
+    // One rejected change used to fail the whole batch, and since nothing was
+    // marked as saved it was sent again with every later save, so nothing
+    // could be saved until the page was reloaded. Save each change on its
+    // own instead, and report only the ones that failed.
+    const failed: string[] = [];
+    let lastError: unknown = error;
+    for (const change of changes) {
+      try {
+        const single = writeBatch(db);
+        writeChange(single, change);
+        await single.commit();
+      } catch (changeError) {
+        lastError = changeError;
+        failed.push(`${activityEntityNames[change.key]} ${change.entity.id}`);
+      }
+    }
+    // Failed changes are not retried on every later save; the live data
+    // replaces them on the screen with what the database actually holds.
+    lastSyncedStore = next;
+    if (failed.length) throw new PartialSaveError(failed, lastError);
   }
-  await batch.commit();
-  lastSyncedStore = next;
 }
 
 export function savePlatformStore(next: PlatformStore, actor?: UserProfile) {
