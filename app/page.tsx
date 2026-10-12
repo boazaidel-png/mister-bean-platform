@@ -82,6 +82,7 @@ import type {
   SalesWorkspace,
   Task,
   Ticket,
+  TicketIntake,
   UserProfile,
   View,
 } from "@/lib/platform-types";
@@ -99,6 +100,7 @@ import { contractMonthlyKg, currentMonthKey, syncContractOrders } from "@/lib/or
 import { CONTACT_OFFICE_MESSAGE, contractOrdersOnly, DELIVERY_PREFERENCES, extraAllowanceKg, highConsumption, deliveredThisMonthKg, deliveryPreferenceLabel, isExtraOrder, MAX_EXTRA_ORDER_KG, newExtraOrder, nextContractDelivery, openExtraOrders, validateExtraOrder } from "@/lib/extra-orders";
 import { buildNotifications, type AppNotification } from "@/lib/notifications";
 import { NotificationBell } from "@/components/notification-bell";
+import { EMERGENCY_PHONE, EMERGENCY_PHONE_LINK, IMPACT_OPTIONS, isSafetyHazard, missingIntake, needsSafetyReview, RECURRENCE_OPTIONS, SAFETY_NONE, SAFETY_OPTIONS, SAFETY_UNSURE, SCREEN_OPTIONS, SCREEN_YES, STARTED_OPTIONS, TICKET_FAULT_TYPES, urgencyForIntake } from "@/lib/ticket-intake";
 import { disablePush, enablePush, pushState, refreshPush, type PushState } from "@/lib/push";
 import { calculateQuote } from "@/lib/quote-engine";
 import { activeQuoteFor, customerUpdateForActiveQuote, existingAccountIdForQuote, isSupersededQuote } from "@/lib/quote-lifecycle";
@@ -1058,8 +1060,8 @@ function Tickets({tickets,machines,isStaff,staffUsers,onAssign,onUpdate,onOpen,o
   const rows=tickets.filter(t=>(status==="הכל"||t.status===status)&&(urgency==="הכל"||t.urgency===urgency)&&(t.id+customerName(t.accountId)+t.type).toLowerCase().includes(q.toLowerCase()));
   return <><SectionTitle title="קריאות שירות" sub={`${tickets.filter(t=>!closed(t.status)).length} קריאות פתוחות`} action={<button className="primary" onClick={()=>openTicket()}>＋ פתיחת קריאה</button>}/>
     <div className="filters"><label className="search">⌕<input placeholder="חיפוש קריאה, לקוח או תקלה" value={q} onChange={e=>setQ(e.target.value)}/></label><select value={status} onChange={e=>setStatus(e.target.value)}><option>הכל</option>{["התקבלה","בטיפול","ממתין ללקוח","ממתין לטכנאי","תואם ביקור","נסגרה"].map(x=><option key={x}>{x}</option>)}</select><select value={urgency} onChange={e=>setUrgency(e.target.value)}><option>הכל</option><option>דחופה</option><option>גבוהה</option><option>רגילה</option></select></div>
-    <div className="table-wrap"><table><thead><tr><th>קריאה</th>{isStaff&&<th>לקוח</th>}<th>מכונה / סניף</th><th>תקלה</th><th>דחיפות</th><th>סטטוס</th><th>יעד פתרון</th>{isStaff&&<th>אחראי</th>}<th></th></tr></thead><tbody>{rows.map(t=>{const m=machines.find(m=>m.id===t.machineId);return <tr key={t.id}><td><strong>{t.id}</strong><small>עודכן {formatDateTime(t.updatedAt)}</small></td>{isStaff&&<td><strong>{customerName(t.accountId)}</strong></td>}<td><strong>{m?.model||"בעיה כללית"}</strong><small>{t.site}</small></td><td>{t.type}</td><td><div className="badge-stack"><Badge>{t.urgency}</Badge>{slaBreached(t)&&<Badge>חריגת SLA</Badge>}</div></td><td>{isStaff&&!closed(t.status)?<select className="status-select" value={t.status} onChange={e=>onUpdate(t.id,e.target.value)}>{["התקבלה","ממתין לטכנאי","תואם ביקור","בדרך","הגעה ללקוח","בטיפול","ממתין ללקוח","בוצע טיפול"].map(s=><option key={s}>{s}</option>)}</select>:<Badge>{t.status}</Badge>}</td><td>{formatDateTime(t.resolutionDueAt||"")}</td>{isStaff&&<td>{staffUsers.length?<select className="status-select" value={t.assignedUid||""} onChange={event=>onAssign(t.id,event.target.value)}><option value="">טרם הוקצה</option>{staffUsers.map(user=><option value={user.uid} key={user.uid}>{user.displayName||user.email}</option>)}</select>:t.assignedTo}</td>}<td><div className="row-actions"><button className="row-action" onClick={()=>onOpen(t.id)}>פרטים</button>{isStaff&&!closed(t.status)&&<button className="row-action danger" onClick={()=>onClose(t.id)}>סגירה</button>}</div></td></tr>})}</tbody></table></div>
-    <div className="mobile-cards">{rows.map(t=><button className="mobile-card" key={t.id} onClick={()=>onOpen(t.id)}><div><strong>{t.id} · {t.type}</strong><Badge>{t.urgency}</Badge></div><p>{isStaff&&`${customerName(t.accountId)} · `}{t.site}</p><small>{t.assignedTo} · יעד {formatDateTime(t.resolutionDueAt||"")}</small><div><Badge>{t.status}</Badge><small>{formatDate(t.openedAt)}</small></div></button>)}</div>
+    <div className="table-wrap"><table><thead><tr><th>קריאה</th>{isStaff&&<th>לקוח</th>}<th>מכונה / סניף</th><th>תקלה</th><th>דחיפות</th><th>סטטוס</th><th>יעד פתרון</th>{isStaff&&<th>אחראי</th>}<th></th></tr></thead><tbody>{rows.map(t=>{const m=machines.find(m=>m.id===t.machineId);return <tr key={t.id}><td><strong>{t.id}</strong><small>עודכן {formatDateTime(t.updatedAt)}</small></td>{isStaff&&<td><strong>{customerName(t.accountId)}</strong></td>}<td><strong>{m?.model||"בעיה כללית"}</strong><small>{t.site}</small></td><td>{t.type}</td><td><div className="badge-stack">{t.intake?.safetyReview&&<span className="safety-badge">⚠️ בטיחות</span>}<Badge>{t.urgency}</Badge>{slaBreached(t)&&<Badge>חריגת SLA</Badge>}</div></td><td>{isStaff&&!closed(t.status)?<select className="status-select" value={t.status} onChange={e=>onUpdate(t.id,e.target.value)}>{["התקבלה","ממתין לטכנאי","תואם ביקור","בדרך","הגעה ללקוח","בטיפול","ממתין ללקוח","בוצע טיפול"].map(s=><option key={s}>{s}</option>)}</select>:<Badge>{t.status}</Badge>}</td><td>{formatDateTime(t.resolutionDueAt||"")}</td>{isStaff&&<td>{staffUsers.length?<select className="status-select" value={t.assignedUid||""} onChange={event=>onAssign(t.id,event.target.value)}><option value="">טרם הוקצה</option>{staffUsers.map(user=><option value={user.uid} key={user.uid}>{user.displayName||user.email}</option>)}</select>:t.assignedTo}</td>}<td><div className="row-actions"><button className="row-action" onClick={()=>onOpen(t.id)}>פרטים</button>{isStaff&&!closed(t.status)&&<button className="row-action danger" onClick={()=>onClose(t.id)}>סגירה</button>}</div></td></tr>})}</tbody></table></div>
+    <div className="mobile-cards">{rows.map(t=><button className="mobile-card" key={t.id} onClick={()=>onOpen(t.id)}><div><strong>{t.id} · {t.type}</strong>{t.intake?.safetyReview&&<span className="safety-badge">⚠️ בטיחות</span>}<Badge>{t.urgency}</Badge></div><p>{isStaff&&`${customerName(t.accountId)} · `}{t.site}</p><small>{t.assignedTo} · יעד {formatDateTime(t.resolutionDueAt||"")}</small><div><Badge>{t.status}</Badge><small>{formatDate(t.openedAt)}</small></div></button>)}</div>
   </>;
 }
 
@@ -1295,30 +1297,64 @@ function PasswordSetupModal({email,onClose,onSave}:{email:string;onClose:()=>voi
     <footer><button type="button" onClick={onClose} disabled={busy}>ביטול</button><button className="primary" type="submit" disabled={busy}>{busy?"מגדיר…":"הפעלת כניסה עם סיסמה"}</button></footer>
   </form></Modal>;
 }
+/** One answer out of a few, as buttons; nothing is chosen until the customer picks. */
+function ChoiceGroup({label,options,value,onChange,required=false,tone}:{label:string;options:readonly string[];value:string;onChange:(value:string)=>void;required?:boolean;tone?:(option:string)=>string}) {
+  return <fieldset className="choice-group"><legend>{label}{required&&<b aria-hidden="true"> *</b>}</legend><div role="radiogroup" aria-label={label} aria-required={required}>{options.map(option=><button type="button" role="radio" aria-checked={value===option} key={option} className={`${value===option?"active":""} ${tone?.(option)||""}`} onClick={()=>onChange(option)}>{option}</button>)}</div></fieldset>;
+}
+
+/** Shown the moment a danger sign is chosen, before anything is sent. */
+function SafetyAlert({unsure}:{unsure:boolean}) {
+  return <div className="safety-alert" role="alert"><strong>⚠️ {unsure?"אם יש ספק, התייחסו לזה כסכנה":"זהו מצב שדורש טיפול בטיחותי"}</strong><ul><li>אם אפשר לעשות זאת בבטחה, נתקו את המכונה מהחשמל. אל תגעו במכונה או במים שסביבה כשהיא מחוברת.</li><li>אל תנסו להפעיל או לתקן את המכונה.</li><li>בעשן, אש או פגיעה באדם, חייגו מיד <a href="tel:102">102</a>.</li></ul><a className="safety-call" href={EMERGENCY_PHONE_LINK}>📞 התקשרו אלינו עכשיו: {EMERGENCY_PHONE}</a><small>הקריאה תסומן לטיפול בטיחותי. אפשר להמשיך ולשלוח אותה, אבל אל תחכו לתשובה בכתב.</small></div>;
+}
+
 function TicketModal({customers,accountId,allowAccountChange,preselectedMachine,machines,onClose,onSave}:{customers:Customer[];accountId:string;allowAccountChange:boolean;preselectedMachine:string;machines:Machine[];onClose:()=>void;onSave:(t:Ticket)=>void}) {
   const [activeAccount,setActiveAccount]=useState(accountId);
   const customer=customers.find(c=>c.id===activeAccount)||customers[0]; const available=machines.filter(m=>m.accountId===customer.id);
+  const [type,setType]=useState("");
+  const [intake,setIntake]=useState<Partial<TicketIntake>>({});
+  const [missing,setMissing]=useState<string[]>([]);
+  const answer=(key:keyof TicketIntake)=>(value:string)=>{setIntake(current=>({...current,[key]:value}));setMissing([]);};
+  const hazard=isSafetyHazard({safety:intake.safety||""},type);
+  const unsure=!hazard&&intake.safety===SAFETY_UNSURE;
   const submit=(e:FormEvent<HTMLFormElement>)=>{
     e.preventDefault();
-    const f=new FormData(e.currentTarget),machineId=String(f.get("machine")),urgency=String(f.get("urgency"));
+    const gaps=missingIntake(intake,type);
+    if(gaps.length){setMissing(gaps);return;}
+    const f=new FormData(e.currentTarget),machineId=String(f.get("machine"));
+    const answers:TicketIntake={
+      safety:intake.safety||"",safetyReview:needsSafetyReview({safety:intake.safety||""},type),impact:intake.impact||"",startedWhen:intake.startedWhen||"",
+      ...(intake.startedAt?{startedAt:intake.startedAt}:{}),screen:intake.screen||"",
+      ...(intake.screen===SCREEN_YES?{screenMessage:(intake.screenMessage||"").trim().slice(0,500)}:{}),recurrence:intake.recurrence||"",
+    };
+    const urgency=urgencyForIntake(answers,type);
     const openedAt=new Date();
     const ticketId=createId("SR").toUpperCase();
     const deadlines=calculateTicketDeadlines(customer,urgency,openedAt);
-    onSave({id:ticketId,accountId:customer.id,site:String(f.get("site")),machineId,type:String(f.get("type")),urgency,status:"התקבלה",description:String(f.get("description")),contact:String(f.get("contact")),phone:String(f.get("phone")),assignedTo:"טרם הוקצה",assignedUid:"",openedAt:openedAt.toISOString(),updatedAt:openedAt.toISOString(),...deadlines,attachments:[],events:[{id:createId("event"),type:"created",label:"קריאת השירות נפתחה",createdAt:openedAt.toISOString(),createdBy:String(f.get("contact"))||"לקוח",visibleToCustomer:true}]});
+    onSave({id:ticketId,accountId:customer.id,site:String(f.get("site")),machineId,type,urgency,status:"התקבלה",description:String(f.get("description")),contact:String(f.get("contact")),phone:String(f.get("phone")),assignedTo:"טרם הוקצה",assignedUid:"",openedAt:openedAt.toISOString(),updatedAt:openedAt.toISOString(),...deadlines,intake:answers,attachments:[],events:[{id:createId("event"),type:"created",label:answers.safetyReview?"קריאת השירות נפתחה · סומנה לטיפול בטיחותי":"קריאת השירות נפתחה",createdAt:openedAt.toISOString(),createdBy:String(f.get("contact"))||"לקוח",visibleToCustomer:true}]});
   };
   return <Modal title="פתיחת קריאת שירות" onClose={onClose}>
-    <form onSubmit={submit} className="modal-form">
+    <form onSubmit={submit} className="modal-form ticket-intake" noValidate>
       {allowAccountChange?<label className="account-picker"><span>לקוח</span><select value={activeAccount} onChange={e=>setActiveAccount(e.target.value)}>{customers.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>:<div className="customer-context"><span className="customer-avatar">{customer.name.slice(0,2)}</span><div><small>עבור</small><strong>{customer.name}</strong></div></div>}
+      <ChoiceGroup label="האם יש סימן לסכנה?" required options={SAFETY_OPTIONS} value={intake.safety||""} onChange={answer("safety")} tone={option=>option===SAFETY_NONE?"":option===SAFETY_UNSURE?"caution":"danger"}/>
+      {(hazard||unsure)&&<SafetyAlert unsure={unsure}/>}
       <div className="form-grid">
         <label><span>סניף</span><select name="site" required key={`site-${activeAccount}`}>{customer.branches.map(b=><option key={b}>{b}</option>)}</select></label>
         <label><span>מכונה</span><select name="machine" defaultValue={preselectedMachine} key={`machine-${activeAccount}`}><option value="">בעיה כללית</option>{available.map(m=><option key={m.id} value={m.id}>{m.model} · {m.serial}</option>)}</select></label>
-        <label><span>סוג תקלה</span><select name="type">{["נזילה","המכונה לא נדלקת","קפה יוצא חלש","אין חימום","בעיית טחינה","בעיית חלב / מקציף","דרוש ניקוי","תקלה חוזרת","בקשת הדרכה"].map(x=><option key={x}>{x}</option>)}</select></label>
-        <label><span>השפעה על הפעילות</span><select name="urgency"><option>רגילה</option><option>גבוהה</option><option>דחופה</option></select></label>
-        <label className="full"><span>תיאור הבעיה</span><textarea name="description" required maxLength={5000} placeholder="מה קרה, מתי התחילה הבעיה וכיצד היא משפיעה על העבודה?"/></label>
+        <label className="full"><span>סוג התקלה *</span><select value={type} onChange={e=>{setType(e.target.value);setMissing([]);}}><option value="" disabled>בחירת סוג התקלה</option>{TICKET_FAULT_TYPES.map(x=><option key={x}>{x}</option>)}</select></label>
+      </div>
+      <ChoiceGroup label="השפעה על הפעילות" required options={IMPACT_OPTIONS} value={intake.impact||""} onChange={answer("impact")}/>
+      <ChoiceGroup label="מתי התחילה התקלה?" required options={STARTED_OPTIONS} value={intake.startedWhen||""} onChange={answer("startedWhen")}/>
+      <label className="optional-field"><span>שעה או תאריך מדויקים (רשות)</span><input type="datetime-local" value={intake.startedAt||""} max={new Date().toISOString().slice(0,16)} onChange={e=>setIntake(current=>({...current,startedAt:e.target.value}))}/></label>
+      <ChoiceGroup label="האם מופיעה הודעה על המסך?" required options={SCREEN_OPTIONS} value={intake.screen||""} onChange={answer("screen")}/>
+      {intake.screen===SCREEN_YES&&<label className="optional-field"><span>מה כתוב על המסך? *</span><input maxLength={500} value={intake.screenMessage||""} onChange={e=>{setIntake(current=>({...current,screenMessage:e.target.value}));setMissing([]);}} placeholder="העתיקו את ההודעה או הקוד בדיוק כפי שהם מופיעים"/><small>אין צורך לפרש את הקוד. הנוסח המדויק עדיף על ניחוש.</small></label>}
+      <ChoiceGroup label="האם התקלה חזרה?" required options={RECURRENCE_OPTIONS} value={intake.recurrence||""} onChange={answer("recurrence")}/>
+      <div className="form-grid">
+        <label className="full"><span>פירוט נוסף</span><textarea name="description" rows={5} maxLength={5000} placeholder="מה קרה, מה כבר ניסיתם, ומה עוד חשוב שהטכנאי ידע"/></label>
         <label><span>איש קשר</span><input name="contact" maxLength={160} key={`contact-${activeAccount}`} defaultValue={customer.contactName}/></label>
         <label><span>טלפון לחזרה</span><input name="phone" maxLength={40} key={`phone-${activeAccount}`} defaultValue={customer.phone}/></label>
       </div>
-      <footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" type="submit">פתיחת הקריאה</button></footer>
+      {missing.length>0&&<div className="auth-error" role="alert">יש להשלים: {missing.join(" · ")}</div>}
+      <footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" type="submit">{hazard||unsure?"שליחה כקריאה בטיחותית":"פתיחת הקריאה"}</button></footer>
     </form>
   </Modal>
 }
@@ -1372,5 +1408,5 @@ function TicketDetailModal({ticket,machine,canEdit,onEdit,onClose}:{ticket:Ticke
   const customerName=useCustomerName();
   if(!ticket) return null;
   const events=ticket.events?.length?ticket.events:[{id:"opened",type:"created" as const,label:"קריאת השירות נפתחה",createdAt:ticket.openedAt,createdBy:ticket.contact,visibleToCustomer:true},{id:"updated",type:"status" as const,label:`סטטוס: ${ticket.status}`,createdAt:ticket.updatedAt,createdBy:ticket.assignedTo,visibleToCustomer:true}];
-  return <Modal title={`קריאה ${ticket.id}`} onClose={onClose}><div className="ticket-detail"><div className="detail-summary"><div><small>לקוח</small><strong>{customerName(ticket.accountId)}</strong></div><div><small>מכונה</small><strong>{machine?.model||"בעיה כללית"}</strong></div><div><small>דחיפות</small><Badge>{ticket.urgency}</Badge></div><div><small>סטטוס</small><Badge>{ticket.status}</Badge></div><div><small>אחראי</small><strong>{ticket.assignedTo}</strong></div><div><small>יעד פתרון</small><strong>{formatDateTime(ticket.resolutionDueAt||"")}</strong></div></div><section><h3>{ticket.type}</h3><p>{ticket.description}</p></section>{ticket.attachments?.length?<section className="ticket-attachments"><h3>תמונות וקבצים</h3><div>{ticket.attachments.map((attachment,index)=><TicketAttachment attachment={attachment} key={attachment.storagePath||attachment.url||`${attachment.name}-${index}`}/>)}</div></section>:null}<div className="timeline">{[...events].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)).map(event=><div className="done" key={event.id}><i>✓</i><div><strong>{event.label}</strong><small>{event.createdBy} · {formatDateTime(event.createdAt)}</small></div></div>)}</div>{ticket.workSummary&&<div className="close-reason"><strong>סיכום עבודה</strong><span>{ticket.workSummary}</span></div>}{ticket.partsUsed?.length?<div className="close-reason"><strong>חלקים שהוחלפו</strong><span>{ticket.partsUsed.join(", ")}</span></div>:null}{ticket.closeReason&&<div className="close-reason"><strong>סיבת סגירה</strong><span>{ticket.closeReason}</span></div>}<footer>{canEdit&&<button onClick={onEdit}>עריכת הקריאה</button>}<button className="primary" onClick={onClose}>סגירה</button></footer></div></Modal>
+  return <Modal title={`קריאה ${ticket.id}`} onClose={onClose}><div className="ticket-detail"><div className="detail-summary"><div><small>לקוח</small><strong>{customerName(ticket.accountId)}</strong></div><div><small>מכונה</small><strong>{machine?.model||"בעיה כללית"}</strong></div><div><small>דחיפות</small><Badge>{ticket.urgency}</Badge></div><div><small>סטטוס</small><Badge>{ticket.status}</Badge></div><div><small>אחראי</small><strong>{ticket.assignedTo}</strong></div><div><small>יעד פתרון</small><strong>{formatDateTime(ticket.resolutionDueAt||"")}</strong></div></div>{ticket.intake?.safetyReview&&<div className="safety-alert compact" role="note"><strong>⚠️ קריאה לטיפול בטיחותי</strong><span>סימן סכנה: {ticket.intake.safety}. אין לנסות תפעול רגיל מרחוק.</span></div>}<section><h3>{ticket.type}</h3>{ticket.intake&&<dl className="ticket-intake-answers"><div><dt>השפעה על הפעילות</dt><dd>{ticket.intake.impact}</dd></div><div><dt>מתי התחילה</dt><dd>{ticket.intake.startedWhen}{ticket.intake.startedAt?` · ${formatDateTime(ticket.intake.startedAt)}`:""}</dd></div><div><dt>הודעה על המסך</dt><dd>{ticket.intake.screen}{ticket.intake.screenMessage?<>: <bdi className="screen-message">{ticket.intake.screenMessage}</bdi></>:null}</dd></div><div><dt>האם חזרה</dt><dd>{ticket.intake.recurrence}</dd></div><div><dt>סימן לסכנה</dt><dd>{ticket.intake.safety}</dd></div></dl>}{ticket.description&&<p>{ticket.description}</p>}</section>{ticket.attachments?.length?<section className="ticket-attachments"><h3>תמונות וקבצים</h3><div>{ticket.attachments.map((attachment,index)=><TicketAttachment attachment={attachment} key={attachment.storagePath||attachment.url||`${attachment.name}-${index}`}/>)}</div></section>:null}<div className="timeline">{[...events].sort((a,b)=>a.createdAt.localeCompare(b.createdAt)).map(event=><div className="done" key={event.id}><i>✓</i><div><strong>{event.label}</strong><small>{event.createdBy} · {formatDateTime(event.createdAt)}</small></div></div>)}</div>{ticket.workSummary&&<div className="close-reason"><strong>סיכום עבודה</strong><span>{ticket.workSummary}</span></div>}{ticket.partsUsed?.length?<div className="close-reason"><strong>חלקים שהוחלפו</strong><span>{ticket.partsUsed.join(", ")}</span></div>:null}{ticket.closeReason&&<div className="close-reason"><strong>סיבת סגירה</strong><span>{ticket.closeReason}</span></div>}<footer>{canEdit&&<button onClick={onEdit}>עריכת הקריאה</button>}<button className="primary" onClick={onClose}>סגירה</button></footer></div></Modal>
 }

@@ -48,7 +48,10 @@ export const onTicketWritten = onDocumentWrittenWithAuthContext(
       serviceOf(users).forEach((uid) => recipients.add(uid));
       customersOf(users, accountId).forEach((uid) => recipients.add(uid));
       if (assignedTo) recipients.add(assignedTo);
-      title = `קריאת שירות ${urgent}חדשה · ${name}`;
+      title = after.intake?.safetyReview
+        ? `⚠️ קריאה בטיחותית · ${name}`
+        : `קריאת שירות ${urgent}חדשה · ${name}`;
+      if (after.intake?.safetyReview) body = `סימן לסכנה: ${after.intake.safety} · ${body}`;
     } else {
       if (assignedTo) recipients.add(assignedTo);
       if (statusChanged) customersOf(users, accountId).forEach((uid) => recipients.add(uid));
