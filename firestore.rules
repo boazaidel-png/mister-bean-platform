@@ -215,8 +215,29 @@ service cloud.firestore {
         && data.get('monthlyRent', 0) <= 1000000;
     }
 
+    // Answers given when the call was opened (lib/ticket-intake.ts).
+    function validTicketIntake(data) {
+      return !('intake' in data)
+        || (
+          data.intake is map
+          && data.intake.keys().hasOnly([
+            'safety', 'safetyReview', 'impact', 'startedWhen', 'startedAt',
+            'screen', 'screenMessage', 'recurrence'
+          ])
+          && shortString(data.intake.get('safety', ''), 120)
+          && data.intake.get('safetyReview', false) is bool
+          && shortString(data.intake.get('impact', ''), 120)
+          && shortString(data.intake.get('startedWhen', ''), 80)
+          && shortString(data.intake.get('startedAt', ''), 40)
+          && shortString(data.intake.get('screen', ''), 80)
+          && shortString(data.intake.get('screenMessage', ''), 500)
+          && shortString(data.intake.get('recurrence', ''), 80)
+        );
+    }
+
     function validTicket(data, documentId, accountId) {
-      return data.id == documentId
+      return validTicketIntake(data)
+        && data.id == documentId
         && data.accountId == accountId
         && shortString(data.site, 300)
         && shortString(data.get('machineId', ''), 160)

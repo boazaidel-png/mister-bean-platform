@@ -209,6 +209,20 @@ export type TicketEvent = {
   visibleToCustomer?: boolean;
 };
 
+/** What the customer answered when opening a service call (see lib/ticket-intake.ts). */
+export type TicketIntake = {
+  safety: string;
+  /** A danger sign or "not sure": handled as a safety case, not by remote guidance. */
+  safetyReview: boolean;
+  impact: string;
+  startedWhen: string;
+  /** Optional date and time the fault started. */
+  startedAt?: string;
+  screen: string;
+  screenMessage?: string;
+  recurrence: string;
+};
+
 export type Ticket = {
   id: string;
   accountId: string;
@@ -237,6 +251,7 @@ export type Ticket = {
   customerConfirmedBy?: string;
   customerConfirmedAt?: string;
   events?: TicketEvent[];
+  intake?: TicketIntake;
   attachments?: Array<{
     name: string;
     url?: string;
