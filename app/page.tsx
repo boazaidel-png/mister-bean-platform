@@ -45,6 +45,7 @@ import {
   resetPassword,
   revokeUserAccess,
   adminSetUserPassword,
+  addQuoteMachines,
   loadAuditLog,
   type AuditEntry,
   savePlatformStore,
@@ -467,6 +468,7 @@ export default function Home() {
     for(const customer of working){
       const next={...customer,...customerUpdateForActiveQuote(customer,quote,commercialAgreementFromQuote(quote))};
       await saveCustomer(next);
+      await addQuoteMachines(next,quote);
       setCustomers(current=>current.map(item=>item.id===next.id?next:item));
     }
     setToast(working.length?`ההצעה נשמרה והנתונים בכרטיס ${working.map(item=>item.name).join(", ")} עודכנו`:"הצעת המחיר נשמרה");
@@ -863,7 +865,7 @@ function CustomerCard({initialTab,customer,store,sales,canManageCustomer,openTic
   // The quote the card works from: the one chosen as active, else the latest approved one.
   const approvedQuote=activeQuoteFor(customer,quotes);
   const [activating,setActivating]=useState("");
-  const chooseActiveQuote=async(quote:Quote)=>{if(readOnly){onToast("מצב התצוגה הוא לקריאה בלבד");return;}if(customer.commercialAgreement&&!window.confirm(`לעבוד מול "${quote.versionName}"? ההסכם המסחרי בכרטיס ייבנה מחדש מההצעה הזו, ושינויים שהוזנו בו ידנית יוחלפו.`))return;setActivating(quote.id);try{await onSaveCustomer({...customer,...customerUpdateForActiveQuote(customer,quote,commercialAgreementFromQuote(quote))});onToast(`"${quote.versionName}" היא עכשיו ההצעה הפעילה של ${customer.name}`);}finally{setActivating("");}};
+  const chooseActiveQuote=async(quote:Quote)=>{if(readOnly){onToast("מצב התצוגה הוא לקריאה בלבד");return;}if(customer.commercialAgreement&&!window.confirm(`לעבוד מול "${quote.versionName}"? ההסכם המסחרי בכרטיס ייבנה מחדש מההצעה הזו, ושינויים שהוזנו בו ידנית יוחלפו.`))return;setActivating(quote.id);try{await onSaveCustomer({...customer,...customerUpdateForActiveQuote(customer,quote,commercialAgreementFromQuote(quote))});const added=await addQuoteMachines(customer,quote);onToast(`"${quote.versionName}" היא עכשיו ההצעה הפעילה של ${customer.name}${added?` · נוספו ${added} מכונות לציוד`:""}`);}finally{setActivating("");}};
   const commercialAgreement=customer.commercialAgreement||(approvedQuote?commercialAgreementFromQuote(approvedQuote):undefined);
   const contractEnd=customer.contractEnd?formatDate(customer.contractEnd):"טרם הוגדר";
   const value=(text:string|undefined)=>text||"טרם הוגדר";
@@ -1083,7 +1085,7 @@ function Orders({orders,isStaff,onChange,profitability=[],onAdditionalSaleChange
   const [extraOpen,setExtraOpen]=useState(false);
   const rows=[...orders].sort((a,b)=>b.month.localeCompare(a.month));
   const total=rows.reduce((s,o)=>s+(o.approvedKg||o.requestedKg),0);
-  const statuses=["לפי חוזה","ממתין לעדכון לקוח","ממתין לאישור","אושר","סופק","בוטל"];
+  const statuses=["ממתין לעדכון לקוח","ממתין לאישור","אושר","בהכנה","סופק","בוטל"];
   const monthName=(month:string)=>{const [year,value]=month.split("-");return `${value}/${year}`;};
   const changeStatus=(order:Order,status:string)=>onChange(order.id,{status,...(status==="אושר"&&order.status==="ממתין לאישור"&&order.customerConfirmedAt?{approvedKg:order.requestedKg}:{}),...(status==="סופק"&&!order.deliveredAt?{deliveredAt:new Date().toISOString().slice(0,10)}:{})});
   // Company extras and employee orders are entered in the customer card; listed here so both screens show the same sales.
@@ -1119,11 +1121,26 @@ function Orders({orders,isStaff,onChange,profitability=[],onAdditionalSaleChange
     <div className="kpi-grid"><Kpi label="סה״כ ברשומות" value={`${Math.round(total)} ק״ג`} meta="לפי הכמות המאושרת"/><Kpi label="ממתינות לאישור" value={rows.filter(o=>o.status==="ממתין לאישור").length} meta="דורשות החלטה" tone="orange"/><Kpi label="סופקו ולא שולמו" value={rows.filter(o=>o.status==="סופק"&&!o.paid).length} meta="דורשות מעקב גבייה" tone="red"/></div>
     {bucketTabs}
     {!visibleRows.length&&!additionalSales.length&&<section className="panel inline-empty">אין רשומות בלשונית הזו.</section>}
-    {visibleRows.length>0&&<><div className="table-wrap order-table"><table><thead><tr><th>חודש</th><th>לקוח</th><th>לפי חוזה</th><th>מבוקש</th><th>מאושר</th><th>תערובת</th><th>סטטוס</th><th>אספקה</th><th>תשלום ומסמכים</th></tr></thead><tbody>{visibleRows.map(o=><tr key={o.id}><td><strong>{monthName(o.month)}</strong></td><td><strong>{customerName(o.accountId)}</strong></td><td>{Math.round(o.defaultKg)} ק״ג</td><td>{Math.round(o.requestedKg)} ק״ג</td><td><input className="kg-input small" type="number" step="1" value={Math.round(o.approvedKg||o.requestedKg)} onChange={e=>onChange(o.id,{approvedKg:Math.round(+e.target.value)})}/></td><td><OrderBlendInput order={o} onChange={onChange}/>{isExtraOrder(o)&&<small className="extra-order-tag">השלמה{deliveryPreferenceLabel(o)?` · ${deliveryPreferenceLabel(o)}`:""}</small>}</td><td><select className="status-select" value={o.status} onChange={event=>changeStatus(o,event.target.value)}>{Array.from(new Set([...statuses,o.status])).map(status=><option key={status}>{status}</option>)}</select></td><td>{o.status==="סופק"?<input className="delivery-date-input" type="date" value={(o.deliveredAt||"").slice(0,10)} onChange={event=>onChange(o.id,{deliveredAt:event.target.value})}/>:<span className="muted-cell">לא סופק</span>}</td><td><OrderFulfillmentControls order={o} onChange={onChange}/></td></tr>)}</tbody></table></div>
-    <div className="mobile-cards order-mobile-cards">{visibleRows.map(o=><article className="mobile-card order-mobile-card" key={o.id}><div className="mobile-card-head"><div><strong>{monthName(o.month)} · {customerName(o.accountId)}</strong><small>{o.blend}{isExtraOrder(o)?` · השלמה${deliveryPreferenceLabel(o)?` · ${deliveryPreferenceLabel(o)}`:""}`:""}</small></div><Badge>{o.status}</Badge></div><div className="mobile-order-metrics"><span><small>לפי חוזה</small><strong>{Math.round(o.defaultKg)} ק״ג</strong></span><span><small>מבוקש</small><strong>{Math.round(o.requestedKg)} ק״ג</strong></span><span><small>מאושר</small><strong>{Math.round(o.approvedKg||o.requestedKg)} ק״ג</strong></span></div><div className="mobile-order-edit"><label><span>כמות מאושרת (ק״ג)</span><input className="kg-input" type="number" inputMode="numeric" min="0" step="1" value={Math.round(o.approvedKg||o.requestedKg)} onChange={e=>onChange(o.id,{approvedKg:Math.round(+e.target.value)})}/></label><label><span>תערובת</span><OrderBlendInput order={o} onChange={onChange}/></label></div><label><span>שינוי סטטוס</span><select value={o.status} onChange={event=>changeStatus(o,event.target.value)}>{Array.from(new Set([...statuses,o.status])).map(status=><option key={status}>{status}</option>)}</select></label>{o.status==="סופק"&&<label><span>תאריך אספקה</span><input type="date" value={(o.deliveredAt||"").slice(0,10)} onChange={event=>onChange(o.id,{deliveredAt:event.target.value})}/></label>}<OrderFulfillmentControls order={o} onChange={onChange}/></article>)}</div></>}
+    {visibleRows.length>0&&<><div className="table-wrap order-table"><table><thead><tr><th>חודש</th><th>לקוח</th><th>לפי חוזה</th><th>מבוקש</th><th>מאושר</th><th>תערובת</th><th>סטטוס</th><th>אספקה</th><th>תשלום ומסמכים</th></tr></thead><tbody>{visibleRows.map(o=><tr key={o.id}><td><strong>{monthName(o.month)}</strong></td><td><strong>{customerName(o.accountId)}</strong></td><td>{Math.round(o.defaultKg)} ק״ג</td><td>{Math.round(o.requestedKg)} ק״ג</td><td><OrderKgInput order={o} small onChange={onChange}/></td><td><OrderBlendInput order={o} onChange={onChange}/>{isExtraOrder(o)&&<small className="extra-order-tag">השלמה{deliveryPreferenceLabel(o)?` · ${deliveryPreferenceLabel(o)}`:""}</small>}</td><td><select className="status-select" value={o.status} onChange={event=>changeStatus(o,event.target.value)}>{Array.from(new Set([...statuses,o.status])).map(status=><option key={status}>{status}</option>)}</select></td><td>{o.status==="סופק"?<input className="delivery-date-input" type="date" value={(o.deliveredAt||"").slice(0,10)} onChange={event=>onChange(o.id,{deliveredAt:event.target.value})}/>:<span className="muted-cell">לא סופק</span>}</td><td><OrderFulfillmentControls order={o} onChange={onChange}/></td></tr>)}</tbody></table></div>
+    <div className="mobile-cards order-mobile-cards">{visibleRows.map(o=><article className="mobile-card order-mobile-card" key={o.id}><div className="mobile-card-head"><div><strong>{monthName(o.month)} · {customerName(o.accountId)}</strong><small>{o.blend}{isExtraOrder(o)?` · השלמה${deliveryPreferenceLabel(o)?` · ${deliveryPreferenceLabel(o)}`:""}`:""}</small></div><Badge>{o.status}</Badge></div><div className="mobile-order-metrics"><span><small>לפי חוזה</small><strong>{Math.round(o.defaultKg)} ק״ג</strong></span><span><small>מבוקש</small><strong>{Math.round(o.requestedKg)} ק״ג</strong></span><span><small>מאושר</small><strong>{Math.round(o.approvedKg||o.requestedKg)} ק״ג</strong></span></div><div className="mobile-order-edit"><label><span>כמות מאושרת (ק״ג)</span><OrderKgInput order={o} onChange={onChange}/></label><label><span>תערובת</span><OrderBlendInput order={o} onChange={onChange}/></label></div><label><span>שינוי סטטוס</span><select value={o.status} onChange={event=>changeStatus(o,event.target.value)}>{Array.from(new Set([...statuses,o.status])).map(status=><option key={status}>{status}</option>)}</select></label>{o.status==="סופק"&&<label><span>תאריך אספקה</span><input type="date" value={(o.deliveredAt||"").slice(0,10)} onChange={event=>onChange(o.id,{deliveredAt:event.target.value})}/></label>}<OrderFulfillmentControls order={o} onChange={onChange}/></article>)}</div></>}
     {additionalSection}
     {Array.from(new Set(rows.map(o=>o.accountId))).map(accountId=>{const customer=customers.find(item=>item.id===accountId);return <datalist id={`order-blends-${accountId}`} key={accountId}>{(customer?knownBlends(customer):BLEND_CATALOG.map(item=>({name:item.name}))).map(item=><option value={item.name} key={item.name}/>)}</datalist>;})}
   </>;
+}
+
+/**
+ * Approved quantity of an order. Typing stays in the field and is saved when
+ * the field is left or Enter is pressed: saving on every key wrote each digit
+ * to the database, showed a message per key, and an emptied field jumped back
+ * to the requested quantity, so a new number could not be typed.
+ */
+function OrderKgInput({order,small=false,onChange}:{order:Order;small?:boolean;onChange:(id:string,data:Partial<Order>)=>void}) {
+  const saved=Math.round(order.approvedKg||order.requestedKg);
+  const [text,setText]=useState(String(saved));
+  const [shown,setShown]=useState(saved);
+  if(shown!==saved){setShown(saved);setText(String(saved));}
+  const commit=()=>{const kg=Math.round(Number(text));if(text.trim()===""||!Number.isFinite(kg)||kg<0){setText(String(saved));return;}if(kg!==saved)onChange(order.id,{approvedKg:kg});};
+  return <input className={`kg-input${small?" small":""}`} type="number" inputMode="numeric" min="0" step="1" aria-label="כמות מאושרת בק״ג" value={text} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==="Enter")event.currentTarget.blur();if(event.key==="Escape"){setText(String(saved));}}}/>;
 }
 
 /** Blend of a monthly order. Saved when the field is left, so typing does not write on every key. */
@@ -1183,7 +1200,7 @@ function OrderEditor({order,blends,deliveryDate,onSave}:{order:Order;blends:stri
   const allowedBlends=Array.from(new Set([...blends,order.blend].map(item=>item.trim()).filter(item=>item&&item!=="טרם הוגדרה תערובת")));
   const contract=Math.round(order.defaultKg);
   const below=contract>0&&kg<contract;
-  const closed=["סופק","בוטל"].includes(order.status);
+  const closed=["בהכנה","סופק","בוטל"].includes(order.status);
   const valid=Number.isInteger(kg)&&kg>0&&kg<=10000;
   const save=()=>{
     const customerConfirmedAt=new Date().toISOString();
@@ -1191,7 +1208,8 @@ function OrderEditor({order,blends,deliveryDate,onSave}:{order:Order;blends:stri
       ?{requestedKg:kg,blend,note,status:"ממתין לאישור",customerConfirmedAt}
       :{requestedKg:kg,approvedKg:kg,blend,note,status:"אושר",customerConfirmedAt});
   };
-  const state=closed?null
+  const state=order.status==="בהכנה"?<div className="order-confirm-state done">📦 ההזמנה בהכנה: {Math.round(order.approvedKg||order.requestedKg)} ק״ג. לשינוי יש לפנות למשרד.</div>
+    :closed?null
     :order.status==="ממתין לאישור"?<div className="order-confirm-state pending">⏳ הבקשה ל־{Math.round(order.requestedKg)} ק״ג נשלחה לאישור המנהל, כי היא נמוכה מהחוזה.</div>
     :order.customerConfirmedAt&&order.status==="אושר"?<div className="order-confirm-state done">✓ ההזמנה אושרה: {Math.round(order.approvedKg||order.requestedKg)} ק״ג. אפשר לעדכן עד מועד האספקה.</div>
     :<div className="order-confirm-state todo">יש לאשר את ההזמנה לאספקה ב־{formatDate(deliveryDate)}. לפי החוזה {contract} ק״ג; אפשר להזמין יותר.</div>;

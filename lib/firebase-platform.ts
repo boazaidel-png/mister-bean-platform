@@ -37,7 +37,10 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { canonicalBlendName, withCanonicalBlends } from "./blend-catalog";
 import { getFirebaseServices } from "./firebase-client";
+import { LEGACY_NEW_ORDER_STATUS, NEW_ORDER_STATUS } from "./order-sync";
+import { machinesMissingForQuote } from "./quote-engine";
 import {
   defaultProfileAccess,
   isBootstrapAdminEmail,
@@ -72,16 +75,6 @@ import type {
 } from "./platform-types";
 
 const entityKeys = ["tickets", "orders", "tasks", "machines", "activities", "profitability"] as const;
-const legacyAddonKeys = new Set([
-  "fridge",
-  "filter",
-  "install",
-  "frother",
-  "osmosis",
-  "ypeper_fridge",
-  "ypeper_filter",
-  "ypeper_install",
-]);
 type EntityKey = (typeof entityKeys)[number];
 type Entity = Ticket | Order | Task | Machine | Activity | MonthlyProfitability;
 
@@ -126,12 +119,21 @@ function normalizeLeadRecord(value: Lead): Lead {
   };
 }
 
+/** Older orders: the retired "לפי חוזה" status and renamed blends read as today's. */
+function normalizeOrderRecord(order: Order): Order {
+  return {
+    ...order,
+    status: order.status === LEGACY_NEW_ORDER_STATUS ? NEW_ORDER_STATUS : order.status,
+    blend: canonicalBlendName(order.blend),
+  };
+}
+
 function normalizeQuoteRecord(value: Quote): Quote {
   return {
     ...value,
     // Older or partial records may lack these lists; the quote editor maps over them.
     blends: (Array.isArray(value.blends) ? value.blends : []).map((blend) => ({
-      name: blend?.name || "",
+      name: canonicalBlendName(blend?.name || ""),
       quantityKg: Number(blend?.quantityKg) || 0,
       costPerKg: Number(blend?.costPerKg) || 0,
       pricePerKg: Number(blend?.pricePerKg) || 0,
@@ -422,7 +424,8 @@ export function subscribeToPlatformStore(
             if (change.type === "removed") {
               buckets[key].delete(mapKey);
             } else {
-              buckets[key].set(mapKey, change.doc.data() as Entity);
+              const data = change.doc.data() as Entity;
+              buckets[key].set(mapKey, key === "orders" ? normalizeOrderRecord(data as Order) : data);
             }
           }
           readySubscriptions.add(`${key}:${accountId || "all"}`);
@@ -479,7 +482,7 @@ export function subscribeToCustomers(
       (snapshot) => {
         onCustomers(
           snapshot.docs
-            .map((account) => account.data() as Customer)
+            .map((account) => withCanonicalBlends(account.data() as Customer))
             .sort((a, b) => a.name.localeCompare(b.name, "he")),
         );
       },
@@ -493,7 +496,7 @@ export function subscribeToCustomers(
       doc(db, "accounts", accountId),
       (snapshot) => {
         if (snapshot.exists()) {
-          accountMaps.set(accountId, snapshot.data() as Customer);
+          accountMaps.set(accountId, withCanonicalBlends(snapshot.data() as Customer));
           onCustomers([...accountMaps.values()]);
         }
       },
@@ -972,6 +975,21 @@ function accountIdForQuote(quote: Quote) {
   return `${readable || "customer"}-${quote.id.slice(-6).toLowerCase()}`;
 }
 
+/**
+ * Adds to a customer card the machines of the quote it works from that it
+ * does not have yet. Returns how many were added.
+ */
+export async function addQuoteMachines(customer: Pick<Customer, "id">, quote: Quote) {
+  const { db } = getFirebaseServices();
+  const existing = (await getDocs(collection(db, "accounts", customer.id, "machines"))).docs.map((item) => item.data() as Machine);
+  const missing = machinesMissingForQuote(quote, existing, customer.id, "סניף ראשי", new Date().toISOString());
+  if (!missing.length) return 0;
+  const batch = writeBatch(db);
+  for (const machine of missing) batch.set(doc(db, "accounts", customer.id, "machines", machine.id), withoutUndefined(machine));
+  await batch.commit();
+  return missing.length;
+}
+
 export async function convertQuoteToCustomer(
   quote: Quote,
   lead?: Lead,
@@ -1102,32 +1120,13 @@ export async function convertQuoteToCustomer(
       { merge: true },
     );
   }
+  const existingMachines = isNewAccount
+    ? []
+    : (await getDocs(collection(db, "accounts", accountId, "machines"))).docs.map((item) => item.data() as Machine);
+  for (const machine of machinesMissingForQuote(quote, existingMachines, accountId, lead?.location || "סניף ראשי", now)) {
+    batch.set(doc(db, "accounts", accountId, "machines", machine.id), withoutUndefined(machine));
+  }
   if (isNewAccount) {
-    quote.equipment
-      .filter(
-        (item) =>
-          item.quantity > 0 &&
-          !legacyAddonKeys.has(item.key || item.model),
-      )
-      .forEach((item, itemIndex) => {
-        for (let index = 0; index < item.quantity; index += 1) {
-          const machineId = `machine-${quote.id}-${itemIndex + 1}-${index + 1}`;
-          batch.set(doc(db, "accounts", accountId, "machines", machineId), {
-            id: machineId,
-            accountId,
-            site: lead?.location || "סניף ראשי",
-            model: item.model,
-            serial: "טרם הוגדר",
-            status: "בהקמה",
-            commercial: item.commercialModel,
-            location: "",
-            lastService: "",
-            nextService: "",
-            updatedAt: now,
-          });
-        }
-      });
-
     const monthlyKg = quote.knownKg || mainBlend?.quantityKg || 0;
     const orderId = `order-${accountId}-${now.slice(0, 7)}`;
     batch.set(doc(db, "accounts", accountId, "orders", orderId), {
@@ -1137,7 +1136,7 @@ export async function convertQuoteToCustomer(
       defaultKg: monthlyKg,
       requestedKg: monthlyKg,
       approvedKg: monthlyKg,
-      status: "לפי חוזה",
+      status: NEW_ORDER_STATUS,
       blend: mainBlend?.name || "טרם הוגדרה תערובת",
       note: "",
       createdAt: now,
@@ -1361,7 +1360,7 @@ export async function convertLeadToCustomer(
           defaultKg: monthlyKg,
           requestedKg: monthlyKg,
           approvedKg: monthlyKg,
-          status: "לפי חוזה",
+          status: NEW_ORDER_STATUS,
           blend: "טרם הוגדרה תערובת",
           note: "",
           createdAt: now,

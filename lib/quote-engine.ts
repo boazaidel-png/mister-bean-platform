@@ -1,4 +1,4 @@
-import type { Quote, QuoteAllocation, QuoteEquipment } from "./platform-types";
+import type { Machine, Quote, QuoteAllocation, QuoteEquipment } from "./platform-types";
 
 export type EquipmentCatalogItem = {
   key: string;
@@ -22,9 +22,9 @@ export const importers = {
 } as const;
 
 export const equipmentCatalog: EquipmentCatalogItem[] = [
-  { key: "c12", label: "DR. COFFEE C-12", cost: 3350, capacityPerDay: 70, importer: "tavor", addonKeys: ["fridge", "filter", "install"] },
-  { key: "f15", label: "DR. COFFEE F-15", cost: 4090, capacityPerDay: 100, importer: "tavor", addonKeys: ["fridge", "filter", "install"] },
-  { key: "break", label: "DR. COFFEE - COFFEE BREAK", cost: 5350, capacityPerDay: 100, importer: "tavor", addonKeys: ["fridge", "filter", "install"] },
+  { key: "c12", label: "DR. COFFEE C-12", cost: 3350, capacityPerDay: 70, importer: "tavor", addonKeys: ["fridge", "osmosis", "install"] },
+  { key: "f15", label: "DR. COFFEE F-15", cost: 4090, capacityPerDay: 100, importer: "tavor", addonKeys: ["fridge", "osmosis", "install"] },
+  { key: "break", label: "DR. COFFEE - COFFEE BREAK", cost: 5350, capacityPerDay: 100, importer: "tavor", addonKeys: ["fridge", "osmosis", "install"] },
   { key: "emini", label: "Emilio mini", cost: 800, capacityPerDay: 30, importer: "tavor", addonKeys: ["frother"] },
   { key: "emax", label: "Emilio MAX", cost: 1090, capacityPerDay: 30, importer: "tavor", addonKeys: ["frother"] },
   { key: "jura_w8", label: "Jura W8", cost: 5000, capacityPerDay: 80, importer: "ypeper", addonKeys: ["ypeper_fridge", "ypeper_filter"] },
@@ -37,7 +37,7 @@ export const equipmentCatalog: EquipmentCatalogItem[] = [
 export const addonCatalog: AddonCatalogItem[] = [
   { key: "fridge", label: "מקרר חלב", cost: 591, importer: "tavor" },
   { key: "filter", label: "פילטר בריטה", cost: 350, importer: "tavor" },
-  { key: "install", label: "התקנה", cost: 300, importer: "tavor" },
+  { key: "install", label: "התקנה", cost: 200, importer: "tavor" },
   { key: "frother", label: "מקציף חלב", cost: 129, importer: "tavor" },
   { key: "osmosis", label: "אוסמוזה", cost: 550, importer: "tavor" },
   { key: "ypeper_fridge", label: "מקרר חלב", cost: 530, importer: "ypeper" },
@@ -914,4 +914,56 @@ export function recommendQuotePricing(quote: Quote) {
       monthlyFee: packageMonthlyFee,
     },
   };
+}
+
+const isAccessory = (item: Pick<QuoteEquipment, "key" | "model">) => {
+  const key = item.key || item.model;
+  return key.startsWith("custom-equipment-")
+    || addonCatalog.some((addon) => addon.key === key || addon.label === item.model);
+};
+
+/**
+ * Machines the customer card should have for a quote it works from, that it
+ * does not have yet. Machines are matched by model, so switching between
+ * versions of a quote adds only what is new, and a machine the customer
+ * returned ("הוחזרה") no longer counts. Water treatment in the quote is noted
+ * on each new machine.
+ */
+export function machinesMissingForQuote(
+  quote: Pick<Quote, "id" | "equipment">,
+  existing: Pick<Machine, "id" | "model" | "status">[],
+  accountId: string,
+  site: string,
+  now: string,
+): Machine[] {
+  const quantityOf = (key: string) => quote.equipment
+    .filter((item) => (item.key || item.model) === key)
+    .reduce((sum, item) => sum + positive(item.quantity), 0);
+  const osmosis = quantityOf("osmosis") > 0;
+  const filter = quantityOf("filter") + quantityOf("ypeper_filter") > 0;
+  const waterSystem: Machine["waterSystem"] = osmosis && filter ? "filter_and_osmosis" : osmosis ? "osmosis" : filter ? "filter" : undefined;
+
+  const ids = new Set(existing.map((machine) => machine.id));
+  const created: Machine[] = [];
+  const wanted = new Map<string, { quantity: number; commercial: string }>();
+  for (const item of quote.equipment) {
+    if (positive(item.quantity) <= 0 || isAccessory(item) || !item.model.trim()) continue;
+    const current = wanted.get(item.model) || { quantity: 0, commercial: item.commercialModel };
+    wanted.set(item.model, { ...current, quantity: current.quantity + Math.round(positive(item.quantity)) });
+  }
+  for (const [model, { quantity, commercial }] of wanted) {
+    const have = existing.filter((machine) => machine.model === model && machine.status !== "הוחזרה").length;
+    for (let count = have, index = 1; count < quantity; index += 1) {
+      const id = `machine-${quote.id}-${model.replace(/[^a-zA-Z0-9_-]/g, "-")}-${index}`;
+      if (ids.has(id)) continue;
+      ids.add(id);
+      count += 1;
+      created.push({
+        id, accountId, site, model, serial: "טרם הוגדר", status: "בהקמה", commercial,
+        location: "", lastService: "", nextService: "", updatedAt: now,
+        ...(waterSystem ? { waterSystem } : {}),
+      });
+    }
+  }
+  return created;
 }

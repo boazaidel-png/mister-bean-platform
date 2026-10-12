@@ -108,7 +108,7 @@ export const onOrderWritten = onDocumentWrittenWithAuthContext(
       return;
     }
 
-    const labels: Record<string, string> = { "אושר": "ההזמנה אושרה", "סופק": "ההזמנה סופקה", "בוטל": "ההזמנה בוטלה" };
+    const labels: Record<string, string> = { "אושר": "ההזמנה אושרה", "בהכנה": "ההזמנה בהכנה", "סופק": "ההזמנה סופקה", "בוטל": "ההזמנה בוטלה" };
     if (before.status === after.status || !labels[after.status]) return;
     const users = await activeUsers();
     const name = await customerName(accountId);
