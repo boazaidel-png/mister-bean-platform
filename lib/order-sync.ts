@@ -1,7 +1,12 @@
 import type { CommercialAgreement, Customer, Order } from "./platform-types";
 
 const UNSET_BLEND = "טרם הוגדרה תערובת";
-const CLOSED_STATUSES = ["סופק", "בוטל"];
+// Being prepared, delivered or cancelled: the contract no longer changes it.
+const CLOSED_STATUSES = ["בהכנה", "סופק", "בוטל"];
+/** A new month's order waits for the customer to confirm it. */
+export const NEW_ORDER_STATUS = "ממתין לעדכון לקוח";
+/** Status of orders opened before NEW_ORDER_STATUS replaced it; shown as the new one. */
+export const LEGACY_NEW_ORDER_STATUS = "לפי חוזה";
 
 /**
  * Kilograms the contract covers each month: the package's included coffee or
@@ -28,10 +33,10 @@ function latestOrder(orders: Order[], accountId: string) {
  * Keeps the month's orders in step with the contract chosen in each customer
  * card:
  * - every customer that is not paused gets an order for the month;
- * - an open order's contract quantity ("לפי חוזה") always follows the
+ * - an open order's contract quantity always follows the
  *   contract, and its requested and approved quantities follow too unless
  *   someone changed them;
- * - delivered and cancelled orders are history and stay as they are.
+ * - orders being prepared, delivered or cancelled stay as they are.
  * Returns the same array when nothing changed.
  */
 export function syncContractOrders(
@@ -54,7 +59,7 @@ export function syncContractOrders(
       next = [{
         id: `order-${customer.id}-${month}`, accountId: customer.id, month,
         defaultKg: kg, requestedKg: kg, approvedKg: kg,
-        status: "לפי חוזה", blend, note: "", createdAt: now, updatedAt: now,
+        status: NEW_ORDER_STATUS, blend, note: "", createdAt: now, updatedAt: now,
       }, ...next];
       continue;
     }

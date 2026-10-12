@@ -30,7 +30,7 @@ test("the next delivery is this month's until it passes or is delivered", () => 
 test("the order opens 14 days before delivery, not earlier, and only once", () => {
   assert.equal(run("2026-10-05", { customers: [customer("a")] }).newOrders.length, 0);
   const opened = run("2026-10-06", { customers: [customer("a")] }).newOrders;
-  assert.deepEqual(opened.map((item) => [item.id, item.defaultKg, item.status]), [["order-a-2026-10", 10, "לפי חוזה"]]);
+  assert.deepEqual(opened.map((item) => [item.id, item.defaultKg, item.status]), [["order-a-2026-10", 10, "ממתין לעדכון לקוח"]]);
   assert.equal(run("2026-10-07", { customers: [customer("a")], orders: opened }).newOrders.length, 0);
   assert.equal(run("2026-10-06", { customers: [customer("a", { status: "בהשהיה" })] }).newOrders.length, 0);
 });

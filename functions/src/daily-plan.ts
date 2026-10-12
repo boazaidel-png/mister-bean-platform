@@ -14,7 +14,8 @@ export const ORDER_PREP_DAYS = 4;
 export const SERVICE_TASK_NOTICE_DAYS = 14;
 
 const CLOSED_ORDER = ["סופק", "בוטל"];
-const AWAITING_CUSTOMER = ["לפי חוזה", "ממתין לעדכון לקוח"];
+// "לפי חוזה" is the retired name of "ממתין לעדכון לקוח", kept for older orders.
+const AWAITING_CUSTOMER = ["ממתין לעדכון לקוח", "לפי חוזה"];
 const OFFICE = "מנהל המערכת";
 
 const safeKey = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "-");
