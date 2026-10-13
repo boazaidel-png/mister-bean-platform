@@ -39,6 +39,7 @@ import {
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { canonicalBlendName, withCanonicalBlends } from "./blend-catalog";
 import { getFirebaseServices } from "./firebase-client";
+import { changedEntities, entityKeysOf } from "./store-diff";
 import { LEGACY_NEW_ORDER_STATUS, NEW_ORDER_STATUS } from "./order-sync";
 import { machinesMissingForQuote } from "./quote-engine";
 import {
@@ -419,6 +420,7 @@ export function subscribeToPlatformStore(
       profitability: [...buckets.profitability.values()] as MonthlyProfitability[],
     };
     lastSyncedStore = next;
+    entityKeysOf(next).forEach((key) => seenEntityKeys.add(key));
     onStore(next);
   };
 
@@ -666,34 +668,6 @@ export async function revokeUserAccess(user: UserProfile) {
   await batch.commit();
 }
 
-function changedEntities(next: PlatformStore, previous: PlatformStore | null) {
-  const changes: Array<{
-    key: Exclude<EntityKey, "activities">;
-    entity: Exclude<Entity, Activity>;
-    action: "created" | "updated" | "deleted";
-  }> = [];
-  for (const key of entityKeys) {
-    if (key === "activities") continue;
-    const before = new Map(
-      (previous?.[key] || []).map((entity) => [entity.id, entity]),
-    );
-    for (const entity of next[key]) {
-      const previousEntity = before.get(entity.id);
-      if (JSON.stringify(previousEntity) !== JSON.stringify(entity)) {
-        changes.push({
-          key,
-          entity,
-          action: previousEntity ? "updated" : "created",
-        });
-      }
-      before.delete(entity.id);
-    }
-    for (const entity of before.values()) {
-      changes.push({ key, entity, action: "deleted" });
-    }
-  }
-  return changes;
-}
 
 const activityEntityNames = {
   tickets: "קריאת שירות",
@@ -704,6 +678,8 @@ const activityEntityNames = {
 } as const;
 
 let platformSaveQueue: Promise<void> = Promise.resolve();
+// Everything the database has sent this session, so a save never re-creates what was removed elsewhere.
+const seenEntityKeys = new Set<string>();
 
 /** A save that some changes could not make; the rest were saved. */
 export class PartialSaveError extends Error {
@@ -713,7 +689,7 @@ export class PartialSaveError extends Error {
 }
 
 async function persistPlatformStore(next: PlatformStore, actor?: UserProfile) {
-  const changes = changedEntities(next, lastSyncedStore);
+  const changes = changedEntities(next, lastSyncedStore, seenEntityKeys);
   if (!changes.length) return;
 
   const { db } = getFirebaseServices();
