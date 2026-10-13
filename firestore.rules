@@ -475,6 +475,89 @@ service cloud.firestore {
         && (data.ratings.size() > 0 || data.favoriteBlendId.size() > 0);
     }
 
+    function validShopCampaign(data, documentId) {
+      return data.keys().hasOnly([
+          'id', 'accountId', 'customerName', 'title', 'status', 'items',
+          'closesAtMs', 'note', 'paymentUrl', 'createdAt', 'updatedAt',
+          'createdBy', 'closedAt'
+        ])
+        && data.id == documentId
+        && shortString(data.accountId, 160)
+        && exists(/databases/$(database)/documents/accounts/$(data.accountId))
+        && shortString(data.customerName, 300)
+        && shortString(data.title, 200)
+        && data.status in ['open', 'closed']
+        && data.items is list
+        && data.items.size() > 0
+        && data.items.size() <= 30
+        && data.closesAtMs is number
+        && data.closesAtMs >= 0
+        && shortString(data.note, 1000)
+        && shortString(data.paymentUrl, 500)
+        && (data.paymentUrl == '' || data.paymentUrl.matches('^https://.+'))
+        && shortString(data.createdAt, 40)
+        && shortString(data.updatedAt, 40)
+        && shortString(data.createdBy, 320)
+        && shortString(data.get('closedAt', ''), 40);
+    }
+
+    function shopCampaignTakesOrders(campaignId) {
+      return get(/databases/$(database)/documents/shopCampaigns/$(campaignId)).data.status == 'open'
+        && (
+          get(/databases/$(database)/documents/shopCampaigns/$(campaignId)).data.closesAtMs == 0
+          || request.time.toMillis() < get(/databases/$(database)/documents/shopCampaigns/$(campaignId)).data.closesAtMs
+        );
+    }
+
+    // Employees order from a link without signing in. They may only add one
+    // well-formed, unpaid order to a campaign that still takes orders; they
+    // can never read, change or delete orders. Quantities and totals are
+    // re-checked against the campaign's prices when staff read them.
+    function validShopOrderCreate(data, campaignId, documentId) {
+      return data.keys().hasOnly([
+          'id', 'campaignId', 'fullName', 'email', 'phone', 'department',
+          'quantities', 'total', 'note', 'status', 'createdAt'
+        ])
+        && data.id == documentId
+        && data.campaignId == campaignId
+        && shortString(data.fullName, 120)
+        && data.fullName.size() >= 2
+        && shortString(data.email, 320)
+        && data.email.matches('^[^@ ]+@[^@ ]+[.][^@ ]+$')
+        && shortString(data.phone, 40)
+        && data.phone.size() >= 9
+        && shortString(data.department, 120)
+        && data.quantities is map
+        && data.quantities.size() > 0
+        && data.quantities.size() <= 150
+        && data.total is number
+        && data.total > 0
+        && data.total <= 100000
+        && shortString(data.note, 500)
+        && data.status == 'pending'
+        && shortString(data.createdAt, 40);
+    }
+
+    function validShopOrderPayment() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'paidAt', 'paidAmount', 'invoiceNumber', 'invoiceUrl',
+          'updatedAt', 'updatedBy'
+        ])
+        && request.resource.data.status in ['pending', 'paid', 'cancelled']
+        && shortString(request.resource.data.get('paidAt', ''), 40)
+        && request.resource.data.get('paidAmount', 0) is number
+        && request.resource.data.get('paidAmount', 0) >= 0
+        && request.resource.data.get('paidAmount', 0) <= 100000
+        && shortString(request.resource.data.get('invoiceNumber', ''), 60)
+        && shortString(request.resource.data.get('invoiceUrl', ''), 500)
+        && (
+          request.resource.data.get('invoiceUrl', '') == ''
+          || request.resource.data.get('invoiceUrl', '').matches('^https://.+')
+        )
+        && shortString(request.resource.data.get('updatedAt', ''), 40)
+        && shortString(request.resource.data.get('updatedBy', ''), 320);
+    }
+
     match /users/{userId} {
       allow read: if signedIn() && (request.auth.uid == userId || isStaff());
       allow create: if validSelfRegistration(userId) || validInvitedProfile(userId);
@@ -557,6 +640,24 @@ service cloud.firestore {
         allow create: if get(/databases/$(database)/documents/tastingSessions/$(sessionId)).data.status == 'open'
           && validTastingResponse(request.resource.data, sessionId, documentId);
         allow update: if false;
+      }
+    }
+
+    match /{path=**}/shopOrders/{documentId} { allow read: if isAdmin(); }
+
+    match /shopCampaigns/{campaignId} {
+      // Anyone holding the link may read that single campaign (its products,
+      // prices and whether it is open); only administrators may list them.
+      allow get: if true;
+      allow list, delete: if isAdmin();
+      allow create, update: if isAdmin()
+        && validShopCampaign(request.resource.data, campaignId);
+
+      match /shopOrders/{documentId} {
+        allow read, delete: if isAdmin();
+        allow create: if shopCampaignTakesOrders(campaignId)
+          && validShopOrderCreate(request.resource.data, campaignId, documentId);
+        allow update: if isAdmin() && validShopOrderPayment();
       }
     }
 

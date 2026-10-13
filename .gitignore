@@ -38,7 +38,7 @@ firebase-debug.log*
 
 # generated output from the previous local scaffold
 /dist/
-/.wrangler/
+.wrangler/
 /outputs/
 /work/
 *.tsbuildinfo
@@ -46,3 +46,6 @@ firebase-debug.log*
 # firebase functions
 /functions/node_modules/
 /functions/dist/
+
+# Local secrets for the payments worker
+.dev.vars

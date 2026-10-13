@@ -1149,8 +1149,8 @@ const ACCOUNT_RECORD_KEYS = ["tickets", "orders", "tasks", "machines", "profitab
 
 /**
  * Deletes a customer card and everything stored under it: machines, service
- * calls, coffee orders, tasks, profitability records, tastings and the
- * customer's access invites. Quotes and leads are kept but unlinked, so the
+ * calls, coffee orders, tasks, profitability records, tastings, employee
+ * coffee sales and the customer's access invites. Quotes and leads are kept but unlinked, so the
  * sales history stays and a later approval opens a fresh card. Users who were
  * linked only to this customer lose access. The activity log is append-only by
  * design and stays in the database without a card to show it.
@@ -1162,7 +1162,7 @@ export async function deleteCustomerAccount(
   await requireRecentAdminLogin();
   const { db } = getFirebaseServices();
 
-  const [recordSnapshots, tastingSnapshot, quotesSnapshot, leadsSnapshot, invitesSnapshot, usersSnapshot] =
+  const [recordSnapshots, tastingSnapshot, shopSnapshot, quotesSnapshot, leadsSnapshot, invitesSnapshot, usersSnapshot] =
     await Promise.all([
       Promise.all(
         ACCOUNT_RECORD_KEYS.map((key) =>
@@ -1170,6 +1170,7 @@ export async function deleteCustomerAccount(
         ),
       ),
       getDocs(query(collection(db, "tastingSessions"), where("accountId", "==", accountId))),
+      getDocs(query(collection(db, "shopCampaigns"), where("accountId", "==", accountId))),
       getDocs(query(collection(db, "quotes"), where("accountId", "==", accountId))),
       getDocs(query(collection(db, "leads"), where("convertedAccountId", "==", accountId))),
       getDocs(query(collection(db, "accessInvites"), where("accountId", "==", accountId))),
@@ -1178,6 +1179,11 @@ export async function deleteCustomerAccount(
   const tastingResponses = await Promise.all(
     tastingSnapshot.docs.map((session) =>
       getDocs(collection(db, "tastingSessions", session.id, "tastingResponses")),
+    ),
+  );
+  const shopOrders = await Promise.all(
+    shopSnapshot.docs.map((campaign) =>
+      getDocs(collection(db, "shopCampaigns", campaign.id, "shopOrders")),
     ),
   );
 
@@ -1191,6 +1197,8 @@ export async function deleteCustomerAccount(
   recordSnapshots.forEach((snapshot) => snapshot.docs.forEach((item) => remove(item.ref)));
   tastingResponses.forEach((snapshot) => snapshot.docs.forEach((item) => remove(item.ref)));
   tastingSnapshot.docs.forEach((item) => remove(item.ref));
+  shopOrders.forEach((snapshot) => snapshot.docs.forEach((item) => remove(item.ref)));
+  shopSnapshot.docs.forEach((item) => remove(item.ref));
   invitesSnapshot.docs.forEach((item) => remove(item.ref));
   const deletedRecords = writes.length;
 

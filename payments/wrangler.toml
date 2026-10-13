@@ -1,0 +1,29 @@
+# The server piece of the employee coffee sale. It holds the Rivhit and
+# iCredit tokens, which must never reach the browser: it opens a payment page
+# for each order, records payments iCredit confirms, and issues invoices.
+#
+# Local:  npx wrangler dev --config payments/wrangler.toml   (secrets in payments/.dev.vars)
+# Deploy: npx wrangler secret put RIVHIT_API_TOKEN --config payments/wrangler.toml
+#         npx wrangler secret put ICREDIT_GROUP_TOKEN --config payments/wrangler.toml
+#         npx wrangler secret put FIREBASE_SERVICE_ACCOUNT --config payments/wrangler.toml
+#         npx wrangler deploy --config payments/wrangler.toml
+name = "mister-bean-payments"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "misterbean-platform"
+# Browsers allowed to call this server.
+ALLOWED_ORIGINS = "https://boazaidel-png.github.io,http://localhost:3000"
+# Rivhit payment type recorded on the invoice (9 = bank transfer in a default
+# Rivhit account). Set to the account's own code for Bit or credit card.
+RIVHIT_PAYMENT_TYPE = "9"
+# Payment type recorded for an online card / Apple Pay / Google Pay payment.
+RIVHIT_CARD_PAYMENT_TYPE = "3"
+# The public order page, for the return from the payment page.
+SHOP_PAGE_PATH = "/mister-bean-platform/shop/"
+# iCredit test environment; https://icredit.rivhit.co.il for real payments.
+ICREDIT_API = "https://testicredit.rivhit.co.il"
+# Leave empty to use the account's invoice-receipt document type automatically.
+RIVHIT_DOCUMENT_TYPE = ""
+RIVHIT_SEND_MAIL = "true"
