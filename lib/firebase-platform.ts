@@ -355,19 +355,27 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
   return profile;
 }
 
+/**
+ * How many recent activity entries the app loads. The log only grows, and
+ * loading all of it (tens of thousands of entries) held up every screen;
+ * the screens show recent activity only.
+ */
+export const RECENT_ACTIVITY_LIMIT = 300;
+
 function queryFor(
   key: EntityKey,
   profile: UserProfile,
   accountId?: string,
 ): Query<DocumentData> {
   const { db } = getFirebaseServices();
+  const recentOnly = key === "activities" ? [orderBy("createdAt", "desc"), limit(RECENT_ACTIVITY_LIMIT)] : [];
   if (profile.role === "admin" || profile.role === "service") {
-    return query(collectionGroup(db, key));
+    return query(collectionGroup(db, key), ...recentOnly);
   }
   if (!accountId) {
     throw new Error("למשתמש עדיין לא שויך חשבון לקוח.");
   }
-  return query(collection(db, "accounts", accountId, key));
+  return query(collection(db, "accounts", accountId, key), ...recentOnly);
 }
 
 export function subscribeToPlatformStore(
