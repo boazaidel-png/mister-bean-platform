@@ -18,7 +18,7 @@ import {
   shopCampaignCsv,
   summarizeShopCampaign,
 } from "./shop-engine.ts";
-import { DADA_SHOP_CATALOG, discountedPrice } from "./shop-catalog.ts";
+import { DADA_SHOP_CATALOG, discountedPrice, shopCatalogItems, withCatalogProfile } from "./shop-catalog.ts";
 import { deliveryPrep, deliveryRecipients, deliverySheetHtml } from "./delivery-sheet.ts";
 import type { Order } from "./platform-types.ts";
 
@@ -278,4 +278,16 @@ test("a sale's link code is short and easy to read aloud", () => {
   const codes = new Set(Array.from({ length: 200 }, () => shortCode()));
   assert.equal(codes.size, 200);
   for (const code of codes) assert.match(code, /^[2-9a-hjkmnp-z]{7}$/);
+});
+
+test("a saved sale keeps only name and price, so the order page takes each coffee's methods from the catalog", () => {
+  // As a sale is saved: no methods or taste profile.
+  const saved = shopCatalogItems().map(({ id, name, group, unit, description, price, listPrice }) => ({ id, name, group, unit, description, price: price - 1, listPrice }));
+  const items = withCatalogProfile([...saved, { id: "custom", name: "קפה מיוחד", group: "תערובות", unit: "1 ק״ג", description: "", price: 100, listPrice: 0 }]);
+  const auto = itemsForMethod(items, "auto").map((item) => item.id);
+  assert.ok(auto.includes("house-blend") && !auto.includes("ethiopia-yirgacheffe"));
+  assert.ok(auto.includes("custom"), "a coffee added by hand has no methods and shows under every method");
+  assert.ok(itemsForMethod(items, "filter").length < items.length);
+  // The sale's own price stays.
+  assert.equal(items[0].price, saved[0].price);
 });
