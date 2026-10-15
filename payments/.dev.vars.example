@@ -1,0 +1,13 @@
+# Copy to payments/.dev.vars for local runs. Never commit the real file.
+# Rivhit's public demo account token (from rivhit-api.readme.io), for tests only.
+RIVHIT_API_TOKEN=DECD03E5-E35C-41E8-84F7-FBA2FB483928
+# Lets the local demo sale (campaign "demo") be invoiced without Firestore.
+DEMO_MODE=1
+# Local dev site ports.
+ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
+# iCredit public test payment page (rivhit-api.readme.io, test environment). Test cards only.
+ICREDIT_GROUP_TOKEN=a1408bfc-18da-49dc-aa77-d65870f7943e
+# Local runs pay in iCredit's test environment, never for real.
+ICREDIT_API=https://testicredit.rivhit.co.il
+# The public Rivhit demo account numbers its invoice-receipt differently.
+RIVHIT_DOCUMENT_TYPE=

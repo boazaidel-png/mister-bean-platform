@@ -58,7 +58,8 @@ export type View =
   | "access"
   | "contract"
   | "contact"
-  | "tastings";
+  | "tastings"
+  | "shop";
 
 export type Customer = {
   id: string;
@@ -575,4 +576,90 @@ export type TastingResponse = {
   favoriteBlendId: string;
   comment: string;
   createdAt: string;
+};
+
+/** A coffee product offered in an employee sale. Prices are per unit, in shekels, VAT included. */
+export type ShopItem = {
+  id: string;
+  name: string;
+  /** "תערובות" or "חד זני", for grouping on the order page. */
+  group: string;
+  unit: string;
+  description: string;
+  price: number;
+  /** The regular store price, shown crossed out; 0 when there is none. */
+  listPrice: number;
+  /** Taste profile shown to employees. Optional: a coffee added by hand has none. */
+  code?: string;
+  color?: string;
+  arabicaPercent?: number;
+  /** 1 (light) to 5 (full); 0 when unknown. */
+  body?: number;
+  /** 1 (low) to 5 (high); 0 when unknown. */
+  acidity?: number;
+  tags?: string[];
+  badge?: string;
+  /** How the coffee is brewed at home; it is listed under each of these. */
+  methods?: ShopMethod[];
+};
+
+export type ShopGrind = "beans" | "espresso" | "turkish" | "moka" | "filter";
+
+export type ShopMethod = "auto" | "espresso" | "turkish" | "moka" | "filter";
+
+export type ShopCampaignStatus = "open" | "closed";
+
+/**
+ * A coffee sale to the employees of one customer. Anyone with the link can
+ * order while it is open and before closesAtMs (0 = no automatic close).
+ * paymentUrl is an optional manual payment link (Bit, PayBox…) shown after ordering.
+ */
+export type ShopCampaign = {
+  id: string;
+  accountId: string;
+  customerName: string;
+  title: string;
+  status: ShopCampaignStatus;
+  items: ShopItem[];
+  closesAtMs: number;
+  note: string;
+  paymentUrl: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  closedAt?: string;
+};
+
+export type ShopOrderStatus = "pending" | "paid" | "cancelled";
+
+/**
+ * One employee's order. Written by the buyer without signing in, so the
+ * quantities are re-checked and the total re-priced from the campaign when read.
+ * Payment fields are set only by staff (or, later, the payment provider).
+ */
+export type ShopOrder = {
+  id: string;
+  campaignId: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  department: string;
+  /** Units per item and grind, keyed "itemId~grind". */
+  quantities: Record<string, number>;
+  /** The total the buyer saw when ordering. */
+  total: number;
+  note: string;
+  status: ShopOrderStatus;
+  createdAt: string;
+  paidAt?: string;
+  paidAmount?: number;
+  invoiceNumber?: string;
+  /** Link to the invoice PDF in Rivhit. */
+  invoiceUrl?: string;
+  /** iCredit's private token for this order's payment page; set by the payments server. */
+  paymentSaleToken?: string;
+  /** iCredit's sale id once the order was paid online. */
+  paymentRef?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 };
