@@ -297,6 +297,12 @@ export type Order = {
   deliveryPreference?: DeliveryPreference;
   /** For a top-up delivered on a chosen date (yyyy-mm-dd). */
   requestedDeliveryDate?: string;
+  /**
+   * Set only on a sale typed into a month's profitability page before sales
+   * became orders. Such an order is built on screen from that page to show it;
+   * it is never written to the database, and it cannot be edited as an order.
+   */
+  legacySale?: { recordId: string; lineId: string };
   /** For employee sales: the sale the order is built from. */
   shopCampaignId?: string;
   /** For employee sales: bags to prepare per coffee and grind, from paid orders only. */
