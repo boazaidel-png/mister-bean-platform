@@ -1,10 +1,9 @@
-import type { CommercialAgreement, MonthlyProfitability, Order, ProfitabilitySaleLine } from "./platform-types";
+import type { CommercialAgreement, Order, OrderKind } from "./platform-types";
 
 /**
  * The coffee orders board: every coffee sale of a month in one list, placed
- * on one pipeline. Monthly contract orders and top-ups are orders; extras for
- * the company and employee orders are sale lines of the month's profitability
- * record. Both move through the same stages.
+ * on one pipeline: the monthly contract order, the customer's top-ups, extras
+ * for the company and employee sales are all orders.
  */
 
 export type OrderStage = "customer" | "approval" | "approved" | "preparing" | "delivered" | "paid" | "cancelled";
@@ -22,10 +21,10 @@ export const ORDER_STAGES: Array<{ key: Exclude<OrderStage, "cancelled">; label:
 export const stageLabel = (stage: OrderStage) =>
   stage === "cancelled" ? "בוטל" : ORDER_STAGES.find((item) => item.key === stage)!.label;
 
-export type RowKind = "monthly" | "extra" | "company_extra" | "employees";
+export type RowKind = OrderKind;
 
 export const ROW_KIND_LABELS: Record<RowKind, string> = {
-  monthly: "חודשית",
+  contract: "חודשית",
   extra: "השלמה",
   company_extra: "אקסטרה לחברה",
   employees: "עובדים",
@@ -45,8 +44,7 @@ export type BoardRow = {
   value: number;
   deliveredAt?: string;
   updatedAt: string;
-  order?: Order;
-  sale?: { recordId: string; line: ProfitabilitySaleLine; locked: boolean };
+  order: Order;
 };
 
 export function orderStage(order: Pick<Order, "status" | "paid">): OrderStage {
@@ -59,26 +57,24 @@ export function orderStage(order: Pick<Order, "status" | "paid">): OrderStage {
   return "customer";
 }
 
-export function saleStage(line: Pick<ProfitabilitySaleLine, "deliveryStatus" | "paid">): OrderStage {
-  if (line.deliveryStatus === "בוטל") return "cancelled";
-  if (line.paid) return "paid";
-  if (line.deliveryStatus === "סופק") return "delivered";
-  if (line.deliveryStatus === "מוכן למשלוח" || line.deliveryStatus === "נשלח") return "preparing";
-  // The office enters these lines itself, so they start approved.
-  return "approved";
-}
-
 const orderKg = (order: Order) => Math.max(0, Math.round(order.approvedKg || order.requestedKg || 0));
 
+/** The price per kilogram a sale outside the contract order is charged by default. */
+export function defaultPricePerKg(kind: OrderKind, agreement?: CommercialAgreement) {
+  if (!agreement || kind === "employees") return 0;
+  return Math.round((agreement.model === "monthly_package" ? agreement.extraKgPrice : agreement.beanPricePerKg || agreement.extraKgPrice) || 0);
+}
+
 /**
- * What an order is worth under the customer's agreement: a package month is
- * the package fee plus extra kilograms beyond what it includes; otherwise
- * kilograms at the agreed price. Top-ups are priced as extra kilograms.
+ * What an order is worth: a contract month under a package is the package fee
+ * plus extra kilograms beyond what it includes, otherwise kilograms at the
+ * agreed price; any other sale is kilograms at the order's own price.
  */
 export function orderValue(order: Order, agreement?: CommercialAgreement) {
-  if (!agreement) return 0;
   const kg = orderKg(order);
-  if (order.kind === "extra") return kg * (agreement.extraKgPrice || agreement.beanPricePerKg || 0);
+  const kind = order.kind ?? "contract";
+  if (kind !== "contract") return kg * (order.pricePerKg ?? defaultPricePerKg(kind, agreement));
+  if (!agreement) return 0;
   if (agreement.model === "monthly_package") {
     const included = agreement.packageCount * agreement.packageIncludedKgPerUnit;
     return agreement.packageCount * agreement.packageMonthlyFee + Math.max(0, kg - included) * (agreement.extraKgPrice || 0);
@@ -88,42 +84,22 @@ export function orderValue(order: Order, agreement?: CommercialAgreement) {
 
 export function buildBoardRows(input: {
   orders: Order[];
-  profitability: MonthlyProfitability[];
   agreementFor: (accountId: string) => CommercialAgreement | undefined;
 }): BoardRow[] {
-  const rows: BoardRow[] = input.orders.map((order) => ({
+  return input.orders.map((order) => ({
     key: `order:${order.id}`,
-    kind: order.kind === "extra" ? "extra" : "monthly",
+    kind: order.kind ?? "contract",
     accountId: order.accountId,
     month: order.month,
     blend: order.blend,
     kg: orderKg(order),
-    ...(order.kind === "extra" ? {} : { contractKg: Math.round(order.defaultKg || 0) }),
+    ...((order.kind ?? "contract") === "contract" ? { contractKg: Math.round(order.defaultKg || 0) } : {}),
     stage: orderStage(order),
     value: orderValue(order, input.agreementFor(order.accountId)),
     ...(order.deliveredAt ? { deliveredAt: order.deliveredAt } : {}),
     updatedAt: order.updatedAt || order.createdAt || "",
     order,
   }));
-  for (const record of input.profitability) {
-    for (const line of record.sales) {
-      if ((line.channel !== "company_extra" && line.channel !== "employees") || line.id.startsWith("contract-")) continue;
-      rows.push({
-        key: `sale:${record.id}:${line.id}`,
-        kind: line.channel,
-        accountId: record.accountId,
-        month: record.month,
-        blend: line.blendName,
-        kg: Math.max(0, Math.round(line.quantityKg)),
-        stage: saleStage(line),
-        value: Math.round(line.quantityKg * line.pricePerKg),
-        ...(line.deliveredAt ? { deliveredAt: line.deliveredAt } : {}),
-        updatedAt: record.updatedAt || "",
-        sale: { recordId: record.id, line, locked: record.status === "closed" },
-      });
-    }
-  }
-  return rows;
 }
 
 /** Orders waiting on the office come first, then the rest of the pipeline in order. */
@@ -168,20 +144,11 @@ export function monthHistory(rows: BoardRow[], endMonth: string, count = 12) {
   });
 }
 
-export type NextAction =
-  | { label: string; order: Partial<Order> }
-  | { label: string; sale: Partial<ProfitabilitySaleLine> };
+export type NextAction = { label: string; order: Partial<Order> };
 
 /** The one button a row offers: what moves it to the next stage. */
 export function nextAction(row: BoardRow, today = new Date().toISOString().slice(0, 10)): NextAction | null {
-  if (row.sale) {
-    if (row.sale.locked) return null;
-    if (row.stage === "approved") return { label: "העברה להכנה", sale: { deliveryStatus: "מוכן למשלוח" } };
-    if (row.stage === "preparing") return { label: "סימון כסופק", sale: { deliveryStatus: "סופק", deliveredAt: row.sale.line.deliveredAt || today } };
-    if (row.stage === "delivered") return { label: "סימון כשולם", sale: { paid: true } };
-    return null;
-  }
-  const order = row.order!;
+  const order = row.order;
   if (row.stage === "customer") return { label: "אישור לפי החוזה", order: { status: "אושר" } };
   if (row.stage === "approval") {
     return { label: "אישור", order: { status: "אושר", ...(order.kind === "extra" || order.customerConfirmedAt ? { approvedKg: order.requestedKg } : {}) } };

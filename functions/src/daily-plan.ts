@@ -36,7 +36,7 @@ export function upcomingDelivery(customer: Customer, orders: Order[], today: str
   for (const month of [thisMonth, addMonth(thisMonth)]) {
     const date = deliveryDate(customer, month);
     // Top-ups the customer ordered during the month are not the contract delivery.
-    const order = orders.find((item) => item.accountId === customer.id && item.month === month && item.kind !== "extra");
+    const order = orders.find((item) => item.accountId === customer.id && item.month === month && (item.kind ?? "contract") === "contract");
     if (date >= today && !CLOSED_ORDER.includes(order?.status || "")) return { month, date, order };
   }
   const month = addMonth(addMonth(thisMonth));
@@ -84,7 +84,7 @@ export function planDailyRun(input: {
 
     let order = existing;
     if (!order) {
-      order = syncContractOrders(ownOrders, [customer], month, undefined, now).find((item) => item.month === month && item.kind !== "extra");
+      order = syncContractOrders(ownOrders, [customer], month, undefined, now).find((item) => item.month === month && (item.kind ?? "contract") === "contract");
       if (!order) continue;
       plan.newOrders.push(order);
     }

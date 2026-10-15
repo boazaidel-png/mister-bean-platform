@@ -298,15 +298,21 @@ service cloud.firestore {
         && data.get('paid', false) is bool
         && data.get('invoiceSent', false) is bool
         && data.get('deliveryNoteSent', false) is bool
-        && shortString(data.get('customerConfirmedAt', ''), 40);
+        && shortString(data.get('customerConfirmedAt', ''), 40)
+        && data.get('kind', 'contract') in ['contract', 'extra', 'company_extra', 'employees']
+        && data.get('pricePerKg', 0) is number
+        && data.get('pricePerKg', 0) >= 0 && data.get('pricePerKg', 0) <= 100000
+        && data.get('costPerKg', 0) is number
+        && data.get('costPerKg', 0) >= 0 && data.get('costPerKg', 0) <= 100000;
     }
 
     // A customer confirms the open order. The contract quantity is the
     // minimum they can confirm themselves (approved as requested); a lower
     // quantity only asks the office, leaving the approved quantity as is.
     function validCustomerOrderUpdate(documentId, accountId) {
-      // Top-ups are approved by the office only.
-      return resource.data.get('kind', 'contract') != 'extra'
+      // Only the contract order: top-ups are approved by the office, and
+      // extras and employee sales are the office's own entries.
+      return resource.data.get('kind', 'contract') == 'contract'
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'requestedKg', 'approvedKg', 'blend', 'note', 'status', 'updatedAt', 'customerConfirmedAt'
         ])
@@ -392,6 +398,8 @@ service cloud.firestore {
         && data.deliveryCost is number && data.deliveryCost >= 0 && data.deliveryCost <= 100000000
         && data.equipmentCost is number && data.equipmentCost >= 0 && data.equipmentCost <= 100000000
         && data.otherCost is number && data.otherCost >= 0 && data.otherCost <= 100000000
+        && data.get('extraCosts', []) is list
+        && data.get('extraCosts', []).size() <= 50
         && shortString(data.createdAt, 40)
         && shortString(data.updatedAt, 40);
     }

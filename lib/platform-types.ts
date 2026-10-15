@@ -165,9 +165,13 @@ export type MonthlyProfitability = {
   equipmentCost: number;
   otherCost: number;
   status: "draft" | "closed";
+  /** One-off costs of this month, beyond what the approved quote plans. */
+  extraCosts?: MonthlyExtraCost[];
   createdAt: string;
   updatedAt: string;
 };
+
+export type MonthlyExtraCost = { id: string; label: string; amount: number; createdAt: string };
 
 export type CustomerNote = {
   id: string;
@@ -261,6 +265,8 @@ export type Ticket = {
   }>;
 };
 
+export type OrderKind = "contract" | "extra" | "company_extra" | "employees";
+
 export type Order = {
   id: string;
   accountId: string;
@@ -277,8 +283,15 @@ export type Order = {
   deliveryNoteSent?: boolean;
   /** When the customer last confirmed or changed the order themselves. */
   customerConfirmedAt?: string;
-  /** "extra": a top-up the customer asked for during the month, on top of the contract order. */
-  kind?: "contract" | "extra";
+  /**
+   * contract: the month's order under the agreement (also when unset);
+   * extra: a top-up the customer asked for; company_extra and employees:
+   * sales the office enters.
+   */
+  kind?: OrderKind;
+  /** Price and cost per kilogram fixed when the order was entered (not used for contract orders). */
+  pricePerKg?: number;
+  costPerKg?: number;
   /** For a top-up: when the customer wants it delivered. */
   deliveryPreference?: DeliveryPreference;
   /** For a top-up delivered on a chosen date (yyyy-mm-dd). */

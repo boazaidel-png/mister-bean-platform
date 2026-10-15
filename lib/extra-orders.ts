@@ -10,7 +10,8 @@ export const MAX_EXTRA_ORDER_KG = 500;
 export const CLOSED_ORDER_STATUSES = ["סופק", "בוטל"];
 
 export const isExtraOrder = (order: Pick<Order, "kind">) => order.kind === "extra";
-export const contractOrdersOnly = <T extends Pick<Order, "kind">>(orders: T[]) => orders.filter((order) => !isExtraOrder(order));
+export const isContractOrder = (order: Pick<Order, "kind">) => (order.kind ?? "contract") === "contract";
+export const contractOrdersOnly = <T extends Pick<Order, "kind">>(orders: T[]) => orders.filter(isContractOrder);
 
 export const DELIVERY_PREFERENCES: Array<[DeliveryPreference, string]> = [
   ["asap", "הכי מהר שאפשר"],
