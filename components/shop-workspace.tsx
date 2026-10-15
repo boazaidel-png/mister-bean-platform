@@ -6,8 +6,12 @@ import QRCode from "qrcode";
 import type { Customer, ShopCampaign, ShopItem, ShopOrder, ShopOrderStatus } from "@/lib/platform-types";
 import { backdropDismiss } from "@/lib/backdrop-dismiss";
 import {
+  campaignMonth,
   dateInputValue,
+  deliveryDateIn,
   endOfDayMs,
+  nextShopDelivery,
+  placedOrders,
   formatShekel,
   grindLabel,
   isCampaignOpen,
@@ -46,6 +50,8 @@ type Props = {
 
 const formatDate = (value: string | number) => value ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short" }).format(new Date(value)) : "";
 const formatDateTime = (value: string) => value ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "";
+const monthTitle = (month: string) => { const [year, value] = month.split("-").map(Number); return new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(new Date(year, value - 1, 1)); };
+const shiftMonth = (month: string, by: number) => { const [year, value] = month.split("-").map(Number); const date = new Date(year, value - 1 + by, 1); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`; };
 const errorText = (error: unknown) => error instanceof Error && error.message.includes("permission") ? "אין הרשאה לפעולה. ייתכן שחוקי Firebase עדיין לא עודכנו." : "הפעולה לא הצליחה. נסו שוב.";
 
 function campaignState(campaign: ShopCampaign) {
@@ -108,7 +114,7 @@ export function ShopWorkspace({ customers, customer, readOnly, actor, onToast }:
       <div className="section-title">
         <div>
           <h2>{customer ? "מכירת קפה לעובדים" : "מכירת קפה לעובדי לקוחות"}</h2>
-          <p>{customer ? `סבבי הזמנות הקפה של העובדים ב${customer.name}` : "פותחים סבב הזמנות לארגון, שולחים קישור לעובדים, ומקבלים הזמנות, תשלומים ורשימת הכנה."}</p>
+          <p>{customer ? `פותחים מכירה, שולחים לעובדים קישור, והזמנות ששולמו מצטרפות למשלוח הקפה של ${customer.name} בלשונית "הזמנות קפה".` : "פותחים סבב הזמנות לארגון, שולחים קישור לעובדים, וההזמנות ששולמו מצטרפות למשלוח הקפה של הלקוח."}</p>
         </div>
         <button className="primary" onClick={() => { if (guard()) setEditing("new"); }}><Plus size={16} /> מכירה חדשה</button>
       </div>
@@ -117,16 +123,16 @@ export function ShopWorkspace({ customers, customer, readOnly, actor, onToast }:
         ? <div className="workspace-loading"><i /><span>טוען מכירות…</span></div>
         : visible.length
           ? <div className="tasting-session-list shop-campaign-list">{visible.map((campaign) => {
-              const summary = summarizeShopCampaign(campaign, orders.get(campaign.id) || []);
+              const summary = summarizeShopCampaign(campaign, placedOrders(orders.get(campaign.id) || []));
               const state = campaignState(campaign);
               return <button key={campaign.id} onClick={() => setOpenId(campaign.id)}>
                 <div>
                   <strong>{campaign.title}</strong>
-                  <small>{!customer && `${campaign.customerName} · `}נפתחה {formatDate(campaign.createdAt)}{campaign.closesAtMs ? ` · עד ${formatDate(campaign.closesAtMs)}` : ""}</small>
+                  <small>{!customer && `${campaign.customerName} · `}משלוח {monthTitle(campaignMonth(campaign))}{campaign.closesAtMs ? ` · הזמנות עד ${formatDate(campaign.closesAtMs)}` : ""}</small>
                 </div>
                 <span className={`badge ${state.tone}`}>{state.label}</span>
                 <span>{summary.orders} הזמנות</span>
-                <span className="tasting-leader">{summary.units} שקיות · נגבו {formatShekel(summary.collected)}{summary.outstanding ? ` · ממתין ${formatShekel(summary.outstanding)}` : ""}</span>
+                <span className="tasting-leader">{summary.units} שקיות · נגבו {formatShekel(summary.collected)}</span>
                 <b>פתיחה ←</b>
               </button>;
             })}</div>
@@ -160,7 +166,17 @@ function CampaignModal({ campaign, orders, customers, fixedCustomer, actor, onCl
   const [accountId, setAccountId] = useState(campaign?.accountId || fixedCustomer?.id || "");
   const customer = fixedCustomer || customers.find((item) => item.id === accountId);
   const [title, setTitle] = useState(campaign?.title || "");
-  const [closesOn, setClosesOn] = useState(() => campaign ? dateInputValue(campaign.closesAtMs) : dateInputValue(Date.now() + 7 * 86400000));
+  // A new sale goes out with the customer's next delivery it can make, and closes a few days before it.
+  const suggested = (id: string) => nextShopDelivery((fixedCustomer || customers.find((item) => item.id === id))?.deliveryDayOfMonth);
+  const [month, setMonth] = useState(() => campaign ? campaignMonth(campaign) : suggested(accountId).month);
+  const [closesOn, setClosesOn] = useState(() => campaign ? dateInputValue(campaign.closesAtMs) : suggested(accountId).closesOn);
+  const deliveryDay = customer?.deliveryDayOfMonth;
+  const chooseMonth = (next: string) => {
+    setMonth(next);
+    const delivery = deliveryDateIn(next, deliveryDay);
+    setClosesOn(dateInputValue(new Date(delivery.getFullYear(), delivery.getMonth(), delivery.getDate() - 3).getTime()));
+  };
+  const monthOptions = Array.from(new Set([campaignMonth(campaign || { createdAt: new Date().toISOString(), closesAtMs: 0 }), month, ...[0, 1, 2].map((by) => shiftMonth(suggested(accountId).month, by - 1))])).sort();
   const [note, setNote] = useState(campaign?.note || "");
   const [paymentUrl, setPaymentUrl] = useState(campaign?.paymentUrl || "");
   const [discount, setDiscount] = useState(DEFAULT_SHOP_DISCOUNT);
@@ -190,6 +206,7 @@ function CampaignModal({ campaign, orders, customers, fixedCustomer, actor, onCl
       status: campaign?.status || "open",
       items: included.map(({ id, name, group, unit, description, price, listPrice }) => ({ id, name: name.trim(), group, unit: unit.trim() || SHOP_UNIT, description: description.trim(), price: Math.round(price * 100) / 100, listPrice })),
       closesAtMs: closesOn ? endOfDayMs(closesOn) : 0,
+      month,
       note: note.trim(),
       paymentUrl: paymentUrl.trim(),
       createdAt: campaign?.createdAt || now,
@@ -210,13 +227,19 @@ function CampaignModal({ campaign, orders, customers, fixedCustomer, actor, onCl
     <form className="modal-form" onSubmit={(event) => void submit(event)}>
       <div className="form-grid">
         {!fixedCustomer && !campaign && <label className="full">לקוח (הארגון)
-          <select required value={accountId} onChange={(event) => setAccountId(event.target.value)}>
+          <select required value={accountId} onChange={(event) => { setAccountId(event.target.value); const next = suggested(event.target.value); setMonth(next.month); setClosesOn(next.closesOn); }}>
             <option value="">בחירת לקוח…</option>
             {customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
           </select>
         </label>}
+        <label>יוצא עם המשלוח של
+          <select value={month} onChange={(event) => chooseMonth(event.target.value)}>
+            {monthOptions.map((item) => <option key={item} value={item}>{monthTitle(item)}</option>)}
+          </select>
+          <small>{customer ? `אספקה ב־${formatDate(deliveryDateIn(month, deliveryDay).getTime())}, יחד עם הקפה של החברה` : "בחרו לקוח"}</small>
+        </label>
         <label>כותרת לעובדים<input value={title} placeholder={defaultTitle} maxLength={200} onChange={(event) => setTitle(event.target.value)} /></label>
-        <label>הזמנות פתוחות עד<input type="date" value={closesOn} onChange={(event) => setClosesOn(event.target.value)} /><small>{closesOn ? "הקישור ייסגר בסוף היום הזה" : "ללא תאריך: נסגר ידנית"}</small></label>
+        <label>הזמנות פתוחות עד<input type="date" value={closesOn} onChange={(event) => setClosesOn(event.target.value)} /><small>{closesOn ? `הקישור ייסגר בסוף היום הזה${customer && endOfDayMs(closesOn) >= deliveryDateIn(month, deliveryDay).getTime() ? ". שימו לב: אחרי מועד האספקה" : ""}` : "ללא תאריך: נסגר ידנית"}</small></label>
         <label className="full">הודעה לעובדים <small>(לא חובה)</small><textarea rows={2} maxLength={1000} value={note} placeholder="לדוגמה: המשלוח יגיע למשרד ביום חמישי ויחולק במטבחון בקומה 3" onChange={(event) => setNote(event.target.value)} /></label>
         <label className="full">קישור לתשלום <small>(לא חובה, עד שהסליקה תחובר: Bit, PayBox…)</small><input type="url" dir="ltr" maxLength={500} value={paymentUrl} placeholder="https://" onChange={(event) => setPaymentUrl(event.target.value)} />{paymentUrlInvalid && <small className="shop-field-error">הקישור צריך להתחיל ב-https://</small>}</label>
       </div>
@@ -262,12 +285,17 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
   onEdit: () => void;
   onBack: () => void;
 }) {
-  const summary = useMemo(() => summarizeShopCampaign(campaign, orders), [campaign, orders]);
-  const sorted = useMemo(() => sortOrders(orders).reverse(), [orders]);
+  // An order counts once it is paid; a draft left on the payment page is not shown.
+  const placed = useMemo(() => placedOrders(orders), [orders]);
+  const drafts = orders.length - placed.length;
+  const [showDrafts, setShowDrafts] = useState(false);
+  const summary = useMemo(() => summarizeShopCampaign(campaign, placed), [campaign, placed]);
+  const sorted = useMemo(() => sortOrders(showDrafts ? orders : placed).reverse(), [orders, placed, showDrafts]);
+  const month = campaignMonth(campaign);
   const [qr, setQr] = useState("");
   const [fullscreen, setFullscreen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState<ShopOrderStatus | "all">("all");
+  const [filter, setFilter] = useState<"paid" | "cancelled" | "all">("all");
   const url = shopPublicUrl(campaign.id);
   const state = campaignState(campaign);
   const takesOrders = isCampaignOpen(campaign);
@@ -294,7 +322,7 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
     link.click();
   };
   const exportCsv = () => {
-    const blob = new Blob(["﻿", shopCampaignCsv(campaign, orders)], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob(["﻿", shopCampaignCsv(campaign, placed)], { type: "text/csv;charset=utf-8" });
     const href = URL.createObjectURL(blob);
     download(href, `הזמנות עובדים - ${campaign.customerName} - ${new Date().toISOString().slice(0, 10)}.csv`);
     setTimeout(() => URL.revokeObjectURL(href), 1000);
@@ -338,7 +366,7 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
       <div className="customer-header tasting-detail-head">
         <div>
           <div className="header-line"><h2>{campaign.title}</h2><span className={`badge ${state.tone}`}>{state.label}</span></div>
-          <p>{showCustomer && `${campaign.customerName} · `}נפתחה {formatDate(campaign.createdAt)}{campaign.closesAtMs ? ` · הזמנות עד ${formatDate(campaign.closesAtMs)}` : ""}{campaign.closedAt && campaign.status === "closed" ? ` · נסגרה ${formatDate(campaign.closedAt)}` : ""}</p>
+          <p>{showCustomer && `${campaign.customerName} · `}יוצא עם המשלוח של {monthTitle(month)} · נפתחה {formatDate(campaign.createdAt)}{campaign.closesAtMs ? ` · הזמנות עד ${formatDate(campaign.closesAtMs)}` : ""}{campaign.closedAt && campaign.status === "closed" ? ` · נסגרה ${formatDate(campaign.closedAt)}` : ""}</p>
         </div>
         <div className="title-actions">
           <button onClick={exportCsv}><FileSpreadsheet size={16} /> ייצוא לאקסל</button>
@@ -351,18 +379,18 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
       </div>
 
       <div className="kpi-grid tasting-kpis">
-        <div className="kpi"><span>הזמנות</span><strong>{summary.orders}</strong><small>{summary.cancelled ? `ועוד ${summary.cancelled} שבוטלו` : takesOrders ? "מתעדכן בזמן אמת" : "סה״כ במכירה"}</small></div>
+        <div className="kpi"><span>עובדים שהזמינו</span><strong>{summary.paid}</strong><small>{summary.cancelled ? `ועוד ${summary.cancelled} שבוטלו` : takesOrders ? "מתעדכן בזמן אמת" : "סה״כ במכירה"}</small></div>
         <div className="kpi"><span>שקיות להכנה</span><strong>{summary.units}</strong><small>{SHOP_UNIT} כל אחת</small></div>
-        <div className="kpi"><span>נגבה</span><strong>{formatShekel(summary.collected)}</strong><small>{summary.paid} הזמנות שולמו</small></div>
-        <div className="kpi"><span>ממתין לתשלום</span><strong>{formatShekel(summary.outstanding)}</strong><small>{summary.pending} הזמנות</small></div>
+        <div className="kpi"><span>נגבה</span><strong>{formatShekel(summary.collected)}</strong><small>כולל מע״מ</small></div>
+        <div className="kpi"><span>משלוח</span><strong>{monthTitle(month)}</strong><small>יחד עם הקפה של החברה</small></div>
       </div>
 
       <div className="tasting-detail-grid">
         <section className="panel shop-packing">
-          <div className="panel-head"><div><h3>רשימת הכנה</h3><p>כמה שקיות לקלות ולארוז, לפי קפה וטחינה. בלי הזמנות שבוטלו.</p></div></div>
+          <div className="panel-head"><div><h3>רשימת הכנה</h3><p>כמה שקיות לארוז, לפי קפה וטחינה. ההזמנה מופיעה גם בלשונית &quot;הזמנות קפה&quot; של הלקוח, ליד הקפה של החברה.</p></div></div>
           {summary.lines.length
-            ? <div className="table-wrap"><table><thead><tr><th>קפה</th><th>טחינה</th><th>שקיות</th><th>מתוכן שולמו</th><th>מזמינים</th></tr></thead><tbody>
-                {summary.lines.map((line) => <tr key={line.key}><td><strong><bdi>{line.item.name}</bdi></strong></td><td>{grindLabel(line.grind)}</td><td><strong>{line.quantity}</strong></td><td>{line.paidQuantity}</td><td>{line.buyers}</td></tr>)}
+            ? <div className="table-wrap"><table><thead><tr><th>קפה</th><th>טחינה</th><th>שקיות</th><th>מזמינים</th></tr></thead><tbody>
+                {summary.lines.map((line) => <tr key={line.key}><td><strong><bdi>{line.item.name}</bdi></strong></td><td>{grindLabel(line.grind)}</td><td><strong>{line.quantity}</strong></td><td>{line.buyers}</td></tr>)}
               </tbody></table></div>
             : <div className="inline-empty">עדיין אין הזמנות.</div>}
         </section>
@@ -386,8 +414,8 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
         <div className="panel-head">
           <div><h3>הזמנות העובדים</h3><p>{shopApiUrl ? "סימון \"שולם\" מפיק חשבונית מס קבלה ברווחית ושולח אותה לעובד במייל." : "מסמנים כאן תשלום ומספר חשבונית. כשרווחית תחובר, החשבונית תופק לבד."}</p></div>
           <div className="tabs shop-order-filter">
-            {(["all", "pending", "paid", "cancelled"] as const).map((key) => <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>
-              {key === "all" ? "הכול" : SHOP_ORDER_STATUS_LABELS[key]} <small>{key === "all" ? orders.length : orders.filter((order) => order.status === key).length}</small>
+            {(["all", "paid", "cancelled"] as const).map((key) => <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>
+              {key === "all" ? "הכול" : SHOP_ORDER_STATUS_LABELS[key]} <small>{key === "all" ? placed.length : placed.filter((order) => order.status === key).length}</small>
             </button>)}
           </div>
         </div>
@@ -408,7 +436,8 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
                     : <input className="shop-invoice-input" key={order.invoiceNumber || ""} defaultValue={order.invoiceNumber || ""} maxLength={60} placeholder="—" aria-label={`מספר חשבונית של ${order.fullName}`} onBlur={(event) => { if (guard()) setInvoice(order, event.target.value.trim()); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />}</td>
               </tr>)}
             </tbody></table></div>
-          : <div className="inline-empty">{orders.length ? "אין הזמנות בסטטוס הזה." : "עדיין לא התקבלו הזמנות. שלחו את הקישור לעובדים."}</div>}
+          : <div className="inline-empty">{placed.length ? "אין הזמנות בסטטוס הזה." : "עדיין לא התקבלו הזמנות. שלחו את הקישור לעובדים."}</div>}
+        {drafts > 0 && <button className="text-btn shop-drafts-toggle" onClick={() => setShowDrafts((value) => !value)}>{showDrafts ? "הסתרת טיוטות" : `${drafts} עובדים פתחו את דף התשלום ולא שילמו (לבדיקה בלבד)`}</button>}
       </section>
 
       {fullscreen && <div className="tasting-fullscreen" onClick={() => setFullscreen(false)} role="dialog" aria-label="קוד QR במסך מלא">

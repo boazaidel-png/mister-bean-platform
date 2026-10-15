@@ -303,7 +303,13 @@ service cloud.firestore {
         && data.get('pricePerKg', 0) is number
         && data.get('pricePerKg', 0) >= 0 && data.get('pricePerKg', 0) <= 100000
         && data.get('costPerKg', 0) is number
-        && data.get('costPerKg', 0) >= 0 && data.get('costPerKg', 0) <= 100000;
+        && data.get('costPerKg', 0) >= 0 && data.get('costPerKg', 0) <= 100000
+        // An employee sale carries its bags and who gets them, written by the office only.
+        && shortString(data.get('shopCampaignId', ''), 160)
+        && data.get('employeeLines', []) is list
+        && data.get('employeeLines', []).size() <= 200
+        && data.get('recipients', []) is list
+        && data.get('recipients', []).size() <= 1000;
     }
 
     // A customer confirms the open order. The contract quantity is the
@@ -507,7 +513,7 @@ service cloud.firestore {
     function validShopCampaign(data, documentId) {
       return data.keys().hasOnly([
           'id', 'accountId', 'customerName', 'title', 'status', 'items',
-          'closesAtMs', 'note', 'paymentUrl', 'createdAt', 'updatedAt',
+          'closesAtMs', 'month', 'note', 'paymentUrl', 'createdAt', 'updatedAt',
           'createdBy', 'closedAt'
         ])
         && data.id == documentId
@@ -521,6 +527,7 @@ service cloud.firestore {
         && data.items.size() <= 30
         && data.closesAtMs is number
         && data.closesAtMs >= 0
+        && (data.get('month', '') == '' || data.get('month', '').matches('^[0-9]{4}-[0-9]{2}$'))
         && shortString(data.note, 1000)
         && shortString(data.paymentUrl, 500)
         && (data.paymentUrl == '' || data.paymentUrl.matches('^https://.+'))
