@@ -56,6 +56,17 @@ export function deliveryRecipients(orders: Order[]): EmployeeRecipient[] {
     .sort((left, right) => left.name.localeCompare(right.name, "he"));
 }
 
+/**
+ * "DX+ · פולים × 2, HB+ · טחון לאספרסו × 1" as its parts, so a Latin coffee
+ * name can be set apart and "DX+" does not show as "+DX" in a Hebrew line.
+ */
+export function itemParts(items: string) {
+  return items.split(", ").filter(Boolean).map((part) => {
+    const [coffee, ...rest] = part.split(" · ");
+    return { coffee, rest: rest.join(" · ") };
+  });
+}
+
 const escapeHtml = (value: string | number) => String(value)
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
@@ -71,7 +82,7 @@ export function deliverySheetHtml(input: { customerName: string; monthTitle: str
   const bags = rows.reduce((sum, row) => sum + row.employeeBags, 0);
   const e = escapeHtml;
   const prep = rows.map((row) => `<tr><td><b><bdi>${e(row.coffee)}</bdi></b></td><td>${row.companyKg ? `${row.companyKg} ק״ג` : "—"}</td><td>${row.grinds.map((item) => `${e(item.grind)} × ${item.bags}`).join("<br>") || "—"}</td><td><b>${row.totalKg} ק״ג</b></td></tr>`).join("");
-  const people = recipients.map((person, index) => `<tr><td>${index + 1}</td><td><b>${e(person.name)}</b></td><td>${e(person.department) || "—"}</td><td>${e(person.items)}</td><td class="box"></td></tr>`).join("");
+  const people = recipients.map((person, index) => `<tr><td>${index + 1}</td><td><b>${e(person.name)}</b></td><td>${e(person.department) || "—"}</td><td>${itemParts(person.items).map((part) => `<bdi>${e(part.coffee)}</bdi>${part.rest ? ` · ${e(part.rest)}` : ""}`).join("<br>")}</td><td class="box"></td></tr>`).join("");
   return `<!doctype html><html lang="he" dir="rtl"><head><meta charset="utf-8"><title>${e(`משלוח קפה - ${input.customerName} - ${input.monthTitle}`)}</title>
 <style>
 body{font-family:Arial,"Heebo",sans-serif;color:#2e2723;margin:32px;font-size:14px}

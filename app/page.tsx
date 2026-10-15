@@ -100,7 +100,7 @@ import { BLEND_CATALOG, findKnownBlend, knownBlends } from "@/lib/blend-catalog"
 import { contractMonthlyKg, currentMonthKey, syncContractOrders } from "@/lib/order-sync";
 import { syncEmployeeOrders } from "@/lib/shop-engine";
 import { subscribeToShopCampaigns, subscribeToShopOrders } from "@/lib/shop-store";
-import { deliveryPrep, deliveryRecipients, openDeliverySheet } from "@/lib/delivery-sheet";
+import { deliveryPrep, deliveryRecipients, itemParts, openDeliverySheet } from "@/lib/delivery-sheet";
 import { CONTACT_OFFICE_MESSAGE, contractOrdersOnly, DELIVERY_PREFERENCES, extraAllowanceKg, highConsumption, deliveredThisMonthKg, deliveryPreferenceLabel, isExtraOrder, MAX_EXTRA_ORDER_KG, newExtraOrder, nextContractDelivery, openExtraOrders, validateExtraOrder } from "@/lib/extra-orders";
 import { buildNotifications, type AppNotification } from "@/lib/notifications";
 import { NotificationBell } from "@/components/notification-bell";
@@ -1125,7 +1125,7 @@ function CustomerOrders({orders,onChange,accountId="",onCreateExtra}:{orders:Ord
       {o?<><section className="order-hero"><div><span>{o.status==="סופק"?"תאריך אספקה":"מועד האספקה הבא"}</span><h2>{o.deliveredAt?formatDate(o.deliveredAt):customer?formatDate(nextDeliveryDate(customer,o)):formatDate(`${o.month}-01`)}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{Math.round(o.requestedKg)}</strong><span>ק״ג</span></div></section><OrderEditor key={o.id} order={o} blends={customer?.contractBlends||[]} deliveryDate={customer?nextDeliveryDate(customer,o):`${o.month}-01`} onSave={onChange}/></>:<section className="panel inline-empty">אין עדיין הזמנה חודשית.</section>}
       {employeeRows.map(item=><section className="panel customer-employee-order" key={item.id}>
         <div className="panel-head"><div><h3>קפה לעובדים · {monthTitle(item.month)}</h3><p>{Math.round(item.approvedKg)} שקיות של {item.recipients!.length} עובדים, מגיעות יחד עם משלוח הקפה{item.status==="סופק"?"":customer?` ב־${formatDate(nextDeliveryDate(customer,item))}`:""}.</p></div><button onClick={()=>printEmployees(item)}>רשימת חלוקה להדפסה</button></div>
-        <ol className="ob-recipients">{item.recipients!.map((person,index)=><li key={`${person.name}-${index}`}><strong>{person.name}</strong>{person.department&&<small>{person.department}</small>}<span>{person.items}</span></li>)}</ol>
+        <ol className="ob-recipients">{item.recipients!.map((person,index)=><li key={`${person.name}-${index}`}><strong>{person.name}</strong>{person.department&&<small>{person.department}</small>}<span><ItemsText items={person.items}/></span></li>)}</ol>
       </section>)}
       {others.length>0&&<section className="panel customer-order-history"><h3>הזמנות נוספות</h3>{others.map(item=><div key={item.id}><strong>{isExtraOrder(item)?`השלמה · ${formatDate(item.createdAt||`${item.month}-01`)}`:monthName(item.month)}</strong><span>{Math.round(item.approvedKg||item.requestedKg)} ק״ג · {item.blend}{isExtraOrder(item)&&deliveryPreferenceLabel(item)&&!item.deliveredAt?` · אספקה ${deliveryPreferenceLabel(item)}`:""}{item.deliveredAt?` · סופק ${formatDate(item.deliveredAt)}`:""}</span><Badge>{item.status}</Badge></div>)}</section>}
       {extraOpen&&customer&&onCreateExtra&&<ExtraOrderModal customer={customer} orders={orders} onClose={()=>setExtraOpen(false)} onSubmit={order=>{onCreateExtra(order);setExtraOpen(false);}}/>}
@@ -1258,6 +1258,9 @@ function OrderDrawer({row,activities,plannedDate,onClose,onOrderChange,onPrint}:
     </ol></section>
   </aside></div>;
 }
+/** One employee's items, a line each, with the coffee name kept left to right. */
+function ItemsText({items}:{items:string}){return <>{itemParts(items).map((part,index)=><span className="ob-item" key={index}><bdi>{part.coffee}</bdi>{part.rest&&` · ${part.rest}`}</span>)}</>;}
+
 /** What the employees ordered: bags per coffee and grind, and who gets what. */
 function EmployeeSaleDetails({order,value,onPrint}:{order:Order;value:number;onPrint:()=>void}) {
   const lines=order.employeeLines||[],people=order.recipients||[];
@@ -1270,7 +1273,7 @@ function EmployeeSaleDetails({order,value,onPrint}:{order:Order;value:number;onP
     {lines.length?<table className="ob-mini-table"><thead><tr><th>קפה</th><th>טחינה</th><th>שקיות</th></tr></thead><tbody>{lines.map(line=><tr key={`${line.coffee}-${line.grind}`}><td><bdi>{line.coffee}</bdi></td><td>{line.grind}</td><td><strong>{line.bags}</strong></td></tr>)}</tbody></table>:<p className="ob-note">עדיין אין הזמנות ששולמו.</p>}
     </section>
     <section><h4>רשימת חלוקה</h4>
-      {people.length?<ol className="ob-recipients">{people.map((person,index)=><li key={`${person.name}-${index}`}><strong>{person.name}</strong>{person.department&&<small>{person.department}</small>}<span>{person.items}</span></li>)}</ol>:<p className="ob-note">הרשימה תתמלא כשעובדים ישלמו.</p>}
+      {people.length?<ol className="ob-recipients">{people.map((person,index)=><li key={`${person.name}-${index}`}><strong>{person.name}</strong>{person.department&&<small>{person.department}</small>}<span><ItemsText items={person.items}/></span></li>)}</ol>:<p className="ob-note">הרשימה תתמלא כשעובדים ישלמו.</p>}
       <button className="primary ob-print" onClick={onPrint}>רשימת משלוח להדפסה ולשליחה</button>
       <p className="ob-note">כל עובד שילם בעצמו וקיבל חשבונית מס קבלה במייל.</p>
     </section>
