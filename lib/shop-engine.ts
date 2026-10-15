@@ -235,6 +235,18 @@ export function campaignMonth(campaign: Pick<ShopCampaign, "month" | "closesAtMs
   return monthOf(campaign.closesAtMs ? new Date(campaign.closesAtMs) : new Date(campaign.createdAt));
 }
 
+/** Letters and digits that cannot be mistaken for each other (no 0/o, 1/l/i). */
+const CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz";
+
+/**
+ * A short random code for a sale's link. Seven characters give over 27
+ * billion codes; a sale is read only by its exact code, never listed.
+ */
+export function shortCode(length = 7) {
+  const bytes = crypto.getRandomValues(new Uint8Array(length));
+  return Array.from(bytes, (byte) => CODE_ALPHABET[byte % CODE_ALPHABET.length]).join("");
+}
+
 export const employeeOrderId = (campaignId: string) => `emp-${campaignId}`;
 
 /** The office has taken the order past preparing it: its contents stay as they were sent. */

@@ -7,6 +7,7 @@ import {
   employeeOrderFor,
   endOfDayMs,
   nextShopDelivery,
+  shortCode,
   syncEmployeeOrders,
   grindForMethod,
   icreditPaymentRequest,
@@ -271,4 +272,10 @@ test("the delivery list puts the company's coffee and the employee bags together
   assert.match(forCustomer, /רשימת חלוקה/);
   assert.match(forCustomer, /טחון למקינטה|פולים/);
   assert.doesNotMatch(forCustomer, /סיכום לפי סוג קפה|לחברה|להכנה/);
+});
+
+test("a sale's link code is short and easy to read aloud", () => {
+  const codes = new Set(Array.from({ length: 200 }, () => shortCode()));
+  assert.equal(codes.size, 200);
+  for (const code of codes) assert.match(code, /^[2-9a-hjkmnp-z]{7}$/);
 });

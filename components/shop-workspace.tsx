@@ -35,6 +35,7 @@ import {
   subscribeToShopCampaigns,
   subscribeToShopOrders,
   issueShopInvoice,
+  newShopCampaignId,
   shopApiUrl,
   updateShopOrderPayment,
 } from "@/lib/shop-store";
@@ -191,8 +192,16 @@ function CampaignModal({ campaign, orders, customers, fixedCustomer, actor, onCl
     if (!customer || !included.length || included.length > MAX_SHOP_ITEMS || invalid || paymentUrlInvalid || saving) return;
     setSaving(true);
     const now = new Date().toISOString();
+    let id = campaign?.id || "";
+    try {
+      if (!id) id = await newShopCampaignId();
+    } catch (error) {
+      onError(error);
+      setSaving(false);
+      return;
+    }
     const next: ShopCampaign = {
-      id: campaign?.id || createShopId("shop"),
+      id,
       accountId: customer.id,
       customerName: customer.name,
       title: title.trim() || defaultTitle,
