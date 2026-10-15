@@ -5,7 +5,7 @@ export const BLEND_CATALOG = [
   { name: "EMERALD", cost: 50 },
   { name: "DX", cost: 60 },
   { name: "HB+", cost: 70 },
-  { name: "TUSCANINI", cost: 70 },
+  { name: "TOSCANINI", cost: 70 },
   { name: "PEGANINI", cost: 70 },
   { name: "STRADIVARI", cost: 90 },
 ];
@@ -13,6 +13,20 @@ export const BLEND_CATALOG = [
 export type KnownBlend = { name: string; costPerKg: number; pricePerKg: number };
 
 const blendKey = (name: string) => name.trim().toLowerCase();
+
+// Blends whose name was corrected; records saved under the old name show the new one.
+const RENAMED_BLENDS: Record<string, string> = { tuscanini: "TOSCANINI" };
+
+export const canonicalBlendName = (name: string) => RENAMED_BLENDS[blendKey(name || "")] || name;
+
+/** A customer card with its blend names corrected (see RENAMED_BLENDS). */
+export function withCanonicalBlends<T extends Pick<Customer, "contractBlends" | "profitabilityBlends">>(customer: T): T {
+  return {
+    ...customer,
+    ...(customer.contractBlends ? { contractBlends: customer.contractBlends.map(canonicalBlendName) } : {}),
+    ...(customer.profitabilityBlends ? { profitabilityBlends: customer.profitabilityBlends.map((item) => ({ ...item, name: canonicalBlendName(item.name) })) } : {}),
+  };
+}
 
 /**
  * Every blend this customer can be sold, with the best known cost and price:

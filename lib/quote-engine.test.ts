@@ -10,6 +10,7 @@ import {
   recommendedConsumptionKg,
   setAllocationField,
   syncAutomaticAddons,
+  machinesMissingForQuote,
 } from "./quote-engine.ts";
 
 const machine = (quantity: number): QuoteEquipment => ({
@@ -19,7 +20,7 @@ const machine = (quantity: number): QuoteEquipment => ({
   unitCost: 4090,
   importer: "tavor",
   capacityPerDay: 100,
-  addonKeys: ["fridge", "filter", "install"],
+  addonKeys: ["fridge", "osmosis", "install"],
   commercialModel: "ללא עלות",
   monthlyPrice: 0,
 });
@@ -93,13 +94,14 @@ test("machine quantity automatically creates the correct accessory quantities", 
     equipment.map((item) => [item.key, item.quantity]),
   );
   assert.equal(quantities.fridge, 2);
-  assert.equal(quantities.filter, 2);
+  assert.equal(quantities.osmosis, 2);
+  assert.equal(quantities.filter, undefined);
   assert.equal(quantities.install, 2);
 });
 
 test("saved equipment defaults to manual mode and keeps explicit overrides", () => {
   const equipment = syncAutomaticAddons([machine(9)]).map((item) =>
-    item.key === "fridge" || item.key === "filter" || item.key === "install"
+    item.key === "fridge" || item.key === "osmosis" || item.key === "install"
       ? { ...item, quantity: 8 }
       : item,
   );
@@ -199,9 +201,9 @@ test("quote totals include the machine and its synchronized package", () => {
   const quote = baseQuote(syncAutomaticAddons([machine(1)]));
   const result = calculateQuote(quote);
   assert.equal(result.consumption.recommendedKg, 38);
-  assert.equal(result.equipment.total, 5331);
-  assert.equal(result.equipment.uncoveredCost, 5331);
-  assert.equal(result.equipment.supplierPayment, 5331 / 8);
+  assert.equal(result.equipment.total, 5431);
+  assert.equal(result.equipment.uncoveredCost, 5431);
+  assert.equal(result.equipment.supplierPayment, 5431 / 8);
   assert.ok(Math.abs(result.beans.costPerCup - 1.2) < 0.000001);
 });
 
@@ -351,17 +353,17 @@ test("a loan is cashflow, not profit, and equipment is paid at purchase", () => 
     ...baseQuote(equipment),
     financingType: "loan" as const,
     financingMonths: 24,
-    financedAmount: 5331,
+    financedAmount: 5431,
   };
   const result = calculateQuote(quote);
 
   assert.equal(result.financing.unfinancedEquipment, 0);
   assert.equal(result.equipment.supplierPayment, 0);
-  assert.equal(result.cashflow.rows[0].financingIn, 5331);
-  assert.equal(result.cashflow.rows[0].equipmentPayment, 5331);
+  assert.equal(result.cashflow.rows[0].financingIn, 5431);
+  assert.equal(result.cashflow.rows[0].equipmentPayment, 5431);
   assert.equal(result.cashflow.rows[1].equipmentPayment, 0);
-  assert.equal(result.cashflow.rows[0].loanPayment, 5331 / 24);
-  assert.equal(result.profitability.totalEquipmentEconomicCost, 5331);
+  assert.equal(result.cashflow.rows[0].loanPayment, 5431 / 24);
+  assert.equal(result.profitability.totalEquipmentEconomicCost, 5431);
   assert.ok(
     Math.abs(
       result.cashflow.finalBalanceAfterLiabilities -
@@ -381,7 +383,7 @@ test("supplier installments and loan repayments are not counted together by defa
     combineFinancingAndSupplier: false,
   });
 
-  assert.equal(result.cashflow.rows[0].equipmentPayment, 5331);
+  assert.equal(result.cashflow.rows[0].equipmentPayment, 5431);
   assert.equal(result.cashflow.rows[1].equipmentPayment, 0);
   assert.ok(result.cashflow.rows[0].loanPayment > 0);
 });
@@ -392,14 +394,14 @@ test("loan interest reduces true profit and final cash by the same amount", () =
     ...baseQuote(equipment),
     financingType: "loan",
     financingMonths: 12,
-    financedAmount: 5331,
+    financedAmount: 5431,
     annualInterest: 0,
   });
   const withInterest = calculateQuote({
     ...baseQuote(equipment),
     financingType: "loan",
     financingMonths: 12,
-    financedAmount: 5331,
+    financedAmount: 5431,
     annualInterest: 12,
   });
 
@@ -430,9 +432,9 @@ test("an explicit combined structure spreads only the unfinanced equipment", () 
     combineFinancingAndSupplier: true,
   });
 
-  assert.equal(result.cashflow.rows[0].equipmentPayment, 3000 + 2331 / 8);
-  assert.equal(result.cashflow.rows[1].equipmentPayment, 2331 / 8);
-  assert.equal(result.cashflow.rows[7].equipmentPayment, 2331 / 8);
+  assert.equal(result.cashflow.rows[0].equipmentPayment, 3000 + 2431 / 8);
+  assert.equal(result.cashflow.rows[1].equipmentPayment, 2431 / 8);
+  assert.equal(result.cashflow.rows[7].equipmentPayment, 2431 / 8);
   assert.equal(result.cashflow.rows[8].equipmentPayment, 0);
 });
 
@@ -466,7 +468,7 @@ test("every cashflow row exposes the running cumulative balance", () => {
     ...baseQuote(syncAutomaticAddons([machine(1)])),
     financingType: "loan",
     financingMonths: 12,
-    financedAmount: 5331,
+    financedAmount: 5431,
   });
 
   let runningBalance = 0;
@@ -540,4 +542,26 @@ test("moving units to rental takes them from the free column", () => {
   const mixed = setAllocationField({ key: "m", free: 3, lease: 0, sale: 0 }, 3, "sale", 1);
   assert.deepEqual(setAllocationField(mixed, 3, "lease", 2), { key: "m", free: 0, lease: 2, sale: 1 });
   assert.deepEqual(setAllocationField(start, 1, "free", 0), { key: "m", free: 0, lease: 0, sale: 0 });
+});
+
+test("a customer working from a quote gets the quote's machines it is missing, once", () => {
+  const quote = {
+    id: "q1",
+    equipment: [
+      { key: "c12", model: "DR. COFFEE C-12", quantity: 2, unitCost: 3350, commercialModel: "השכרה" as const, monthlyPrice: 0 },
+      { key: "osmosis", model: "אוסמוזה", quantity: 2, unitCost: 550, commercialModel: "ללא עלות" as const, monthlyPrice: 0 },
+      { key: "install", model: "התקנה", quantity: 2, unitCost: 200, commercialModel: "ללא עלות" as const, monthlyPrice: 0 },
+    ],
+  };
+  const first = machinesMissingForQuote(quote, [], "a", "סניף", "2026-10-12");
+  assert.deepEqual(first.map((machine) => [machine.model, machine.waterSystem, machine.commercial]), [
+    ["DR. COFFEE C-12", "osmosis", "השכרה"],
+    ["DR. COFFEE C-12", "osmosis", "השכרה"],
+  ]);
+  assert.equal(machinesMissingForQuote(quote, first, "a", "סניף", "2026-10-12").length, 0);
+  // A new version of the quote with a third machine adds only that one.
+  const v2 = { ...quote, id: "q2", equipment: quote.equipment.map((item) => ({ ...item, quantity: 3 })) };
+  assert.equal(machinesMissingForQuote(v2, first, "a", "סניף", "2026-10-12").length, 1);
+  // A returned machine no longer counts.
+  assert.equal(machinesMissingForQuote(quote, [{ ...first[0], status: "הוחזרה" }, first[1]], "a", "סניף", "2026-10-12").length, 1);
 });

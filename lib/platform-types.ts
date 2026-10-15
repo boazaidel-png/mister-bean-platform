@@ -166,9 +166,13 @@ export type MonthlyProfitability = {
   equipmentCost: number;
   otherCost: number;
   status: "draft" | "closed";
+  /** One-off costs of this month, beyond what the approved quote plans. */
+  extraCosts?: MonthlyExtraCost[];
   createdAt: string;
   updatedAt: string;
 };
+
+export type MonthlyExtraCost = { id: string; label: string; amount: number; createdAt: string };
 
 export type CustomerNote = {
   id: string;
@@ -210,6 +214,20 @@ export type TicketEvent = {
   visibleToCustomer?: boolean;
 };
 
+/** What the customer answered when opening a service call (see lib/ticket-intake.ts). */
+export type TicketIntake = {
+  safety: string;
+  /** A danger sign or "not sure": handled as a safety case, not by remote guidance. */
+  safetyReview: boolean;
+  impact: string;
+  startedWhen: string;
+  /** Optional date and time the fault started. */
+  startedAt?: string;
+  screen: string;
+  screenMessage?: string;
+  recurrence: string;
+};
+
 export type Ticket = {
   id: string;
   accountId: string;
@@ -238,6 +256,7 @@ export type Ticket = {
   customerConfirmedBy?: string;
   customerConfirmedAt?: string;
   events?: TicketEvent[];
+  intake?: TicketIntake;
   attachments?: Array<{
     name: string;
     url?: string;
@@ -246,6 +265,8 @@ export type Ticket = {
     uploadedAt: string;
   }>;
 };
+
+export type OrderKind = "contract" | "extra" | "company_extra" | "employees";
 
 export type Order = {
   id: string;
@@ -263,8 +284,15 @@ export type Order = {
   deliveryNoteSent?: boolean;
   /** When the customer last confirmed or changed the order themselves. */
   customerConfirmedAt?: string;
-  /** "extra": a top-up the customer asked for during the month, on top of the contract order. */
-  kind?: "contract" | "extra";
+  /**
+   * contract: the month's order under the agreement (also when unset);
+   * extra: a top-up the customer asked for; company_extra and employees:
+   * sales the office enters.
+   */
+  kind?: OrderKind;
+  /** Price and cost per kilogram fixed when the order was entered (not used for contract orders). */
+  pricePerKg?: number;
+  costPerKg?: number;
   /** For a top-up: when the customer wants it delivered. */
   deliveryPreference?: DeliveryPreference;
   /** For a top-up delivered on a chosen date (yyyy-mm-dd). */

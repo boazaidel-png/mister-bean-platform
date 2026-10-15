@@ -14,7 +14,8 @@ export const ORDER_PREP_DAYS = 4;
 export const SERVICE_TASK_NOTICE_DAYS = 14;
 
 const CLOSED_ORDER = ["סופק", "בוטל"];
-const AWAITING_CUSTOMER = ["לפי חוזה", "ממתין לעדכון לקוח"];
+// "לפי חוזה" is the retired name of "ממתין לעדכון לקוח", kept for older orders.
+const AWAITING_CUSTOMER = ["ממתין לעדכון לקוח", "לפי חוזה"];
 const OFFICE = "מנהל המערכת";
 
 const safeKey = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -35,7 +36,7 @@ export function upcomingDelivery(customer: Customer, orders: Order[], today: str
   for (const month of [thisMonth, addMonth(thisMonth)]) {
     const date = deliveryDate(customer, month);
     // Top-ups the customer ordered during the month are not the contract delivery.
-    const order = orders.find((item) => item.accountId === customer.id && item.month === month && item.kind !== "extra");
+    const order = orders.find((item) => item.accountId === customer.id && item.month === month && (item.kind ?? "contract") === "contract");
     if (date >= today && !CLOSED_ORDER.includes(order?.status || "")) return { month, date, order };
   }
   const month = addMonth(addMonth(thisMonth));
@@ -83,7 +84,7 @@ export function planDailyRun(input: {
 
     let order = existing;
     if (!order) {
-      order = syncContractOrders(ownOrders, [customer], month, undefined, now).find((item) => item.month === month && item.kind !== "extra");
+      order = syncContractOrders(ownOrders, [customer], month, undefined, now).find((item) => item.month === month && (item.kind ?? "contract") === "contract");
       if (!order) continue;
       plan.newOrders.push(order);
     }

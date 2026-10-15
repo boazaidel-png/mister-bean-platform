@@ -37,7 +37,11 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { canonicalBlendName, withCanonicalBlends } from "./blend-catalog";
 import { getFirebaseServices } from "./firebase-client";
+import { changedEntities, entityKeysOf } from "./store-diff";
+import { LEGACY_NEW_ORDER_STATUS, NEW_ORDER_STATUS } from "./order-sync";
+import { machinesMissingForQuote } from "./quote-engine";
 import {
   defaultProfileAccess,
   isBootstrapAdminEmail,
@@ -72,16 +76,6 @@ import type {
 } from "./platform-types";
 
 const entityKeys = ["tickets", "orders", "tasks", "machines", "activities", "profitability"] as const;
-const legacyAddonKeys = new Set([
-  "fridge",
-  "filter",
-  "install",
-  "frother",
-  "osmosis",
-  "ypeper_fridge",
-  "ypeper_filter",
-  "ypeper_install",
-]);
 type EntityKey = (typeof entityKeys)[number];
 type Entity = Ticket | Order | Task | Machine | Activity | MonthlyProfitability;
 
@@ -126,12 +120,21 @@ function normalizeLeadRecord(value: Lead): Lead {
   };
 }
 
+/** Older orders: the retired "לפי חוזה" status and renamed blends read as today's. */
+function normalizeOrderRecord(order: Order): Order {
+  return {
+    ...order,
+    status: order.status === LEGACY_NEW_ORDER_STATUS ? NEW_ORDER_STATUS : order.status,
+    blend: canonicalBlendName(order.blend),
+  };
+}
+
 function normalizeQuoteRecord(value: Quote): Quote {
   return {
     ...value,
     // Older or partial records may lack these lists; the quote editor maps over them.
     blends: (Array.isArray(value.blends) ? value.blends : []).map((blend) => ({
-      name: blend?.name || "",
+      name: canonicalBlendName(blend?.name || ""),
       quantityKg: Number(blend?.quantityKg) || 0,
       costPerKg: Number(blend?.costPerKg) || 0,
       pricePerKg: Number(blend?.pricePerKg) || 0,
@@ -353,19 +356,27 @@ export async function getOrCreateUserProfile(user: User): Promise<UserProfile> {
   return profile;
 }
 
+/**
+ * How many recent activity entries the app loads. The log only grows, and
+ * loading all of it (tens of thousands of entries) held up every screen;
+ * the screens show recent activity only.
+ */
+export const RECENT_ACTIVITY_LIMIT = 300;
+
 function queryFor(
   key: EntityKey,
   profile: UserProfile,
   accountId?: string,
 ): Query<DocumentData> {
   const { db } = getFirebaseServices();
+  const recentOnly = key === "activities" ? [orderBy("createdAt", "desc"), limit(RECENT_ACTIVITY_LIMIT)] : [];
   if (profile.role === "admin" || profile.role === "service") {
-    return query(collectionGroup(db, key));
+    return query(collectionGroup(db, key), ...recentOnly);
   }
   if (!accountId) {
     throw new Error("למשתמש עדיין לא שויך חשבון לקוח.");
   }
-  return query(collection(db, "accounts", accountId, key));
+  return query(collection(db, "accounts", accountId, key), ...recentOnly);
 }
 
 export function subscribeToPlatformStore(
@@ -409,6 +420,7 @@ export function subscribeToPlatformStore(
       profitability: [...buckets.profitability.values()] as MonthlyProfitability[],
     };
     lastSyncedStore = next;
+    entityKeysOf(next).forEach((key) => seenEntityKeys.add(key));
     onStore(next);
   };
 
@@ -422,7 +434,8 @@ export function subscribeToPlatformStore(
             if (change.type === "removed") {
               buckets[key].delete(mapKey);
             } else {
-              buckets[key].set(mapKey, change.doc.data() as Entity);
+              const data = change.doc.data() as Entity;
+              buckets[key].set(mapKey, key === "orders" ? normalizeOrderRecord(data as Order) : data);
             }
           }
           readySubscriptions.add(`${key}:${accountId || "all"}`);
@@ -479,7 +492,7 @@ export function subscribeToCustomers(
       (snapshot) => {
         onCustomers(
           snapshot.docs
-            .map((account) => account.data() as Customer)
+            .map((account) => withCanonicalBlends(account.data() as Customer))
             .sort((a, b) => a.name.localeCompare(b.name, "he")),
         );
       },
@@ -493,7 +506,7 @@ export function subscribeToCustomers(
       doc(db, "accounts", accountId),
       (snapshot) => {
         if (snapshot.exists()) {
-          accountMaps.set(accountId, snapshot.data() as Customer);
+          accountMaps.set(accountId, withCanonicalBlends(snapshot.data() as Customer));
           onCustomers([...accountMaps.values()]);
         }
       },
@@ -655,34 +668,6 @@ export async function revokeUserAccess(user: UserProfile) {
   await batch.commit();
 }
 
-function changedEntities(next: PlatformStore, previous: PlatformStore | null) {
-  const changes: Array<{
-    key: Exclude<EntityKey, "activities">;
-    entity: Exclude<Entity, Activity>;
-    action: "created" | "updated" | "deleted";
-  }> = [];
-  for (const key of entityKeys) {
-    if (key === "activities") continue;
-    const before = new Map(
-      (previous?.[key] || []).map((entity) => [entity.id, entity]),
-    );
-    for (const entity of next[key]) {
-      const previousEntity = before.get(entity.id);
-      if (JSON.stringify(previousEntity) !== JSON.stringify(entity)) {
-        changes.push({
-          key,
-          entity,
-          action: previousEntity ? "updated" : "created",
-        });
-      }
-      before.delete(entity.id);
-    }
-    for (const entity of before.values()) {
-      changes.push({ key, entity, action: "deleted" });
-    }
-  }
-  return changes;
-}
 
 const activityEntityNames = {
   tickets: "קריאת שירות",
@@ -693,14 +678,22 @@ const activityEntityNames = {
 } as const;
 
 let platformSaveQueue: Promise<void> = Promise.resolve();
+// Everything the database has sent this session, so a save never re-creates what was removed elsewhere.
+const seenEntityKeys = new Set<string>();
+
+/** A save that some changes could not make; the rest were saved. */
+export class PartialSaveError extends Error {
+  constructor(readonly failed: string[], readonly cause?: unknown) {
+    super(`platform/partial-save:${failed.join(", ")}`);
+  }
+}
 
 async function persistPlatformStore(next: PlatformStore, actor?: UserProfile) {
-  const changes = changedEntities(next, lastSyncedStore);
+  const changes = changedEntities(next, lastSyncedStore, seenEntityKeys);
   if (!changes.length) return;
 
   const { db } = getFirebaseServices();
-  const batch = writeBatch(db);
-  for (const { key, entity, action } of changes) {
+  const writeChange = (batch: ReturnType<typeof writeBatch>, { key, entity, action }: (typeof changes)[number]) => {
     const entityRef = doc(db, "accounts", entity.accountId, key, entity.id);
     if (action === "deleted") batch.delete(entityRef);
     else batch.set(entityRef, withoutUndefined(entity));
@@ -720,9 +713,36 @@ async function persistPlatformStore(next: PlatformStore, actor?: UserProfile) {
         createdAt: new Date().toISOString(),
       });
     }
+  };
+
+  try {
+    const batch = writeBatch(db);
+    changes.forEach((change) => writeChange(batch, change));
+    await batch.commit();
+    lastSyncedStore = next;
+    return;
+  } catch (error) {
+    // One rejected change used to fail the whole batch, and since nothing was
+    // marked as saved it was sent again with every later save, so nothing
+    // could be saved until the page was reloaded. Save each change on its
+    // own instead, and report only the ones that failed.
+    const failed: string[] = [];
+    let lastError: unknown = error;
+    for (const change of changes) {
+      try {
+        const single = writeBatch(db);
+        writeChange(single, change);
+        await single.commit();
+      } catch (changeError) {
+        lastError = changeError;
+        failed.push(`${activityEntityNames[change.key]} ${change.entity.id}`);
+      }
+    }
+    // Failed changes are not retried on every later save; the live data
+    // replaces them on the screen with what the database actually holds.
+    lastSyncedStore = next;
+    if (failed.length) throw new PartialSaveError(failed, lastError);
   }
-  await batch.commit();
-  lastSyncedStore = next;
 }
 
 export function savePlatformStore(next: PlatformStore, actor?: UserProfile) {
@@ -939,6 +959,21 @@ function accountIdForQuote(quote: Quote) {
   return `${readable || "customer"}-${quote.id.slice(-6).toLowerCase()}`;
 }
 
+/**
+ * Adds to a customer card the machines of the quote it works from that it
+ * does not have yet. Returns how many were added.
+ */
+export async function addQuoteMachines(customer: Pick<Customer, "id">, quote: Quote) {
+  const { db } = getFirebaseServices();
+  const existing = (await getDocs(collection(db, "accounts", customer.id, "machines"))).docs.map((item) => item.data() as Machine);
+  const missing = machinesMissingForQuote(quote, existing, customer.id, "סניף ראשי", new Date().toISOString());
+  if (!missing.length) return 0;
+  const batch = writeBatch(db);
+  for (const machine of missing) batch.set(doc(db, "accounts", customer.id, "machines", machine.id), withoutUndefined(machine));
+  await batch.commit();
+  return missing.length;
+}
+
 export async function convertQuoteToCustomer(
   quote: Quote,
   lead?: Lead,
@@ -1069,32 +1104,13 @@ export async function convertQuoteToCustomer(
       { merge: true },
     );
   }
+  const existingMachines = isNewAccount
+    ? []
+    : (await getDocs(collection(db, "accounts", accountId, "machines"))).docs.map((item) => item.data() as Machine);
+  for (const machine of machinesMissingForQuote(quote, existingMachines, accountId, lead?.location || "סניף ראשי", now)) {
+    batch.set(doc(db, "accounts", accountId, "machines", machine.id), withoutUndefined(machine));
+  }
   if (isNewAccount) {
-    quote.equipment
-      .filter(
-        (item) =>
-          item.quantity > 0 &&
-          !legacyAddonKeys.has(item.key || item.model),
-      )
-      .forEach((item, itemIndex) => {
-        for (let index = 0; index < item.quantity; index += 1) {
-          const machineId = `machine-${quote.id}-${itemIndex + 1}-${index + 1}`;
-          batch.set(doc(db, "accounts", accountId, "machines", machineId), {
-            id: machineId,
-            accountId,
-            site: lead?.location || "סניף ראשי",
-            model: item.model,
-            serial: "טרם הוגדר",
-            status: "בהקמה",
-            commercial: item.commercialModel,
-            location: "",
-            lastService: "",
-            nextService: "",
-            updatedAt: now,
-          });
-        }
-      });
-
     const monthlyKg = quote.knownKg || mainBlend?.quantityKg || 0;
     const orderId = `order-${accountId}-${now.slice(0, 7)}`;
     batch.set(doc(db, "accounts", accountId, "orders", orderId), {
@@ -1104,7 +1120,7 @@ export async function convertQuoteToCustomer(
       defaultKg: monthlyKg,
       requestedKg: monthlyKg,
       approvedKg: monthlyKg,
-      status: "לפי חוזה",
+      status: NEW_ORDER_STATUS,
       blend: mainBlend?.name || "טרם הוגדרה תערובת",
       note: "",
       createdAt: now,
@@ -1336,7 +1352,7 @@ export async function convertLeadToCustomer(
           defaultKg: monthlyKg,
           requestedKg: monthlyKg,
           approvedKg: monthlyKg,
-          status: "לפי חוזה",
+          status: NEW_ORDER_STATUS,
           blend: "טרם הוגדרה תערובת",
           note: "",
           createdAt: now,
