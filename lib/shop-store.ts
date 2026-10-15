@@ -24,7 +24,7 @@ export function createShopId(prefix: string) {
 }
 
 export function shopPublicUrl(campaignId: string) {
-  return `${window.location.origin}/mister-bean-platform/shop/?c=${encodeURIComponent(campaignId)}`;
+  return `${window.location.origin}/shop/?c=${encodeURIComponent(campaignId)}`;
 }
 
 export function subscribeToShopCampaigns(onCampaigns: (campaigns: ShopCampaign[]) => void, onError: (error: Error) => void): Unsubscribe {

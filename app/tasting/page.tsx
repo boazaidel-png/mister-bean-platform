@@ -77,7 +77,7 @@ export default function TastingPage() {
     <div className="tasting-page" dir="rtl">
       <header className="tasting-head">
         {/* eslint-disable-next-line @next/next/no-img-element -- static export, plain image */}
-        <img src="/mister-bean-platform/brands/dada-logo.png" alt="DAdA Fresh Coffee" />
+        <img src="/brands/dada-logo.png" alt="DAdA Fresh Coffee" />
         <div>
           <h1>סקר טעימות קפה</h1>
           <p>{session?.title || "דרגו כל בלנד לפי הטעם שלכם"}</p>

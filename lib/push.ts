@@ -4,7 +4,7 @@ import { getFunctions, httpsCallable } from "firebase/functions";
 import { deleteToken, getMessaging, getToken, isSupported } from "firebase/messaging";
 import { getFirebaseServices } from "./firebase-client";
 
-const APP_ROOT = "/mister-bean-platform/";
+const APP_ROOT = "/";
 const TOKEN_KEY = "mb-push-token";
 
 export type PushState = "unsupported" | "needs-install" | "denied" | "off" | "on";

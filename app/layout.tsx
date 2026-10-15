@@ -11,15 +11,15 @@ export const metadata: Metadata = {
     follow: false,
     googleBot: { index: false, follow: false },
   },
-  manifest: "/mister-bean-platform/manifest.webmanifest",
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: [
-      { url: "/mister-bean-platform/favicon-64.png", sizes: "64x64", type: "image/png" },
-      { url: "/mister-bean-platform/app-icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/favicon-64.png", sizes: "64x64", type: "image/png" },
+      { url: "/app-icon-192.png", sizes: "192x192", type: "image/png" },
     ],
-    shortcut: "/mister-bean-platform/favicon-64.png",
+    shortcut: "/favicon-64.png",
     apple: [
-      { url: "/mister-bean-platform/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
     ],
   },
   appleWebApp: {

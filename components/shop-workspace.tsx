@@ -435,7 +435,7 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
 
       {fullscreen && <div className="tasting-fullscreen" onClick={() => setFullscreen(false)} role="dialog" aria-label="קוד QR במסך מלא">
         {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset */}
-        <img src="/mister-bean-platform/brands/dada-logo.png" alt="DAdA Fresh Coffee" className="tasting-fullscreen-logo" />
+        <img src="/brands/dada-logo.png" alt="DAdA Fresh Coffee" className="tasting-fullscreen-logo" />
         <h2>קפה טרי לעובדי {campaign.customerName}</h2>
         <p>סורקים, בוחרים קפה וטחינה, והקפה מגיע למשרד</p>
         {/* eslint-disable-next-line @next/next/no-img-element -- generated data URL */}

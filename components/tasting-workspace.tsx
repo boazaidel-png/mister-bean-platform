@@ -344,7 +344,7 @@ function TastingSessionDetail({ session, responses, catalog, showCustomer, guard
 
       {fullscreen && <div className="tasting-fullscreen" onClick={() => setFullscreen(false)} role="dialog" aria-label="קוד QR במסך מלא">
         {/* eslint-disable-next-line @next/next/no-img-element -- generated data URL */}
-        <img src="/mister-bean-platform/brands/dada-logo.png" alt="DAdA Fresh Coffee" className="tasting-fullscreen-logo" />
+        <img src="/brands/dada-logo.png" alt="DAdA Fresh Coffee" className="tasting-fullscreen-logo" />
         <h2>סקר טעימות קפה</h2>
         <p>סרקו את הקוד ודרגו את הבלנדים שטעמתם</p>
         {/* eslint-disable-next-line @next/next/no-img-element -- generated data URL */}
@@ -407,7 +407,7 @@ function TastingSummaryReport({ session, summary, onClose }: { session: TastingS
     <article className="tasting-report" dir="rtl">
       <header className="tasting-report-head">
         {/* eslint-disable-next-line @next/next/no-img-element -- static brand asset */}
-        <img src="/mister-bean-platform/brands/dada-logo.png" alt="DAdA Fresh Coffee" />
+        <img src="/brands/dada-logo.png" alt="DAdA Fresh Coffee" />
         <div>
           <small>סיכום סקר טעימות</small>
           <h1><bdi>{session.title}</bdi></h1>

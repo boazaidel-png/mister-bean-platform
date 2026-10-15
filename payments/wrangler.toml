@@ -17,14 +17,14 @@ preview_urls = false
 [vars]
 FIREBASE_PROJECT_ID = "misterbean-platform"
 # Browsers allowed to call this server.
-ALLOWED_ORIGINS = "https://boazaidel-png.github.io"
+ALLOWED_ORIGINS = "https://app.misterbean.co.il,https://boazaidel-png.github.io"
 # Rivhit payment type recorded on the invoice (9 = bank transfer in a default
 # Rivhit account). Set to the account's own code for Bit or credit card.
 RIVHIT_PAYMENT_TYPE = "9"
 # Payment type recorded for an online card / Apple Pay / Google Pay payment.
 RIVHIT_CARD_PAYMENT_TYPE = "3"
 # The public order page, for the return from the payment page.
-SHOP_PAGE_PATH = "/mister-bean-platform/shop/"
+SHOP_PAGE_PATH = "/shop/"
 # Real payments. Local runs use the test environment (ICREDIT_API in .dev.vars).
 ICREDIT_API = "https://icredit.rivhit.co.il"
 # The account's tax invoice-receipt (חשבונית מס קבלה). Leave empty to look it up automatically.
