@@ -21,7 +21,7 @@ import {
   type ShopBuyer,
   type ShopOrderLine,
 } from "@/lib/shop-engine";
-import { DADA_SHOP_CATALOG } from "@/lib/shop-catalog";
+import { DADA_SHOP_CATALOG, withCatalogProfile } from "@/lib/shop-catalog";
 import { confirmShopPayment, shopApiUrl, startShopCheckout, submitShopOrder, subscribeToPublicShopCampaign } from "@/lib/shop-store";
 
 const orderKey = (campaignId: string) => `shop-order-${campaignId}`;
@@ -86,7 +86,7 @@ export default function ShopPage() {
           ? "placed"
           : isCampaignOpen(campaign, now) ? "ready" : "closed";
 
-  const items = useMemo(() => campaign?.items || [], [campaign]);
+  const items = useMemo(() => withCatalogProfile(campaign?.items || []), [campaign]);
   const lines = orderLines(items, quantities);
   const total = orderTotal(items, quantities);
   const listTotal = lines.reduce((sum, line) => sum + Math.max(line.item.listPrice, line.item.price) * line.quantity, 0);

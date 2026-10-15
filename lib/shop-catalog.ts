@@ -135,6 +135,22 @@ export function discountedPrice(listPrice: number, discountPercent: number) {
 }
 
 /** The store catalog priced for employees: the store price less the discount, 1 kg bags. */
+/**
+ * A sale's items with what the catalog knows about each coffee: the brewing
+ * methods it is listed under and its taste profile. A sale keeps only name,
+ * price and description, so without this every coffee showed under every
+ * method. The sale's own values win; a coffee added by hand stays as it is.
+ */
+export function withCatalogProfile(items: ShopItem[]): ShopItem[] {
+  return items.map((item) => {
+    const catalog = DADA_SHOP_CATALOG.find((entry) => entry.id === item.id);
+    if (!catalog) return item;
+    const { code, color, arabicaPercent, body, acidity, tags, badge, methods } = catalog;
+    const profile = Object.fromEntries(Object.entries({ code, color, arabicaPercent, body, acidity, tags, badge, methods }).filter(([, value]) => value !== undefined));
+    return { ...profile, ...item };
+  });
+}
+
 export function shopCatalogItems(discountPercent = DEFAULT_SHOP_DISCOUNT): ShopItem[] {
   return DADA_SHOP_CATALOG.map((item) => ({ ...item, unit: SHOP_UNIT, price: discountedPrice(item.listPrice, discountPercent) }));
 }
