@@ -7,3 +7,7 @@ DEMO_MODE=1
 ALLOWED_ORIGINS=http://localhost:3000,http://localhost:3001
 # iCredit public test payment page (rivhit-api.readme.io, test environment). Test cards only.
 ICREDIT_GROUP_TOKEN=a1408bfc-18da-49dc-aa77-d65870f7943e
+# Local runs pay in iCredit's test environment, never for real.
+ICREDIT_API=https://testicredit.rivhit.co.il
+# The public Rivhit demo account numbers its invoice-receipt differently.
+RIVHIT_DOCUMENT_TYPE=

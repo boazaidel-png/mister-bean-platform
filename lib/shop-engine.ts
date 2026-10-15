@@ -313,6 +313,12 @@ export function rivhitInvoiceRequest(campaign: Pick<ShopCampaign, "items" | "cus
  * order ids in Custom1/Custom2 so a payment can be matched back to its order.
  * The payment page token is added by the server.
  */
+/** First word as the first name, the rest as the last name; a single word fills both. */
+export function splitName(fullName: string) {
+  const [first = "", ...rest] = fullName.trim().split(/\s+/);
+  return { first, last: rest.length ? rest.join(" ") : first };
+}
+
 export function icreditPaymentRequest(
   campaign: Pick<ShopCampaign, "id" | "items" | "customerName" | "title">,
   order: ShopOrder,
@@ -329,8 +335,9 @@ export function icreditPaymentRequest(
     MaxPayments: 1,
     RedirectURL: options.redirectUrl,
     ...(options.ipnUrl ? { IPNURL: options.ipnUrl, IPNMethod: 1 } : {}),
-    // The whole name as typed; Rivhit prints last name before first name.
-    CustomerLastName: order.fullName.trim().slice(0, 30),
+    // The payment page asks for both names; send them so the buyer does not type them again.
+    CustomerFirstName: splitName(order.fullName).first.slice(0, 20),
+    CustomerLastName: splitName(order.fullName).last.slice(0, 30),
     PhoneNumber: order.phone.slice(0, 15),
     ...(email.length >= 6 && email.length <= 50 ? { EmailAddress: email } : {}),
     Comments: `${campaign.customerName} · ${campaign.title}`.slice(0, 400),

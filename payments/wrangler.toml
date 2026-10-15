@@ -10,6 +10,9 @@
 name = "mister-bean-payments"
 main = "src/index.ts"
 compatibility_date = "2026-05-01"
+# Served at https://mister-bean-payments.misterbean.workers.dev, with no preview copies.
+workers_dev = true
+preview_urls = false
 
 [vars]
 FIREBASE_PROJECT_ID = "misterbean-platform"
@@ -22,8 +25,8 @@ RIVHIT_PAYMENT_TYPE = "9"
 RIVHIT_CARD_PAYMENT_TYPE = "3"
 # The public order page, for the return from the payment page.
 SHOP_PAGE_PATH = "/mister-bean-platform/shop/"
-# iCredit test environment; https://icredit.rivhit.co.il for real payments.
-ICREDIT_API = "https://testicredit.rivhit.co.il"
-# Leave empty to use the account's invoice-receipt document type automatically.
-RIVHIT_DOCUMENT_TYPE = ""
+# Real payments. Local runs use the test environment (ICREDIT_API in .dev.vars).
+ICREDIT_API = "https://icredit.rivhit.co.il"
+# The account's tax invoice-receipt (חשבונית מס קבלה). Leave empty to look it up automatically.
+RIVHIT_DOCUMENT_TYPE = "2"
 RIVHIT_SEND_MAIL = "true"

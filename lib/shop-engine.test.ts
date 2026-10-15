@@ -155,8 +155,11 @@ test("an order's payment page carries its exact lines and total, the buyer, and 
     { Description: "HB+ · פולים · 1 ק״ג", Quantity: 1, UnitPrice: 139.9 },
   ]);
   assert.equal(request.MaxPayments, 1);
-  assert.equal(request.CustomerLastName, "דנה כהן לוי");
-  assert.equal("CustomerFirstName" in request, false);
+  assert.equal(request.CustomerFirstName, "דנה");
+  assert.equal(request.CustomerLastName, "כהן לוי");
+  const single = icreditPaymentRequest(campaign, { ...pending, fullName: "דנה" }, { redirectUrl: "https://example.com/" });
+  assert.equal(single.CustomerFirstName, "דנה");
+  assert.equal(single.CustomerLastName, "דנה");
   assert.equal(request.Custom1, "shop-1");
   assert.equal(request.Custom2, "order-abc");
   assert.equal(request.IPNURL, "https://pay.example.com/shop/ipn");
