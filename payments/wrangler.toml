@@ -17,7 +17,7 @@ preview_urls = false
 [vars]
 FIREBASE_PROJECT_ID = "misterbean-platform"
 # Browsers allowed to call this server.
-ALLOWED_ORIGINS = "https://boazaidel-png.github.io,http://localhost:3000"
+ALLOWED_ORIGINS = "https://boazaidel-png.github.io"
 # Rivhit payment type recorded on the invoice (9 = bank transfer in a default
 # Rivhit account). Set to the account's own code for Bit or credit card.
 RIVHIT_PAYMENT_TYPE = "9"

@@ -126,6 +126,25 @@ async function settle(env: Env, db: Awaited<ReturnType<typeof serverDb>> | null,
 }
 
 /**
+ * The payment for this order, as iCredit reports it for the payment page the
+ * server opened for this order (its private token is saved on the order).
+ * Nothing the browser or a notification says is trusted.
+ */
+async function savedSalePaid(env: Env, order: ShopOrder, saleToken: string) {
+  if (!saleToken) return null;
+  const sale = await saleDetails(env.ICREDIT_API, saleToken);
+  const charged = Number(sale.Amount ?? sale.TransactionAmount ?? 0);
+  if (sale.Status !== 0 || !(charged > 0)) return null;
+  if (sale.Custom2 && sale.Custom2 !== order.id) throw new HttpError(409, "התשלום שייך להזמנה אחרת");
+  return {
+    saleId: sale.SaleId,
+    amount: charged,
+    documentNumber: sale.DocumentNum ? String(sale.DocumentNum) : undefined,
+    documentUrl: sale.DocumentURL || undefined,
+  };
+}
+
+/**
  * Opens an iCredit payment page for one order, with its exact lines and total.
  * Anyone with the sale link may ask, but the amount always comes from the
  * order as saved and the sale's prices, never from the request.
@@ -140,6 +159,12 @@ async function checkout(request: Request, env: Env) {
   const { db, campaign, order } = await loadOrder(env, campaignId, orderId, demoOf(env, campaignId, body));
   if (order.status === "paid") throw new HttpError(409, "ההזמנה כבר שולמה");
   if (order.status === "cancelled") throw new HttpError(409, "ההזמנה בוטלה");
+  // Paid on an earlier page (another tab, a slow return): record it instead of opening a new page.
+  const earlier = db ? await savedSalePaid(env, order, order.paymentSaleToken || "") : null;
+  if (earlier) {
+    await settle(env, db, campaign, order, earlier);
+    throw new HttpError(409, "ההזמנה כבר שולמה");
+  }
   if (!isCampaignOpen(campaign)) throw new HttpError(409, "המכירה כבר נסגרה");
   if (!(orderTotal(campaign.items, order.quantities) > 0)) throw new HttpError(400, "אין בהזמנה פריטים לתשלום");
 
@@ -167,22 +192,16 @@ async function confirm(request: Request, env: Env) {
   // The saved token is the one to trust; the demo sale has nowhere to save it.
   const saleToken = order.paymentSaleToken || (db ? "" : String(body.saleToken || ""));
   if (!saleToken) return { paid: false };
-  const sale = await saleDetails(env.ICREDIT_API, saleToken);
-  const charged = Number(sale.Amount ?? sale.TransactionAmount ?? 0);
-  if (sale.Status !== 0 || !(charged > 0)) return { paid: false };
-  if (sale.Custom2 && sale.Custom2 !== order.id) throw new HttpError(409, "התשלום שייך להזמנה אחרת");
-  return settle(env, db, campaign, order, {
-    saleId: sale.SaleId,
-    amount: charged,
-    documentNumber: sale.DocumentNum ? String(sale.DocumentNum) : undefined,
-    documentUrl: sale.DocumentURL || undefined,
-  });
+  const sale = await savedSalePaid(env, order, saleToken);
+  return sale ? settle(env, db, campaign, order, sale) : { paid: false };
 }
 
 /**
  * iCredit's notification of a payment. It must be answered within about a
- * second, so the work continues after the reply. The notification is trusted
- * only after iCredit itself verifies it.
+ * second, so the work continues after the reply. The notification only says
+ * which order to look at: the payment is then checked with iCredit against
+ * the payment page opened for that order, so a real sale id sent with another
+ * order's ids cannot mark that order paid.
  */
 async function ipn(request: Request, env: Env, execution: Execution) {
   const text = await request.text();
@@ -204,12 +223,13 @@ async function ipn(request: Request, env: Env, execution: Execution) {
         return;
       }
       const { db, campaign, order } = await loadOrder(env, campaignId, orderId, null);
-      await settle(env, db, campaign, order, {
-        saleId,
-        amount,
-        documentNumber: fields.DocumentNum ? String(fields.DocumentNum) : undefined,
-        documentUrl: fields.DocumentURL || undefined,
-      });
+      if (order.status === "paid") return;
+      const sale = await savedSalePaid(env, order, order.paymentSaleToken || "");
+      if (!sale || sale.saleId !== saleId) {
+        console.error("IPN does not match the order's own payment page", saleId, orderId);
+        return;
+      }
+      await settle(env, db, campaign, order, sale);
     } catch (error) {
       console.error("IPN failed", saleId, error instanceof Error ? error.message : error);
     }
