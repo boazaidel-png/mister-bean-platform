@@ -4,7 +4,10 @@ import type { ShopCampaign, ShopOrder } from "./platform-types.ts";
 import {
   buyerError,
   cleanQuantities,
+  employeeOrderFor,
   endOfDayMs,
+  nextShopDelivery,
+  syncEmployeeOrders,
   grindForMethod,
   icreditPaymentRequest,
   itemsForMethod,
@@ -15,6 +18,8 @@ import {
   summarizeShopCampaign,
 } from "./shop-engine.ts";
 import { DADA_SHOP_CATALOG, discountedPrice } from "./shop-catalog.ts";
+import { deliveryPrep, deliveryRecipients, deliverySheetHtml } from "./delivery-sheet.ts";
+import type { Order } from "./platform-types.ts";
 
 const campaign: ShopCampaign = {
   id: "shop-1",
@@ -185,4 +190,78 @@ test("the payment page and the invoice show the store price, then the employee d
   assert.equal(invoice.payments[0].amount_nis, 342);
   // Without store prices there is no discount line.
   assert.equal(icreditPaymentRequest(campaign, order("o", { "dx~beans": 1 }), { redirectUrl: "https://example.com/" }).Items.length, 1);
+});
+
+test("a sale becomes one coffee order of the customer, from paid orders only", () => {
+  const sale = { ...campaign, month: "2026-11" };
+  const orders = [
+    order("a", { "dx~beans": 2, "hb~espresso": 1 }, "paid", { fullName: "רון לוי", department: "קומה 3" }),
+    order("bb", { "dx~beans": 1 }, "paid", { fullName: "אבי כהן" }),
+    order("ccc", { "hb~beans": 5 }, "pending", { fullName: "טיוטה" }),
+    order("dddd", { "hb~beans": 2 }, "cancelled"),
+  ];
+  const made = employeeOrderFor(sale, orders, undefined, "2026-10-20T00:00:00.000Z", 0)!;
+  assert.equal(made.id, "emp-shop-1");
+  assert.equal(made.accountId, "customer-a");
+  assert.equal(made.kind, "employees");
+  assert.equal(made.month, "2026-11");
+  assert.equal(made.approvedKg, 4);
+  assert.equal(made.status, "ממתין לעדכון לקוח");
+  assert.deepEqual(made.employeeLines, [{ coffee: "DX+", grind: "פולים", bags: 3 }, { coffee: "HB+", grind: "טחון לאספרסו", bags: 1 }]);
+  assert.deepEqual(made.recipients!.map((person) => person.name), ["אבי כהן", "רון לוי"]);
+  assert.equal(made.recipients![1].department, "קומה 3");
+  // 3 × 120 + 139.9 = 499.9 with VAT, per bag without VAT.
+  assert.equal(made.pricePerKg, Math.round(499.9 / 1.18 / 4 * 100) / 100);
+
+  // Nothing changed: the same order, so nothing is written.
+  assert.equal(employeeOrderFor(sale, orders, made, "2026-10-21T00:00:00.000Z", 0), made);
+  // Closing the sale approves it for preparing.
+  assert.equal(employeeOrderFor({ ...sale, status: "closed" }, orders, made, "2026-10-21T00:00:00.000Z", 0)!.status, "אושר");
+  // Once delivered, late changes no longer touch it.
+  const delivered = { ...made, status: "סופק" };
+  assert.equal(employeeOrderFor(sale, [...orders, order("e", { "dx~beans": 9 }, "paid")], delivered), delivered);
+  // A sale without paid orders sends nothing.
+  assert.equal(employeeOrderFor(sale, [orders[2]], undefined), null);
+});
+
+test("syncing adds and updates employee orders and leaves the list alone when nothing changed", () => {
+  const sale = { ...campaign, month: "2026-11" };
+  const shopOrders = new Map([["shop-1", [order("a", { "dx~beans": 1 }, "paid")]]]);
+  const first = syncEmployeeOrders([], [sale], shopOrders, "2026-10-20T00:00:00.000Z", 0);
+  assert.equal(first.length, 1);
+  assert.equal(syncEmployeeOrders(first, [sale], shopOrders, "2026-10-21T00:00:00.000Z", 0), first);
+});
+
+test("a new sale goes out with the next delivery it can make and closes a few days before", () => {
+  const early = nextShopDelivery(20, new Date(2026, 9, 5));
+  assert.equal(early.month, "2026-10");
+  assert.equal(early.closesOn, "2026-10-17");
+  const late = nextShopDelivery(10, new Date(2026, 9, 8));
+  assert.equal(late.month, "2026-11");
+  assert.equal(late.closesOn, "2026-11-07");
+});
+
+test("the delivery list puts the company's coffee and the employee bags together per coffee", () => {
+  const base = { accountId: "customer-a", month: "2026-11", defaultKg: 0, note: "" };
+  const orders: Order[] = [
+    { ...base, id: "c", requestedKg: 10, approvedKg: 12, status: "אושר", blend: "DX+" },
+    { ...base, id: "x", requestedKg: 3, approvedKg: 0, status: "בוטל", blend: "DX+", kind: "company_extra" },
+    { ...base, id: "e", requestedKg: 4, approvedKg: 4, status: "אושר", blend: "", kind: "employees",
+      employeeLines: [{ coffee: "DX+", grind: "פולים", bags: 3 }, { coffee: "HB+", grind: "טחון לאספרסו", bags: 1 }],
+      recipients: [{ name: "רון <b>", department: "", items: "DX+ · פולים × 3" }] },
+  ];
+  assert.deepEqual(deliveryPrep(orders), [
+    { coffee: "DX+", companyKg: 12, grinds: [{ grind: "פולים", bags: 3 }], employeeBags: 3, totalKg: 15 },
+    { coffee: "HB+", companyKg: 0, grinds: [{ grind: "טחון לאספרסו", bags: 1 }], employeeBags: 1, totalKg: 1 },
+  ]);
+  assert.equal(deliveryRecipients(orders).length, 1);
+  const html = deliverySheetHtml({ customerName: "לקוח א", monthTitle: "נובמבר 2026", deliveryDate: "", orders });
+  assert.match(html, /רון &lt;b&gt;/);
+  assert.doesNotMatch(html, /רון <b>/);
+  assert.match(html, /16 ק״ג/);
+  // The customer gets only who gets what: coffee and grind per employee, no preparing totals.
+  const forCustomer = deliverySheetHtml({ customerName: "לקוח א", monthTitle: "נובמבר 2026", deliveryDate: "", orders: [orders[2]], forCustomer: true });
+  assert.match(forCustomer, /רשימת חלוקה/);
+  assert.match(forCustomer, /טחון למקינטה|פולים/);
+  assert.doesNotMatch(forCustomer, /סיכום לפי סוג קפה|לחברה|להכנה/);
 });

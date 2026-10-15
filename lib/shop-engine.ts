@@ -1,4 +1,4 @@
-import type { ShopCampaign, ShopGrind, ShopItem, ShopMethod, ShopOrder, ShopOrderStatus } from "./platform-types";
+import type { EmployeeOrderLine, EmployeeRecipient, Order, ShopCampaign, ShopGrind, ShopItem, ShopMethod, ShopOrder, ShopOrderStatus } from "./platform-types";
 
 export const MAX_SHOP_ITEMS = 30;
 export const MAX_SHOP_QUANTITY = 20;
@@ -189,6 +189,115 @@ export function summarizeShopCampaign(campaign: Pick<ShopCampaign, "items">, ord
   summary.collected = roundMoney(summary.collected);
   summary.outstanding = roundMoney(summary.outstanding);
   return summary;
+}
+
+/**
+ * The orders that count. An employee's order reaches the office only once it
+ * is paid; a draft left behind by someone who opened the payment page and
+ * did not pay is not an order.
+ */
+export function placedOrders(orders: ShopOrder[]) {
+  return orders.filter((order) => order.status !== "pending");
+}
+
+/** Israeli VAT. Employee prices include it; the orders board and profitability are without it. */
+export const VAT_RATE = 0.18;
+
+const monthOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+/** The customer's delivery day in a month (yyyy-mm), as on the customer card (1–28). */
+export function deliveryDateIn(month: string, deliveryDay: number | undefined) {
+  const [year, value] = month.split("-").map(Number);
+  return new Date(year, value - 1, Math.min(28, Math.max(1, deliveryDay || 1)));
+}
+
+/** Days between a sale closing and the delivery it goes out with: time to order, roast and grind. */
+export const SHOP_LEAD_DAYS = 3;
+
+/**
+ * The delivery a new sale goes out with: this month's, unless it is too close
+ * to collect orders before it, then next month's. The sale closes a few days before it.
+ */
+export function nextShopDelivery(deliveryDay: number | undefined, now = new Date()) {
+  let month = monthOf(now);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (deliveryDateIn(month, deliveryDay).getTime() - today.getTime() < (SHOP_LEAD_DAYS + 2) * 86400000) {
+    month = monthOf(new Date(now.getFullYear(), now.getMonth() + 1, 1));
+  }
+  const delivery = deliveryDateIn(month, deliveryDay);
+  const closes = new Date(delivery.getFullYear(), delivery.getMonth(), delivery.getDate() - SHOP_LEAD_DAYS);
+  return { month, delivery, closesOn: dateInputValue(closes.getTime()) };
+}
+
+/** The delivery month of a sale; older sales have none, so the month they closed in (or opened in). */
+export function campaignMonth(campaign: Pick<ShopCampaign, "month" | "closesAtMs" | "createdAt">) {
+  if (campaign.month) return campaign.month;
+  return monthOf(campaign.closesAtMs ? new Date(campaign.closesAtMs) : new Date(campaign.createdAt));
+}
+
+export const employeeOrderId = (campaignId: string) => `emp-${campaignId}`;
+
+/** The office has taken the order past preparing it: its contents stay as they were sent. */
+const FROZEN_STATUSES = ["סופק", "בוטל"];
+const OPEN_SALE_STATUS = "ממתין לעדכון לקוח";
+
+/**
+ * The coffee order an employee sale becomes: one order of the customer for the
+ * sale's delivery month, next to the company's own, holding the bags per coffee
+ * and grind and who gets what. Only paid orders count. While the sale is open
+ * it waits; once it closes it is approved for preparing. Returns the existing
+ * order itself when nothing changed, and null when there is nothing to send.
+ */
+export function employeeOrderFor(campaign: ShopCampaign, orders: ShopOrder[], existing: Order | undefined, now = new Date().toISOString(), nowMs = Date.now()): Order | null {
+  if (existing && (FROZEN_STATUSES.includes(existing.status) || existing.paid)) return existing;
+  const paid = orders.filter((order) => order.status === "paid");
+  if (!paid.length && !existing) return null;
+  const summary = summarizeShopCampaign(campaign, paid);
+  const employeeLines: EmployeeOrderLine[] = summary.lines.map((line) => ({ coffee: line.item.name, grind: grindLabel(line.grind), bags: line.quantity }));
+  const recipients: EmployeeRecipient[] = paid
+    .map((order) => ({ name: order.fullName, department: order.department || "", items: orderLinesText(campaign.items, order.quantities) }))
+    .sort((left, right) => left.name.localeCompare(right.name, "he"));
+  const bags = summary.units;
+  const coffees = new Set(employeeLines.map((line) => line.coffee)).size;
+  const open = isCampaignOpen(campaign, nowMs);
+  const status = !existing || existing.status === OPEN_SALE_STATUS ? (open ? OPEN_SALE_STATUS : "אושר") : existing.status;
+  const content = {
+    month: campaignMonth(campaign),
+    requestedKg: bags,
+    approvedKg: bags,
+    blend: bags ? `${coffees} סוגי קפה · ${paid.length} עובדים` : "עדיין אין הזמנות ששולמו",
+    status,
+    pricePerKg: bags ? roundMoney(summary.collected / (1 + VAT_RATE) / bags) : 0,
+    employeeLines,
+    recipients,
+  };
+  if (existing && JSON.stringify(Object.keys(content).map((key) => existing[key as keyof Order])) === JSON.stringify(Object.values(content))) return existing;
+  return {
+    ...(existing || {
+      id: employeeOrderId(campaign.id),
+      accountId: campaign.accountId,
+      defaultKg: 0,
+      note: "",
+      kind: "employees" as const,
+      shopCampaignId: campaign.id,
+      createdAt: now,
+    }),
+    ...content,
+    updatedAt: now,
+  };
+}
+
+/** Every employee sale reflected in the coffee orders; the same array when nothing changed. */
+export function syncEmployeeOrders(orders: Order[], campaigns: ShopCampaign[], shopOrders: Map<string, ShopOrder[]>, now = new Date().toISOString(), nowMs = Date.now()) {
+  let next = orders;
+  for (const campaign of campaigns) {
+    const id = employeeOrderId(campaign.id);
+    const existing = next.find((order) => order.id === id);
+    const order = employeeOrderFor(campaign, shopOrders.get(campaign.id) || [], existing, now, nowMs);
+    if (!order || order === existing) continue;
+    next = existing ? next.map((item) => item.id === id ? order : item) : [order, ...next];
+  }
+  return next;
 }
 
 export function sortOrders(orders: ShopOrder[]) {

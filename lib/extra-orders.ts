@@ -56,7 +56,7 @@ export function nextContractDelivery(deliveryDayOfMonth: number, orders: Order[]
 export function deliveredThisMonthKg(orders: Order[], today = new Date()) {
   const month = dayKey(today).slice(0, 7);
   return orders
-    .filter((order) => order.status === "סופק" && (order.deliveredAt || "").slice(0, 7) === month)
+    .filter((order) => order.status === "סופק" && order.kind !== "employees" && (order.deliveredAt || "").slice(0, 7) === month)
     .reduce((sum, order) => sum + Math.max(0, order.approvedKg || order.requestedKg || 0), 0);
 }
 
@@ -137,7 +137,7 @@ const shiftMonth = (month: string, by: number) => {
 /** Coffee a customer took in a month: the contract order and top-ups, cancelled orders left out. */
 export function monthTotalKg(orders: Order[], month: string) {
   return orders
-    .filter((order) => order.month === month && order.status !== "בוטל")
+    .filter((order) => order.month === month && order.status !== "בוטל" && order.kind !== "employees")
     .reduce((sum, order) => sum + Math.max(0, order.approvedKg || order.requestedKg || 0), 0);
 }
 

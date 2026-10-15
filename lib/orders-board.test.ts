@@ -56,6 +56,10 @@ test("all kinds of sale share one list, with the month's totals", () => {
 test("each stage offers one next step", () => {
   assert.deepEqual(nextAction(rows([order("o", { status: "ממתין לאישור", requestedKg: 6, customerConfirmedAt: "x" })])[0]), { label: "אישור", order: { status: "אושר", approvedKg: 6 } });
   assert.deepEqual(nextAction(rows([order("o", { status: "בהכנה" })])[0], "2026-10-12"), { label: "סימון כסופק", order: { status: "סופק", deliveredAt: "2026-10-12" } });
+  // An employee sale: nothing to approve while employees order; delivering it settles it, as they paid up front.
+  const sale = { kind: "employees" as const, shopCampaignId: "shop-1" };
+  assert.equal(nextAction(rows([order("e", { ...sale, status: "ממתין לעדכון לקוח" })])[0]), null);
+  assert.deepEqual(nextAction(rows([order("e", { ...sale, status: "בהכנה" })])[0], "2026-10-12"), { label: "סימון כסופק", order: { status: "סופק", deliveredAt: "2026-10-12", paid: true } });
   assert.deepEqual(nextAction(rows([order("o", { status: "סופק" })])[0]), { label: "סימון כשולם", order: { paid: true } });
   assert.equal(nextAction(rows([order("o", { status: "סופק", paid: true })])[0]), null);
 });
