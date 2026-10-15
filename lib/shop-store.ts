@@ -4,6 +4,7 @@ import {
   collection,
   collectionGroup,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   query,
@@ -14,7 +15,8 @@ import {
 } from "firebase/firestore";
 import { getFirebaseServices } from "./firebase-client";
 import type { ShopCampaign, ShopOrder, ShopOrderStatus } from "./platform-types";
-import { cleanQuantities, normalizeBuyer, orderTotal, type ShopBuyer } from "./shop-engine";
+import { cleanQuantities, normalizeBuyer, orderTotal, shortCode, type ShopBuyer } from "./shop-engine";
+import { publicOrigin } from "./site";
 
 // Kept apart from firebase-platform.ts so the public order page does not
 // pull in the authentication and account code.
@@ -24,7 +26,17 @@ export function createShopId(prefix: string) {
 }
 
 export function shopPublicUrl(campaignId: string) {
-  return `${window.location.origin}/shop/?c=${encodeURIComponent(campaignId)}`;
+  return `${publicOrigin()}/shop/?c=${encodeURIComponent(campaignId)}`;
+}
+
+/** A short, unused code for a new sale; it is the sale's id and the end of its link. */
+export async function newShopCampaignId() {
+  const { db } = getFirebaseServices();
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = shortCode();
+    if (!(await getDoc(doc(db, "shopCampaigns", code))).exists()) return code;
+  }
+  return createShopId("shop");
 }
 
 export function subscribeToShopCampaigns(onCampaigns: (campaigns: ShopCampaign[]) => void, onError: (error: Error) => void): Unsubscribe {

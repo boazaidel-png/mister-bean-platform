@@ -15,6 +15,7 @@ import {
 import { getFirebaseServices } from "./firebase-client";
 import type { TastingBlend, TastingResponse, TastingSession } from "./platform-types";
 import { cleanTastingRatings, MAX_TASTING_COMMENT } from "./tasting-engine";
+import { publicOrigin } from "./site";
 
 // Kept apart from firebase-platform.ts so the public tasting page does not
 // pull in the authentication and account code.
@@ -24,7 +25,7 @@ export function createTastingId(prefix: string) {
 }
 
 export function tastingPublicUrl(sessionId: string) {
-  return `${window.location.origin}/tasting/?s=${encodeURIComponent(sessionId)}`;
+  return `${publicOrigin()}/tasting/?s=${encodeURIComponent(sessionId)}`;
 }
 
 export function subscribeToTastingBlends(onBlends: (blends: TastingBlend[]) => void, onError: (error: Error) => void): Unsubscribe {
