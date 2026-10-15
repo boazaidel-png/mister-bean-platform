@@ -1,0 +1,19 @@
+{
+  "name": "קפה DAdA לעובדים",
+  "short_name": "DAdA",
+  "description": "פולי קפה טריים מבית הקלייה DAdA, במחיר מיוחד לעובדים",
+  "lang": "he",
+  "dir": "rtl",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
