@@ -1,5 +1,5 @@
-const CACHE_NAME = "mister-bean-shell-v25";
-const APP_ROOT = "/mister-bean-platform/";
+const CACHE_NAME = "mister-bean-shell-v26";
+const APP_ROOT = "/";
 const STATIC_ASSETS = [
   APP_ROOT,
   `${APP_ROOT}manifest.webmanifest`,

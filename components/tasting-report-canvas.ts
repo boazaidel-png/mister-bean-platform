@@ -84,7 +84,7 @@ export async function drawTastingReport(session: TastingSession, summary: Tastin
 
   // Header
   let y = MARGIN;
-  const logo = await loadImage("/mister-bean-platform/brands/dada-logo.png");
+  const logo = await loadImage("/brands/dada-logo.png");
   if (logo) ctx.drawImage(logo, RIGHT - 110, y, 110, 110 * logo.height / logo.width);
   text(ctx, "סיכום סקר טעימות", RIGHT - 135, y + 18, { size: 22, weight: 700, color: COLORS.orange });
   text(ctx, session.title, RIGHT - 135, y + 58, { size: 38, weight: 700 });

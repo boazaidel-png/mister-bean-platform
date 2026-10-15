@@ -215,7 +215,7 @@ const riskReasons = (customer: Customer, store: Store) => {
 function Badge({children}:{children:React.ReactNode}) { const text=Array.isArray(children)?children.join(""):String(children??"");return <span className={`badge ${statusTone(text)}`}>{text}</span>; }
 function PilotBadge({large=false}:{large?:boolean}) { return <span className={`pilot-badge ${large?"large":""}`}>פיילוט</span>; }
 function BrandIcon({large=false}:{large?:boolean}) {
-  return <span className={`brand-mark ${large?"large":""}`}><Image src="/mister-bean-platform/app-icon-192.png" width={192} height={192} alt="Mister Bean"/></span>;
+  return <span className={`brand-mark ${large?"large":""}`}><Image src="/app-icon-192.png" width={192} height={192} alt="Mister Bean"/></span>;
 }
 
 export default function Home() {
@@ -348,7 +348,7 @@ export default function Home() {
   },[mobileOpen]);
   useEffect(()=>{
     if(!("serviceWorker" in navigator)||process.env.NODE_ENV!=="production")return;
-    const register=()=>{void navigator.serviceWorker.register("/mister-bean-platform/sw.js",{scope:"/mister-bean-platform/"});};
+    const register=()=>{void navigator.serviceWorker.register("/sw.js",{scope:"/"});};
     window.addEventListener("load",register,{once:true});
     return()=>window.removeEventListener("load",register);
   },[]);

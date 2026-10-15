@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Heebo } from "next/font/google";
 
-const BASE = "/mister-bean-platform/shop";
+const BASE = "/shop";
 const TITLE = "קפה DAdA לעובדים";
 const DESCRIPTION = "פולי קפה טריים מבית הקלייה DAdA, במחיר מיוחד לעובדים";
 
@@ -9,7 +9,7 @@ const DESCRIPTION = "פולי קפה טריים מבית הקלייה DAdA, במ
 // own icon, name for the home screen, and the picture shown when the link is
 // shared. These replace the system-wide ones from the root layout.
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_ORIGIN || "https://boazaidel-png.github.io"),
+  metadataBase: new URL("https://app.misterbean.co.il"),
   title: TITLE,
   description: DESCRIPTION,
   applicationName: "DAdA",

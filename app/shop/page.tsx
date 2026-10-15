@@ -28,7 +28,7 @@ const orderKey = (campaignId: string) => `shop-order-${campaignId}`;
 const saleKey = (orderId: string) => `shop-sale-${orderId}`;
 const buyerKey = "shop-buyer";
 const emptyBuyer: ShopBuyer = { fullName: "", email: "", phone: "", department: "", note: "" };
-const LOGO = "/mister-bean-platform/brands/dada-logo.png";
+const LOGO = "/brands/dada-logo.png";
 
 function readStorage(key: string) {
   try { return window.localStorage.getItem(key); } catch { return null; }
@@ -507,7 +507,7 @@ function groupItems(items: ShopItem[]) {
 }
 
 const PHOTO_IDS = new Set(DADA_SHOP_CATALOG.map((item) => item.id));
-const photoUrl = (id: string) => `/mister-bean-platform/shop/coffee/${id}.jpg`;
+const photoUrl = (id: string) => `/shop/coffee/${id}.jpg`;
 
 /** DAdA's product photo; a coffee added by hand gets a plain bag outline instead. */
 function Photo({ item }: { item: ShopItem }) {

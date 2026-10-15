@@ -2,8 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "export",
-  basePath: "/mister-bean-platform",
-  assetPrefix: "/mister-bean-platform/",
+  // Served from the root of https://app.misterbean.co.il (GitHub Pages custom domain).
   trailingSlash: true,
   images: {
     unoptimized: true,

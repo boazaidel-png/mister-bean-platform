@@ -9,7 +9,7 @@ export const DATABASE_REGION = "me-west1";
 // Callable functions the site calls directly.
 export const CALLABLE_REGION = "europe-west1";
 export const TIME_ZONE = "Asia/Jerusalem";
-export const APP_URL = "https://boazaidel-png.github.io/mister-bean-platform/";
+export const APP_URL = "https://app.misterbean.co.il/";
 
 export const normalizeEmail = (email: unknown) => String(email || "").trim().toLowerCase();
 export const isOwnerEmail = (email: unknown) => OWNER_EMAILS.includes(normalizeEmail(email));

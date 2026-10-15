@@ -24,7 +24,7 @@ export function createTastingId(prefix: string) {
 }
 
 export function tastingPublicUrl(sessionId: string) {
-  return `${window.location.origin}/mister-bean-platform/tasting/?s=${encodeURIComponent(sessionId)}`;
+  return `${window.location.origin}/tasting/?s=${encodeURIComponent(sessionId)}`;
 }
 
 export function subscribeToTastingBlends(onBlends: (blends: TastingBlend[]) => void, onError: (error: Error) => void): Unsubscribe {
