@@ -246,12 +246,15 @@ const OPEN_SALE_STATUS = "ממתין לעדכון לקוח";
  * sale's delivery month, next to the company's own, holding the bags per coffee
  * and grind and who gets what. Only paid orders count. While the sale is open
  * it waits; once it closes it is approved for preparing. Returns the existing
- * order itself when nothing changed, and null when there is nothing to send.
+ * order itself when nothing changed, and null for a closed sale nobody paid in.
+ * An open sale has its order from the start, so it shows next to the company's
+ * coffee as soon as it is opened.
  */
 export function employeeOrderFor(campaign: ShopCampaign, orders: ShopOrder[], existing: Order | undefined, now = new Date().toISOString(), nowMs = Date.now()): Order | null {
   if (existing && (FROZEN_STATUSES.includes(existing.status) || existing.paid)) return existing;
   const paid = orders.filter((order) => order.status === "paid");
-  if (!paid.length && !existing) return null;
+  const open = isCampaignOpen(campaign, nowMs);
+  if (!paid.length && !existing && !open) return null;
   const summary = summarizeShopCampaign(campaign, paid);
   const employeeLines: EmployeeOrderLine[] = summary.lines.map((line) => ({ coffee: line.item.name, grind: grindLabel(line.grind), bags: line.quantity }));
   const recipients: EmployeeRecipient[] = paid
@@ -259,7 +262,6 @@ export function employeeOrderFor(campaign: ShopCampaign, orders: ShopOrder[], ex
     .sort((left, right) => left.name.localeCompare(right.name, "he"));
   const bags = summary.units;
   const coffees = new Set(employeeLines.map((line) => line.coffee)).size;
-  const open = isCampaignOpen(campaign, nowMs);
   const status = !existing || existing.status === OPEN_SALE_STATUS ? (open ? OPEN_SALE_STATUS : "אושר") : existing.status;
   const content = {
     month: campaignMonth(campaign),
@@ -287,9 +289,16 @@ export function employeeOrderFor(campaign: ShopCampaign, orders: ShopOrder[], ex
   };
 }
 
-/** Every employee sale reflected in the coffee orders; the same array when nothing changed. */
+/**
+ * Every employee sale reflected in the coffee orders; the same array when
+ * nothing changed. The order of a deleted sale is cancelled, unless it was
+ * already delivered.
+ */
 export function syncEmployeeOrders(orders: Order[], campaigns: ShopCampaign[], shopOrders: Map<string, ShopOrder[]>, now = new Date().toISOString(), nowMs = Date.now()) {
-  let next = orders;
+  const live = new Set(campaigns.map((campaign) => campaign.id));
+  let next = orders.some((order) => order.shopCampaignId && !live.has(order.shopCampaignId) && !FROZEN_STATUSES.includes(order.status) && !order.paid)
+    ? orders.map((order) => order.shopCampaignId && !live.has(order.shopCampaignId) && !FROZEN_STATUSES.includes(order.status) && !order.paid ? { ...order, status: "בוטל", updatedAt: now } : order)
+    : orders;
   for (const campaign of campaigns) {
     const id = employeeOrderId(campaign.id);
     const existing = next.find((order) => order.id === id);
