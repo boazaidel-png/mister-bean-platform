@@ -259,4 +259,9 @@ test("the delivery list puts the company's coffee and the employee bags together
   assert.match(html, /רון &lt;b&gt;/);
   assert.doesNotMatch(html, /רון <b>/);
   assert.match(html, /16 ק״ג/);
+  // The customer gets only who gets what: coffee and grind per employee, no preparing totals.
+  const forCustomer = deliverySheetHtml({ customerName: "לקוח א", monthTitle: "נובמבר 2026", deliveryDate: "", orders: [orders[2]], forCustomer: true });
+  assert.match(forCustomer, /רשימת חלוקה/);
+  assert.match(forCustomer, /טחון למקינטה|פולים/);
+  assert.doesNotMatch(forCustomer, /סיכום לפי סוג קפה|לחברה|להכנה/);
 });

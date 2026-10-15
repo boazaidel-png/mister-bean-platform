@@ -74,7 +74,7 @@ const escapeHtml = (value: string | number) => String(value)
  * A printable page for a delivery: the totals to prepare and the named list
  * for handing the bags out. Names are typed by employees, so every value is escaped.
  */
-export function deliverySheetHtml(input: { customerName: string; monthTitle: string; deliveryDate: string; orders: Order[] }) {
+export function deliverySheetHtml(input: { customerName: string; monthTitle: string; deliveryDate: string; orders: Order[]; forCustomer?: boolean }) {
   const rows = deliveryPrep(input.orders);
   const recipients = deliveryRecipients(input.orders);
   const total = rows.reduce((sum, row) => sum + row.totalKg, 0);
@@ -93,13 +93,13 @@ table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #e3ddd8;
 td.box{width:48px}tr{break-inside:avoid}
 @media print{body{margin:12mm}button{display:none}}
 </style></head><body>
-<button onclick="window.print()" style="float:left;padding:8px 16px">הדפסה / שמירה כ-PDF</button>
-<h1>משלוח קפה · ${e(input.customerName)}</h1>
+<button onclick="window.print()" style="float:left;padding:8px 16px">הדפסה או שמירה כקובץ</button>
+<h1>${input.forCustomer ? "קפה לעובדים" : "משלוח קפה"} · ${e(input.customerName)}</h1>
 <p>${e(input.monthTitle)}${input.deliveryDate ? ` · אספקה ${e(input.deliveryDate)}` : ""}</p>
-<div class="totals"><div>סה״כ להכנה<b>${total} ק״ג</b></div><div>לחברה<b>${company} ק״ג</b></div><div>לעובדים<b>${bags} שקיות</b></div></div>
+${input.forCustomer ? `<div class="totals"><div>עובדים<b>${recipients.length}</b></div><div>שקיות<b>${bags} × 1 ק״ג</b></div></div>` : `<div class="totals"><div>סה״כ להכנה<b>${total} ק״ג</b></div><div>לחברה<b>${company} ק״ג</b></div><div>לעובדים<b>${bags} שקיות</b></div></div>
 <h2>סיכום לפי סוג קפה</h2>
-${rows.length ? `<table><thead><tr><th>קפה</th><th>לחברה</th><th>לעובדים (שקיות של 1 ק״ג)</th><th>סה״כ</th></tr></thead><tbody>${prep}</tbody></table>` : "<p>אין קפה במשלוח הזה.</p>"}
-${recipients.length ? `<h2>רשימת חלוקה לעובדים (${recipients.length})</h2><table><thead><tr><th>#</th><th>שם</th><th>מחלקה / קומה</th><th>מה הוזמן</th><th>נמסר</th></tr></thead><tbody>${people}</tbody></table>` : ""}
+${rows.length ? `<table><thead><tr><th>קפה</th><th>לחברה</th><th>לעובדים (שקיות של 1 ק״ג)</th><th>סה״כ</th></tr></thead><tbody>${prep}</tbody></table>` : "<p>אין קפה במשלוח הזה.</p>"}`}
+${recipients.length ? `<h2>רשימת חלוקה${input.forCustomer ? "" : ` לעובדים (${recipients.length})`}</h2><table><thead><tr><th>#</th><th>שם</th><th>מחלקה / קומה</th><th>קפה וטחינה</th><th>נמסר</th></tr></thead><tbody>${people}</tbody></table>` : ""}
 </body></html>`;
 }
 

@@ -1117,7 +1117,7 @@ function CustomerOrders({orders,onChange,accountId="",onCreateExtra}:{orders:Ord
     const employeeRows=rows.filter(item=>item.kind==="employees"&&item.shopCampaignId&&item.status!=="בוטל"&&item.recipients?.length);
     const o=[...contractRows].reverse().find(item=>!["סופק","בוטל"].includes(item.status))||contractRows[0];
     const others=rows.filter(item=>item.id!==o?.id&&!employeeRows.includes(item));
-    const printEmployees=(item:Order)=>openDeliverySheet({customerName:customer?.name||"",monthTitle:monthTitle(item.month),deliveryDate:customer?formatDate(nextDeliveryDate(customer,item)):"",orders:rows.filter(other=>other.month===item.month)});
+    const printEmployees=(item:Order)=>openDeliverySheet({customerName:customer?.name||"",monthTitle:monthTitle(item.month),deliveryDate:customer?formatDate(nextDeliveryDate(customer,item)):"",orders:[item],forCustomer:true});
     const pendingExtras=openExtraOrders(orders);
     const outOfCoffee=customer&&onCreateExtra&&<button className="primary out-of-coffee" onClick={()=>setExtraOpen(true)}>☕ נגמר לי הקפה</button>;
     return <><SectionTitle title="הזמנת קפה" sub={o?`הזמנה לחודש ${monthName(o.month)}`:"הזמנות קפה"} action={outOfCoffee||undefined}/>
