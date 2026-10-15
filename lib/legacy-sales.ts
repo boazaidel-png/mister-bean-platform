@@ -46,9 +46,9 @@ export function legacySaleOrders(records: MonthlyProfitability[]): Order[] {
         ...(line.paid ? { paid: true } : {}),
         ...(line.invoiceSent ? { invoiceSent: true } : {}),
         ...(line.deliveryNoteSent ? { deliveryNoteSent: true } : {}),
+        // No createdAt or updatedAt: the line has no date of its own, and the
+        // profitability page's dates are not when the sale was made.
         legacySale: { recordId: record.id, lineId: line.id },
-        createdAt: record.createdAt,
-        updatedAt: record.updatedAt,
       } as Order);
     }
   }

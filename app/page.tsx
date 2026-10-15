@@ -1264,12 +1264,12 @@ function OrderDrawer({row,activities,plannedDate,onClose,onOrderChange,onPrint,o
       <label><span>תאריך אספקה בפועל</span><input type="date" value={(order.deliveredAt||"").slice(0,10)} onChange={event=>onOrderChange(order.id,{deliveredAt:event.target.value})}/></label>
       <label><span>סטטוס</span><select value={order.status==="לפי חוזה"?"ממתין לעדכון לקוח":order.status} onChange={event=>onOrderChange(order.id,{status:event.target.value,...(event.target.value==="סופק"&&!order.deliveredAt?{deliveredAt:new Date().toISOString().slice(0,10)}:{})})}>{statuses.map(value=><option key={value}>{value}</option>)}</select></label>
     </div></section>
-    {!employeeSale&&<section><h4>תשלום ומסמכים</h4><OrderFulfillmentControls order={order} onChange={onOrderChange}/></section>}
-    <section><h4>היסטוריה</h4><ol className="ob-timeline">
+    {!employeeSale&&!legacySale&&<section><h4>תשלום ומסמכים</h4><OrderFulfillmentControls order={order} onChange={onOrderChange}/></section>}
+    {!legacySale&&<section><h4>היסטוריה</h4><ol className="ob-timeline">
       {history.map(item=><li key={item.id}><strong>{item.summary}</strong><small>{item.actorName} · {formatDateTime(item.createdAt)}</small></li>)}
       {order.customerConfirmedAt&&<li><strong>הלקוח {isExtraOrder(order)?"ביקש השלמה":"אישר את ההזמנה"}</strong><small>{formatDateTime(order.customerConfirmedAt)}</small></li>}
       {order.createdAt&&<li><strong>ההזמנה נפתחה</strong><small>{formatDateTime(order.createdAt)}</small></li>}
-    </ol></section>
+    </ol></section>}
   </aside></div>;
 }
 /** One employee's items, a line each, with the coffee name kept left to right. */

@@ -34,6 +34,9 @@ test("typed sales become display orders with their own price and cost", () => {
   assert.equal(order.status, "סופק");
   assert.equal(order.paid, true);
   assert.deepEqual(order.legacySale, { recordId: "profit-herzog-2026-09", lineId: "s1" });
+  assert.equal(order.deliveredAt, "2026-09-18");
+  assert.equal(order.createdAt, undefined);
+  assert.equal(order.updatedAt, undefined);
 });
 
 test("older company lines count as company extras and keep their board status", () => {
@@ -66,4 +69,13 @@ test("real orders stay as they are and come first", () => {
   const all = withLegacySales([real], [record([{ id: "s6", channel: "company_extra", blendName: "DX", quantityKg: 4, costPerKg: 60, pricePerKg: 100 }])]);
   assert.equal(all[0], real);
   assert.equal(all.length, 2);
+});
+
+test("a sale without a delivery date gets no date at all", () => {
+  const [order] = legacySaleOrders([
+    record([{ id: "s7", channel: "company_extra", blendName: "DX", quantityKg: 2, costPerKg: 60, pricePerKg: 100 }]),
+  ]);
+  assert.equal(order.deliveredAt, undefined);
+  assert.equal(order.createdAt, undefined);
+  assert.equal(order.updatedAt, undefined);
 });
