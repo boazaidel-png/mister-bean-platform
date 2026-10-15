@@ -39,15 +39,6 @@ import {
   updateShopOrderPayment,
 } from "@/lib/shop-store";
 
-type Props = {
-  customers: Customer[];
-  /** When set, the workspace shows only this customer's sales (customer card tab). */
-  customer?: Customer;
-  readOnly: boolean;
-  actor: string;
-  onToast: (message: string) => void;
-};
-
 const formatDate = (value: string | number) => value ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short" }).format(new Date(value)) : "";
 const formatDateTime = (value: string) => value ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(value)) : "";
 const monthTitle = (month: string) => { const [year, value] = month.split("-").map(Number); return new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(new Date(year, value - 1, 1)); };
@@ -74,73 +65,75 @@ function useShopData(onError: (message: string) => void) {
   return { campaigns, orders, ready };
 }
 
-export function ShopWorkspace({ customers, customer, readOnly, actor, onToast }: Props) {
-  const { campaigns, orders, ready } = useShopData(onToast);
-  const [openId, setOpenId] = useState("");
-  const [editing, setEditing] = useState<ShopCampaign | "new" | null>(null);
-  const visible = customer ? campaigns.filter((campaign) => campaign.accountId === customer.id) : campaigns;
-  const open = visible.find((campaign) => campaign.id === openId);
-  const guard = () => { if (readOnly) { onToast("מצב התצוגה הוא לקריאה בלבד"); return false; } return true; };
+type SaleProps = {
+  customers: Customer[];
+  readOnly: boolean;
+  actor: string;
+  onToast: (message: string) => void;
+};
 
-  const modal = editing && <CampaignModal
-    campaign={editing === "new" ? undefined : editing}
-    orders={editing === "new" ? [] : orders.get(editing.id) || []}
+/** Opening a sale from the coffee orders: the customer is fixed in the customer card, chosen on the main board. */
+export function ShopSaleNew({ customers, customer, actor, onToast, onCreated, onClose }: SaleProps & {
+  customer?: Customer;
+  onCreated: (campaign: ShopCampaign) => void;
+  onClose: () => void;
+}) {
+  return <CampaignModal
+    orders={[]}
     customers={customers}
     fixedCustomer={customer}
     actor={actor}
-    onClose={() => setEditing(null)}
-    onSaved={(campaign, created) => { setEditing(null); setOpenId(campaign.id); onToast(created ? "המכירה נוצרה. אפשר לשלוח את הקישור לעובדים." : "המכירה עודכנה"); }}
+    onClose={onClose}
+    onSaved={(campaign) => { onToast("המכירה נפתחה. שלחו את הקישור לעובדים."); onCreated(campaign); }}
     onError={(error) => onToast(errorText(error))}
   />;
+}
 
-  if (open) {
-    return <>
-      <CampaignDetail
-        campaign={open}
-        orders={orders.get(open.id) || []}
-        showCustomer={!customer}
-        actor={actor}
-        guard={guard}
-        onToast={onToast}
-        onEdit={() => { if (guard()) setEditing(open); }}
-        onBack={() => setOpenId("")}
-      />
-      {modal}
-    </>;
-  }
-
-  return (
-    <div className="tasting-admin">
-      <div className="section-title">
-        <div>
-          <h2>{customer ? "מכירת קפה לעובדים" : "מכירת קפה לעובדי לקוחות"}</h2>
-          <p>{customer ? `פותחים מכירה, שולחים לעובדים קישור, והזמנות ששולמו מצטרפות למשלוח הקפה של ${customer.name} בלשונית "הזמנות קפה".` : "פותחים סבב הזמנות לארגון, שולחים קישור לעובדים, וההזמנות ששולמו מצטרפות למשלוח הקפה של הלקוח."}</p>
-        </div>
-        <button className="primary" onClick={() => { if (guard()) setEditing("new"); }}><Plus size={16} /> מכירה חדשה</button>
-      </div>
-
+/**
+ * Everything about one sale over the coffee orders: the link and QR to send,
+ * the preparing list, who paid and their invoices, editing, closing and reopening.
+ */
+export function ShopSaleManager({ campaignId, customers, readOnly, actor, onToast, onClose }: SaleProps & { campaignId: string; onClose: () => void }) {
+  const { campaigns, orders, ready } = useShopData(onToast);
+  const [editing, setEditing] = useState(false);
+  const campaign = campaigns.find((item) => item.id === campaignId);
+  const guard = () => { if (readOnly) { onToast("מצב התצוגה הוא לקריאה בלבד"); return false; } return true; };
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape" && !editing) onClose(); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [editing, onClose]);
+  useEffect(() => {
+    document.body.classList.add("dialog-open");
+    return () => document.body.classList.remove("dialog-open");
+  }, []);
+  return <div className="shop-manager" role="dialog" aria-modal="true" aria-label="ניהול מכירה לעובדים">
+    <div className="shop-manager-inner">
       {!ready
-        ? <div className="workspace-loading"><i /><span>טוען מכירות…</span></div>
-        : visible.length
-          ? <div className="tasting-session-list shop-campaign-list">{visible.map((campaign) => {
-              const summary = summarizeShopCampaign(campaign, placedOrders(orders.get(campaign.id) || []));
-              const state = campaignState(campaign);
-              return <button key={campaign.id} onClick={() => setOpenId(campaign.id)}>
-                <div>
-                  <strong>{campaign.title}</strong>
-                  <small>{!customer && `${campaign.customerName} · `}משלוח {monthTitle(campaignMonth(campaign))}{campaign.closesAtMs ? ` · הזמנות עד ${formatDate(campaign.closesAtMs)}` : ""}</small>
-                </div>
-                <span className={`badge ${state.tone}`}>{state.label}</span>
-                <span>{summary.orders} הזמנות</span>
-                <span className="tasting-leader">{summary.units} שקיות · נגבו {formatShekel(summary.collected)}</span>
-                <b>פתיחה ←</b>
-              </button>;
-            })}</div>
-          : <div className="panel inline-empty">{customer ? "עדיין לא נפתחו מכירות לעובדי הלקוח." : "עדיין לא נפתחו מכירות."}</div>}
-
-      {modal}
+        ? <div className="workspace-loading"><i /><span>טוען את המכירה…</span></div>
+        : campaign
+          ? <CampaignDetail
+              campaign={campaign}
+              orders={orders.get(campaign.id) || []}
+              showCustomer
+              actor={actor}
+              guard={guard}
+              onToast={onToast}
+              onEdit={() => { if (guard()) setEditing(true); }}
+              onBack={onClose}
+            />
+          : <div className="panel inline-empty">המכירה לא נמצאה. ייתכן שנמחקה. <button className="text-btn" onClick={onClose}>חזרה להזמנות</button></div>}
     </div>
-  );
+    {editing && campaign && <CampaignModal
+      campaign={campaign}
+      orders={orders.get(campaign.id) || []}
+      customers={customers}
+      actor={actor}
+      onClose={() => setEditing(false)}
+      onSaved={() => { setEditing(false); onToast("המכירה עודכנה"); }}
+      onError={(error) => onToast(errorText(error))}
+    />}
+  </div>;
 }
 
 type DraftItem = ShopItem & { included: boolean };
@@ -362,7 +355,7 @@ function CampaignDetail({ campaign, orders, showCustomer, actor, guard, onToast,
 
   return (
     <div className="tasting-admin">
-      <button className="text-btn tasting-back" onClick={onBack}><ArrowRight size={15} /> חזרה לרשימת המכירות</button>
+      <button className="text-btn tasting-back" onClick={onBack}><ArrowRight size={15} /> חזרה להזמנות</button>
       <div className="customer-header tasting-detail-head">
         <div>
           <div className="header-line"><h2>{campaign.title}</h2><span className={`badge ${state.tone}`}>{state.label}</span></div>

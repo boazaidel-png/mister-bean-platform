@@ -220,8 +220,11 @@ test("a sale becomes one coffee order of the customer, from paid orders only", (
   // Once delivered, late changes no longer touch it.
   const delivered = { ...made, status: "סופק" };
   assert.equal(employeeOrderFor(sale, [...orders, order("e", { "dx~beans": 9 }, "paid")], delivered), delivered);
-  // A sale without paid orders sends nothing.
-  assert.equal(employeeOrderFor(sale, [orders[2]], undefined), null);
+  // An open sale shows from the start, empty; a closed one nobody paid in sends nothing.
+  const fresh = employeeOrderFor(sale, [orders[2]], undefined, "2026-10-20T00:00:00.000Z", 0)!;
+  assert.equal(fresh.approvedKg, 0);
+  assert.equal(fresh.status, "ממתין לעדכון לקוח");
+  assert.equal(employeeOrderFor({ ...sale, status: "closed" }, [orders[2]], undefined), null);
 });
 
 test("syncing adds and updates employee orders and leaves the list alone when nothing changed", () => {
@@ -230,6 +233,10 @@ test("syncing adds and updates employee orders and leaves the list alone when no
   const first = syncEmployeeOrders([], [sale], shopOrders, "2026-10-20T00:00:00.000Z", 0);
   assert.equal(first.length, 1);
   assert.equal(syncEmployeeOrders(first, [sale], shopOrders, "2026-10-21T00:00:00.000Z", 0), first);
+  // The sale was deleted: its order is cancelled, but a delivered one stays as it was.
+  assert.equal(syncEmployeeOrders(first, [], shopOrders, "2026-10-22T00:00:00.000Z", 0)[0].status, "בוטל");
+  const delivered = [{ ...first[0], status: "סופק" }];
+  assert.equal(syncEmployeeOrders(delivered, [], shopOrders), delivered);
 });
 
 test("a new sale goes out with the next delivery it can make and closes a few days before", () => {

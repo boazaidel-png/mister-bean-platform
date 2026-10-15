@@ -1634,7 +1634,9 @@ html:has(.sp-wrap),html:has(.sp-wrap) body{overflow-x:clip;background:#fff}
 .ob-note{margin:0;font-size:12px;color:#4d5f58;background:#f6f8f6;border-radius:9px;padding:8px 10px}
 .ob-mini-table{width:100%;border-collapse:collapse;font-size:13px}.ob-mini-table th{font-size:11px;color:#6b7b74;font-weight:700;text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}.ob-mini-table td{padding:6px;border-bottom:1px solid #eef2ef}
 .ob-recipients{margin:0;padding-inline-start:20px;display:grid;gap:6px;font-size:13px}.ob-recipients li{padding:2px 0}.ob-recipients li strong{margin-inline-end:6px}.ob-recipients li small{color:#6b7b74;margin-inline-end:6px}.ob-recipients li span{display:block;color:#4d5f58;font-size:12px}
-.ob-print{justify-self:start}.ob-item{display:block}
+.ob-print{justify-self:start}.ob-sale-actions div{display:flex;gap:8px;flex-wrap:wrap}
+.shop-manager{position:fixed;inset:0;z-index:90;background:var(--bg);overflow-y:auto;overscroll-behavior:contain}.shop-manager-inner{max-width:1180px;margin:0 auto;padding:24px 20px 60px}
+@media (max-width:700px){.shop-manager-inner{padding:14px 12px 40px}}.ob-item{display:block}
 .ob-prep{margin-bottom:12px}.ob-prep .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.ob-prep h3{margin:0}.ob-prep p{margin:2px 0 0;font-size:13px;color:#6b7b74}
 .ob-grind{display:inline-block;margin:0 0 2px 8px;padding:1px 8px;border-radius:999px;background:#f1f4f2;font-size:12px;white-space:nowrap}
 .customer-employee-order .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.customer-employee-order h3{margin:0}.customer-employee-order p{margin:2px 0 10px;font-size:13px;color:#6b7b74}
