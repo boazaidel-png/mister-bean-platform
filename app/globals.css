@@ -1632,6 +1632,13 @@ html:has(.sp-wrap),html:has(.sp-wrap) body{overflow-x:clip;background:#fff}
 .ob-drawer section{padding:14px 18px;border-bottom:1px solid var(--line);display:grid;gap:10px}.ob-drawer h4{margin:0;font-size:12px;color:#6b7b74;font-weight:800}
 .ob-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.ob-fields label{display:grid;gap:5px}.ob-fields label>span{font-size:11px;font-weight:700;color:#6b7b74}.ob-fields input,.ob-fields select{height:38px;border:1px solid #d6e1dc;border-radius:9px;padding:0 10px;background:#fff;width:100%}.ob-fields .readonly{height:38px;display:flex;align-items:center;padding:0 10px;background:#f1f4f2;border-radius:9px;font-weight:700;font-size:13px}.ob-fields .kg-input{width:100%}
 .ob-note{margin:0;font-size:12px;color:#4d5f58;background:#f6f8f6;border-radius:9px;padding:8px 10px}
+.ob-mini-table{width:100%;border-collapse:collapse;font-size:13px}.ob-mini-table th{font-size:11px;color:#6b7b74;font-weight:700;text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}.ob-mini-table td{padding:6px;border-bottom:1px solid #eef2ef}
+.ob-recipients{margin:0;padding-inline-start:20px;display:grid;gap:6px;font-size:13px}.ob-recipients li{padding:2px 0}.ob-recipients li strong{margin-inline-end:6px}.ob-recipients li small{color:#6b7b74;margin-inline-end:6px}.ob-recipients li span{display:block;color:#4d5f58;font-size:12px}
+.ob-print{justify-self:start}
+.ob-prep{margin-bottom:12px}.ob-prep .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.ob-prep h3{margin:0}.ob-prep p{margin:2px 0 0;font-size:13px;color:#6b7b74}
+.ob-grind{display:inline-block;margin:0 0 2px 8px;padding:1px 8px;border-radius:999px;background:#f1f4f2;font-size:12px;white-space:nowrap}
+.customer-employee-order .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.customer-employee-order h3{margin:0}.customer-employee-order p{margin:2px 0 10px;font-size:13px;color:#6b7b74}
+.shop-drafts-toggle{margin-top:10px;font-size:12px;color:#8a7f78}
 .ob-timeline{list-style:none;margin:0;padding:0;display:grid;gap:8px}.ob-timeline li{display:grid;padding-inline-start:14px;border-inline-start:2px solid #d6e1dc}.ob-timeline strong{font-size:12px}.ob-timeline small{font-size:11px;color:#8d9b95}
 @media (max-width:900px){
   .ob-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}

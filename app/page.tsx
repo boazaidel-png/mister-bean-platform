@@ -26,7 +26,6 @@ import {
   Trash2,
   UserCog,
   ClipboardCheck,
-  ShoppingBag,
   UsersRound,
   X,
   History,
@@ -81,6 +80,8 @@ import type {
   Quote,
   Role,
   SalesWorkspace,
+  ShopCampaign,
+  ShopOrder,
   Task,
   Ticket,
   TicketIntake,
@@ -97,6 +98,9 @@ import { reconcileFilterReplacementTask, updateTaskStatus } from "@/lib/maintena
 import { createBusinessBackup } from "@/lib/system-backup";
 import { BLEND_CATALOG, findKnownBlend, knownBlends } from "@/lib/blend-catalog";
 import { contractMonthlyKg, currentMonthKey, syncContractOrders } from "@/lib/order-sync";
+import { syncEmployeeOrders } from "@/lib/shop-engine";
+import { subscribeToShopCampaigns, subscribeToShopOrders } from "@/lib/shop-store";
+import { deliveryPrep, deliveryRecipients, openDeliverySheet } from "@/lib/delivery-sheet";
 import { CONTACT_OFFICE_MESSAGE, contractOrdersOnly, DELIVERY_PREFERENCES, extraAllowanceKg, highConsumption, deliveredThisMonthKg, deliveryPreferenceLabel, isExtraOrder, MAX_EXTRA_ORDER_KG, newExtraOrder, nextContractDelivery, openExtraOrders, validateExtraOrder } from "@/lib/extra-orders";
 import { buildNotifications, type AppNotification } from "@/lib/notifications";
 import { NotificationBell } from "@/components/notification-bell";
@@ -147,7 +151,6 @@ const adminNav = [
   {id:"tickets" as View,label:"שירות ותקלות",icon:Headphones},{id:"orders" as View,label:"הזמנות קפה",icon:Coffee},
   {id:"machines" as View,label:"צי מכונות",icon:MonitorCog},{id:"tasks" as View,label:"משימות צוות",icon:ListTodo},
   {id:"tastings" as View,label:"טעימות קפה",icon:ClipboardCheck},
-  {id:"shop" as View,label:"מכירה לעובדים",icon:ShoppingBag},
   {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},{id:"access" as View,label:"ניהול והרשאות",icon:UserCog},
 ];
 const serviceNav = [
@@ -185,7 +188,7 @@ const customerAgreement = (customer:Customer,quotes:Quote[]) => {
 };
 const latestCustomerOrder = (orders:Order[],accountId:string) =>
   orders
-    .filter(order=>order.accountId===accountId)
+    .filter(order=>order.accountId===accountId&&order.kind!=="employees")
     .sort((left,right)=>right.month.localeCompare(left.month)||(right.updatedAt||"").localeCompare(left.updatedAt||""))[0];
 const createId = (prefix:string) => `${prefix}-${Date.now().toString(36)}-${crypto.randomUUID().slice(0,6)}`;
 const greetingForHour = (hour:number) => {
@@ -393,6 +396,40 @@ export default function Home() {
     const timer=window.setInterval(sync,60*60*1000);
     return()=>window.clearInterval(timer);
   },[customers,role,preview,storeReady,salesWorkspace.quotes]);
+  // Employee sales go out with the company's coffee, so each sale is kept as one coffee order of the
+  // customer, built from its paid orders. Only administrators see the sales, so they keep it in step.
+  const [shopData,setShopData]=useState<{campaigns:ShopCampaign[];orders:Map<string,ShopOrder[]>}|null>(null);
+  const [shopClock,setShopClock]=useState(()=>Date.now());
+  useEffect(()=>{
+    if(!storeReady||role!=="admin"||preview)return;
+    let campaigns:ShopCampaign[]|null=null,orders:Map<string,ShopOrder[]>|null=null;
+    const publish=()=>{if(campaigns&&orders)setShopData({campaigns,orders});};
+    const fail=(error:Error)=>setSyncError(firebaseMessage(error));
+    const stopCampaigns=subscribeToShopCampaigns(next=>{campaigns=next;publish();},fail);
+    const stopOrders=subscribeToShopOrders(next=>{orders=next;publish();},fail);
+    // A sale also closes when its date passes, with nothing in the database changing.
+    const timer=window.setInterval(()=>setShopClock(Date.now()),10*60*1000);
+    return()=>{stopCampaigns();stopOrders();window.clearInterval(timer);};
+  },[role,preview,storeReady]);
+  // Each content is written once per session, so two screens that see it differently cannot keep rewriting it.
+  const employeeSyncApplied=useRef(new Set<string>());
+  useEffect(()=>{
+    if(!shopData||role!=="admin"||preview)return;
+    const next=syncEmployeeOrders(store.orders,shopData.campaigns,shopData.orders,new Date().toISOString(),shopClock);
+    if(next===store.orders)return;
+    const changed=next.filter(order=>!store.orders.includes(order)).filter(order=>{
+      const key=`${order.id}:${JSON.stringify([order.month,order.status,order.approvedKg,order.pricePerKg,order.employeeLines,order.recipients])}`;
+      if(employeeSyncApplied.current.has(key))return false;
+      employeeSyncApplied.current.add(key);
+      return true;
+    });
+    if(!changed.length)return;
+    const byId=new Map(changed.map(order=>[order.id,order]));
+    setStore(current=>{
+      const known=new Set(current.orders.map(order=>order.id));
+      return {...current,orders:[...changed.filter(order=>!known.has(order.id)),...current.orders.map(order=>byId.get(order.id)||order)]};
+    });
+  },[shopData,shopClock,store.orders,role,preview]);
   const clientId = customers.some(customer=>customer.id===selectedCustomer)?selectedCustomer:(customers[0]?.id||"");
   const scopedMachines = isStaff?store.machines:store.machines.filter(m=>m.accountId===clientId);
   const scopedTickets = isStaff?store.tickets:store.tickets.filter(t=>t.accountId===clientId);
@@ -614,7 +651,6 @@ export default function Home() {
           {view==="orders"&&(isStaff?<OrdersBoard orders={scopedOrders} activities={store.activities} agreementFor={id=>{const customer=customers.find(item=>item.id===id);return customer?customerAgreement(customer,salesWorkspace.quotes):undefined;}} onOrderChange={updateOrder} onCreateOrder={createOrder}/>:<CustomerOrders orders={scopedOrders} onChange={updateOrder} accountId={clientId} onCreateExtra={createExtraOrder}/>)}
           {view==="tasks"&&<Tasks tasks={scopedTasks} onCreate={()=>{if(allowWrite())setModal("task");}} onStatus={updateTask}/>}
           {view==="tastings"&&role==="admin"&&<TastingWorkspace customers={customers} readOnly={readOnly} actor={profile.email} onToast={setToast}/>}
-          {view==="shop"&&role==="admin"&&<ShopWorkspace customers={customers} readOnly={readOnly} actor={profile.email} onToast={setToast}/>}
           {view==="reports"&&role==="admin"&&<Reports store={store} customers={customers} users={users}/>}
           {view==="access"&&profile.role==="admin"&&<AccessManagement currentUser={profile} customers={customers} users={users} readOnly={readOnly} onBackup={downloadBackup} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await updateUserAccess(user.uid,role,accountIds,status);setSyncError("");setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onRevoke={async user=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await revokeUserAccess(user);setSyncError("");setToast("הגישה הוסרה והמשתמש נותק מנתוני הלקוחות");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onSetPassword={async(email,password)=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");const result=await adminSetUserPassword(email,password);setToast(result.created?"המשתמש נוצר. יש לאשר לו הרשאות ברשימה":"הסיסמה נשמרה. אפשר להתחבר עם מייל וסיסמה");}} onPreview={next=>enterPreview(next)}/>}
           {view==="contract"&&(customers.find(c=>c.id===clientId)?<Contract customer={customers.find(c=>c.id===clientId)!} machines={scopedMachines}/>:<EmptyCustomerState/>)}
@@ -1076,14 +1112,21 @@ function CustomerOrders({orders,onChange,accountId="",onCreateExtra}:{orders:Ord
   const rows=[...orders].sort((a,b)=>b.month.localeCompare(a.month));
   const monthName=(month:string)=>{const [year,value]=month.split("-");return `${value}/${year}`;};
     const customer=customers.find(item=>item.id===(orders[0]?.accountId||accountId));
-    const contractRows=rows.filter(item=>!isExtraOrder(item));
+    // The month's order is the contract one; top-ups, extras and employee sales are listed apart.
+    const contractRows=rows.filter(item=>(item.kind??"contract")==="contract");
+    const employeeRows=rows.filter(item=>item.kind==="employees"&&item.shopCampaignId&&item.status!=="בוטל"&&item.recipients?.length);
     const o=[...contractRows].reverse().find(item=>!["סופק","בוטל"].includes(item.status))||contractRows[0];
-    const others=rows.filter(item=>item.id!==o?.id);
+    const others=rows.filter(item=>item.id!==o?.id&&!employeeRows.includes(item));
+    const printEmployees=(item:Order)=>openDeliverySheet({customerName:customer?.name||"",monthTitle:monthTitle(item.month),deliveryDate:customer?formatDate(nextDeliveryDate(customer,item)):"",orders:rows.filter(other=>other.month===item.month)});
     const pendingExtras=openExtraOrders(orders);
     const outOfCoffee=customer&&onCreateExtra&&<button className="primary out-of-coffee" onClick={()=>setExtraOpen(true)}>☕ נגמר לי הקפה</button>;
     return <><SectionTitle title="הזמנת קפה" sub={o?`הזמנה לחודש ${monthName(o.month)}`:"הזמנות קפה"} action={outOfCoffee||undefined}/>
       {pendingExtras.length>0&&<section className="panel extra-order-pending">{pendingExtras.map(item=><div key={item.id}><div><strong>הזמנת השלמה · {Math.round(item.approvedKg||item.requestedKg)} ק״ג · <bdi>{item.blend}</bdi></strong><span>{item.status==="אושר"?"אושרה":"ממתינה לאישור"}{deliveryPreferenceLabel(item)?` · אספקה ${deliveryPreferenceLabel(item)}`:""}</span></div>{item.status==="ממתין לאישור"&&<button className="extra-order-cancel" onClick={()=>{if(window.confirm(`לבטל את הזמנת ההשלמה של ${Math.round(item.requestedKg)} ק״ג?`))onChange(item.id,{status:"בוטל"});}}>ביטול ההזמנה</button>}</div>)}</section>}
       {o?<><section className="order-hero"><div><span>{o.status==="סופק"?"תאריך אספקה":"מועד האספקה הבא"}</span><h2>{o.deliveredAt?formatDate(o.deliveredAt):customer?formatDate(nextDeliveryDate(customer,o)):formatDate(`${o.month}-01`)}</h2><Badge>{o.status}</Badge></div><div className="kg-ring"><strong>{Math.round(o.requestedKg)}</strong><span>ק״ג</span></div></section><OrderEditor key={o.id} order={o} blends={customer?.contractBlends||[]} deliveryDate={customer?nextDeliveryDate(customer,o):`${o.month}-01`} onSave={onChange}/></>:<section className="panel inline-empty">אין עדיין הזמנה חודשית.</section>}
+      {employeeRows.map(item=><section className="panel customer-employee-order" key={item.id}>
+        <div className="panel-head"><div><h3>קפה לעובדים · {monthTitle(item.month)}</h3><p>{Math.round(item.approvedKg)} שקיות של {item.recipients!.length} עובדים, מגיעות יחד עם משלוח הקפה{item.status==="סופק"?"":customer?` ב־${formatDate(nextDeliveryDate(customer,item))}`:""}.</p></div><button onClick={()=>printEmployees(item)}>רשימת חלוקה להדפסה</button></div>
+        <ol className="ob-recipients">{item.recipients!.map((person,index)=><li key={`${person.name}-${index}`}><strong>{person.name}</strong>{person.department&&<small>{person.department}</small>}<span>{person.items}</span></li>)}</ol>
+      </section>)}
       {others.length>0&&<section className="panel customer-order-history"><h3>הזמנות נוספות</h3>{others.map(item=><div key={item.id}><strong>{isExtraOrder(item)?`השלמה · ${formatDate(item.createdAt||`${item.month}-01`)}`:monthName(item.month)}</strong><span>{Math.round(item.approvedKg||item.requestedKg)} ק״ג · {item.blend}{isExtraOrder(item)&&deliveryPreferenceLabel(item)&&!item.deliveredAt?` · אספקה ${deliveryPreferenceLabel(item)}`:""}{item.deliveredAt?` · סופק ${formatDate(item.deliveredAt)}`:""}</span><Badge>{item.status}</Badge></div>)}</section>}
       {extraOpen&&customer&&onCreateExtra&&<ExtraOrderModal customer={customer} orders={orders} onClose={()=>setExtraOpen(false)} onSubmit={order=>{onCreateExtra(order);setExtraOpen(false);}}/>}
     </>;
@@ -1129,10 +1172,18 @@ function OrdersBoard({orders,activities,agreementFor,onOrderChange,onCreateOrder
   const plannedDate=(row:BoardRow)=>{
     if(row.deliveredAt)return `סופק ${formatDate(row.deliveredAt)}`;
     if(isExtraOrder(row.order))return deliveryPreferenceLabel(row.order)||"—";
+    if(row.kind==="employees"&&row.order.shopCampaignId){
+      if(row.stage==="customer")return "העובדים עדיין מזמינים";
+      const customer=customers.find(item=>item.id===row.accountId);
+      return customer?`עם המשלוח · ${formatDate(nextDeliveryDate(customer,row.order))}`:"עם המשלוח";
+    }
     if(row.kind!=="contract")return "לפי תיאום";
     const customer=customers.find(item=>item.id===row.accountId);
     return customer?formatDate(nextDeliveryDate(customer,row.order)):"—";
   };
+  /** The delivery of one customer in the shown month: the company's coffee and the employee bags together. */
+  const deliveryOrders=(id:string)=>orders.filter(order=>order.accountId===id&&order.month===month);
+  const printDelivery=(id:string)=>{const customer=customers.find(item=>item.id===id);openDeliverySheet({customerName:customerName(id),monthTitle:monthTitle(month),deliveryDate:customer?formatDate(nextDeliveryDate(customer,{month} as Order)):"",orders:deliveryOrders(id)});};
   const exportCsv=()=>{const csv="חודש,לקוח,סוג,תערובת,ק״ג,שלב,ערך,אספקה\n"+monthRows.map(row=>[row.month,customerName(row.accountId),ROW_KIND_LABELS[row.kind],row.blend,row.kg,stageLabel(row.stage),Math.round(row.value),row.deliveredAt||""].map(value=>`"${String(value).replace(/"/g,'""')}"`).join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download=`coffee-orders-${month}.csv`;a.click();};
   return <div className="orders-board">
     {!scoped&&<SectionTitle title="הזמנות קפה"/>}
@@ -1146,6 +1197,7 @@ function OrdersBoard({orders,activities,agreementFor,onOrderChange,onCreateOrder
       <article><small>שווי ההזמנות</small><strong>{summary.value?shekels(summary.value):"—"}</strong><span>לפי ההסכם, ללא מע״מ</span></article>
       <article className={summary.unpaidCount?"alert":""}><small>סופק ולא שולם</small><strong>{summary.unpaidCount?shekels(summary.unpaidValue):"הכול שולם"}</strong><span>{summary.unpaidCount?`${summary.unpaidCount} הזמנות`:"אין חוב פתוח"}</span></article>
     </div>
+    {scoped&&accountId&&<DeliveryPrepPanel orders={deliveryOrders(accountId)} onPrint={()=>printDelivery(accountId)}/>}
     <div className="ob-pipeline" role="tablist" aria-label="שלבי ההזמנה">
       {ORDER_STAGES.map(item=><button role="tab" key={item.key} aria-selected={stage===item.key} className={`${stage===item.key?"active":""} ${item.key==="approval"&&summary.byStage.approval?"attention":""}`} onClick={()=>setStage(stage===item.key?"":item.key)}><b>{summary.byStage[item.key]}</b><span>{item.label}</span></button>)}
     </div>
@@ -1165,36 +1217,40 @@ function OrdersBoard({orders,activities,agreementFor,onOrderChange,onCreateOrder
       <header><span>12 חודשים אחרונים</span><small>לחיצה על חודש עוברת אליו</small></header>
       <div>{history.map(item=><button key={item.month} className={item.month===month?"active":""} onClick={()=>setMonth(item.month)} title={`${monthTitle(item.month)} · ${item.kg} ק״ג`} aria-label={`${monthTitle(item.month)}: ${item.kg} ק״ג`}><i style={{height:`${Math.max(4,item.kg/maxKg*100)}%`}}/><span>{Number(item.month.slice(5))}</span></button>)}</div>
     </section>
-    {open&&<OrderDrawer row={open} activities={activities} onClose={()=>setOpenKey("")} onOrderChange={onOrderChange} plannedDate={plannedDate(open)}/>}
+    {open&&<OrderDrawer row={open} activities={activities} onClose={()=>setOpenKey("")} onOrderChange={onOrderChange} plannedDate={plannedDate(open)} onPrint={()=>printDelivery(open.accountId)}/>}
     {creating&&onCreateOrder&&<NewOrderModal customers={customers} accountId={accountId} orders={orders} agreementFor={agreementFor} onClose={()=>setCreating(false)} onCreate={order=>{onCreateOrder(order);setCreating(false);setMonth(order.month);}}/>}
     {Array.from(new Set(monthRows.map(row=>row.accountId))).map(id=>{const customer=customers.find(item=>item.id===id);return <datalist id={`order-blends-${id}`} key={id}>{(customer?knownBlends(customer):BLEND_CATALOG.map(item=>({name:item.name}))).map(item=><option value={item.name} key={item.name}/>)}</datalist>;})}
   </div>;
 }
 
 /** Everything about one order, and the only place it is edited. */
-function OrderDrawer({row,activities,plannedDate,onClose,onOrderChange}:{row:BoardRow;activities:ActivityRecord[];plannedDate:string;onClose:()=>void;onOrderChange:(id:string,data:Partial<Order>)=>void}) {
+function OrderDrawer({row,activities,plannedDate,onClose,onOrderChange,onPrint}:{row:BoardRow;activities:ActivityRecord[];plannedDate:string;onClose:()=>void;onOrderChange:(id:string,data:Partial<Order>)=>void;onPrint:()=>void}) {
   const customerName=useCustomerName();
   useEffect(()=>{const onKey=(event:KeyboardEvent)=>{if(event.key==="Escape")onClose();};window.addEventListener("keydown",onKey);return()=>window.removeEventListener("keydown",onKey);},[onClose]);
   const order=row.order;
   const contract=row.kind==="contract";
+  // An employee sale is built from what the employees paid for: its quantities and price are read-only here.
+  const employeeSale=row.kind==="employees"&&Boolean(order.shopCampaignId);
   const history=activities.filter(item=>item.entityId===order.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   const statuses=["ממתין לעדכון לקוח","ממתין לאישור","אושר","בהכנה","סופק","בוטל"];
   const money=(key:"pricePerKg"|"costPerKg",label:string)=><label><span>{label}</span><input key={`${key}-${order[key]??""}`} type="number" min="0" step="1" defaultValue={order[key]??""} onBlur={event=>{const value=Math.max(0,Math.round(Number(event.target.value)));if(event.target.value!==""&&value!==order[key])onOrderChange(order.id,{[key]:value});}}/></label>;
   return <div className="ob-drawer-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}><aside className="ob-drawer" role="dialog" aria-modal="true" aria-label={`הזמנה של ${customerName(row.accountId)}`}>
     <header><div><small>{ROW_KIND_LABELS[row.kind]} · {monthTitle(row.month)}</small><h3>{customerName(row.accountId)}</h3><i className={`ob-chip ${row.stage}`}>{stageLabel(row.stage)}</i></div><button aria-label="סגירה" onClick={onClose}>✕</button></header>
+    {employeeSale?<EmployeeSaleDetails order={order} value={row.value} onPrint={onPrint}/>:<>
     <section><h4>כמות ותערובת</h4><div className="ob-fields">
       {contract&&<label><span>לפי החוזה</span><div className="readonly">{Math.round(order.defaultKg)} ק״ג</div></label>}
       {(contract||isExtraOrder(order))&&<label><span>הלקוח ביקש</span><div className="readonly">{Math.round(order.requestedKg)} ק״ג</div></label>}
       <label><span>כמות {contract||isExtraOrder(order)?"מאושרת":""}</span><OrderKgInput order={order} onChange={onOrderChange}/></label>
       <label><span>תערובת</span><OrderBlendInput order={order} onChange={onOrderChange}/></label>
     </div>{order.note&&<p className="ob-note"><b>הערה:</b> {order.note}</p>}</section>
-    {!contract&&<section><h4>מחיר</h4><div className="ob-fields">{money("pricePerKg","מחיר ללקוח לק״ג")}{money("costPerKg","עלות לנו לק״ג")}<label><span>סה״כ</span><div className="readonly">{row.value?shekels(row.value):"—"}</div></label></div></section>}
+    </>}
+    {!contract&&!employeeSale&&<section><h4>מחיר</h4><div className="ob-fields">{money("pricePerKg","מחיר ללקוח לק״ג")}{money("costPerKg","עלות לנו לק״ג")}<label><span>סה״כ</span><div className="readonly">{row.value?shekels(row.value):"—"}</div></label></div></section>}
     <section><h4>אספקה</h4><div className="ob-fields">
       <label><span>מועד</span><div className="readonly">{plannedDate}</div></label>
       <label><span>תאריך אספקה בפועל</span><input type="date" value={(order.deliveredAt||"").slice(0,10)} onChange={event=>onOrderChange(order.id,{deliveredAt:event.target.value})}/></label>
       <label><span>סטטוס</span><select value={order.status==="לפי חוזה"?"ממתין לעדכון לקוח":order.status} onChange={event=>onOrderChange(order.id,{status:event.target.value,...(event.target.value==="סופק"&&!order.deliveredAt?{deliveredAt:new Date().toISOString().slice(0,10)}:{})})}>{statuses.map(value=><option key={value}>{value}</option>)}</select></label>
     </div></section>
-    <section><h4>תשלום ומסמכים</h4><OrderFulfillmentControls order={order} onChange={onOrderChange}/></section>
+    {!employeeSale&&<section><h4>תשלום ומסמכים</h4><OrderFulfillmentControls order={order} onChange={onOrderChange}/></section>}
     <section><h4>היסטוריה</h4><ol className="ob-timeline">
       {history.map(item=><li key={item.id}><strong>{item.summary}</strong><small>{item.actorName} · {formatDateTime(item.createdAt)}</small></li>)}
       {order.customerConfirmedAt&&<li><strong>הלקוח {isExtraOrder(order)?"ביקש השלמה":"אישר את ההזמנה"}</strong><small>{formatDateTime(order.customerConfirmedAt)}</small></li>}
@@ -1202,6 +1258,40 @@ function OrderDrawer({row,activities,plannedDate,onClose,onOrderChange}:{row:Boa
     </ol></section>
   </aside></div>;
 }
+/** What the employees ordered: bags per coffee and grind, and who gets what. */
+function EmployeeSaleDetails({order,value,onPrint}:{order:Order;value:number;onPrint:()=>void}) {
+  const lines=order.employeeLines||[],people=order.recipients||[];
+  return <>
+    <section><h4>מה להכין</h4><div className="ob-fields">
+      <label><span>שקיות</span><div className="readonly">{Math.round(order.approvedKg)} × 1 ק״ג</div></label>
+      <label><span>עובדים</span><div className="readonly">{people.length}</div></label>
+      <label><span>שווי ללא מע״מ</span><div className="readonly">{value?shekels(value):"—"}</div></label>
+    </div>
+    {lines.length?<table className="ob-mini-table"><thead><tr><th>קפה</th><th>טחינה</th><th>שקיות</th></tr></thead><tbody>{lines.map(line=><tr key={`${line.coffee}-${line.grind}`}><td><bdi>{line.coffee}</bdi></td><td>{line.grind}</td><td><strong>{line.bags}</strong></td></tr>)}</tbody></table>:<p className="ob-note">עדיין אין הזמנות ששולמו.</p>}
+    </section>
+    <section><h4>רשימת חלוקה</h4>
+      {people.length?<ol className="ob-recipients">{people.map((person,index)=><li key={`${person.name}-${index}`}><strong>{person.name}</strong>{person.department&&<small>{person.department}</small>}<span>{person.items}</span></li>)}</ol>:<p className="ob-note">הרשימה תתמלא כשעובדים ישלמו.</p>}
+      <button className="primary ob-print" onClick={onPrint}>רשימת משלוח להדפסה ולשליחה</button>
+      <p className="ob-note">כל עובד שילם בעצמו וקיבל חשבונית מס קבלה במייל.</p>
+    </section>
+  </>;
+}
+
+/** The month's delivery to one customer: per coffee, what the company ordered and the employee bags by grind. */
+function DeliveryPrepPanel({orders,onPrint}:{orders:Order[];onPrint:()=>void}) {
+  const rows=deliveryPrep(orders);
+  const people=deliveryRecipients(orders).length;
+  if(!rows.length)return null;
+  const total=rows.reduce((sum,row)=>sum+row.totalKg,0);
+  const bags=rows.reduce((sum,row)=>sum+row.employeeBags,0);
+  return <section className="panel ob-prep">
+    <div className="panel-head"><div><h3>הכנה למשלוח</h3><p>{total} ק״ג בסך הכול{bags?` · מתוכם ${bags} שקיות של ${people} עובדים`:""}</p></div><button onClick={onPrint}>רשימת משלוח להדפסה ולשליחה</button></div>
+    <div className="table-wrap"><table><thead><tr><th>קפה</th><th>לחברה</th><th>לעובדים</th><th>סה״כ</th></tr></thead><tbody>
+      {rows.map(row=><tr key={row.coffee}><td><strong><bdi>{row.coffee}</bdi></strong></td><td>{row.companyKg?`${row.companyKg} ק״ג`:"—"}</td><td>{row.grinds.length?row.grinds.map(item=><span className="ob-grind" key={item.grind}>{item.grind} × {item.bags}</span>):"—"}</td><td><strong>{row.totalKg} ק״ג</strong></td></tr>)}
+    </tbody></table></div>
+  </section>;
+}
+
 /**
  * Approved quantity of an order. Typing stays in the field and is saved when
  * the field is left or Enter is pressed: saving on every key wrote each digit

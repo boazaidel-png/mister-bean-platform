@@ -149,6 +149,13 @@ export type NextAction = { label: string; order: Partial<Order> };
 /** The one button a row offers: what moves it to the next stage. */
 export function nextAction(row: BoardRow, today = new Date().toISOString().slice(0, 10)): NextAction | null {
   const order = row.order;
+  // An employee sale waits while employees are still ordering, and was paid by
+  // each of them up front, so delivering it also settles it.
+  if (row.kind === "employees" && order.shopCampaignId) {
+    if (row.stage === "approved") return { label: "העברה להכנה", order: { status: "בהכנה" } };
+    if (row.stage === "preparing") return { label: "סימון כסופק", order: { status: "סופק", deliveredAt: order.deliveredAt || today, paid: true } };
+    return null;
+  }
   if (row.stage === "customer") return { label: "אישור לפי החוזה", order: { status: "אושר" } };
   if (row.stage === "approval") {
     return { label: "אישור", order: { status: "אושר", ...(order.kind === "extra" || order.customerConfirmedAt ? { approvedKg: order.requestedKg } : {}) } };

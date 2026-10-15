@@ -297,11 +297,21 @@ export type Order = {
   deliveryPreference?: DeliveryPreference;
   /** For a top-up delivered on a chosen date (yyyy-mm-dd). */
   requestedDeliveryDate?: string;
+  /** For employee sales: the sale the order is built from. */
+  shopCampaignId?: string;
+  /** For employee sales: bags to prepare per coffee and grind, from paid orders only. */
+  employeeLines?: EmployeeOrderLine[];
+  /** For employee sales: who gets what, for labelling the bags and handing them out at the office. */
+  recipients?: EmployeeRecipient[];
   createdAt?: string;
   updatedAt?: string;
 };
 
 export type DeliveryPreference = "asap" | "tomorrow" | "date";
+
+export type EmployeeOrderLine = { coffee: string; grind: string; bags: number };
+
+export type EmployeeRecipient = { name: string; department: string; items: string };
 
 export type Task = {
   id: string;
@@ -622,6 +632,8 @@ export type ShopCampaign = {
   status: ShopCampaignStatus;
   items: ShopItem[];
   closesAtMs: number;
+  /** The delivery month (yyyy-mm) the bags go out with, together with the company's coffee. */
+  month?: string;
   note: string;
   paymentUrl: string;
   createdAt: string;
