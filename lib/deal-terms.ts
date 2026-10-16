@@ -165,14 +165,23 @@ const inRun = (month: string, first: string, count: number) => {
  * for equipment sold to them, and the operating estimate while the deal runs.
  */
 export function dealMonthMoney(deal: CustomerDeal, month: string) {
-  let equipment = 0, financing = 0, equipmentSale = 0;
+  let equipment = 0, financing = 0, equipmentSale = 0, loanFundedEquipment = 0;
   for (const item of deal.purchases) {
-    // The part a loan paid is repaid through the loan, not to the supplier.
-    if (!item.loanId && inRun(month, addMonths(item.month, item.supplierPayDelayMonths), item.supplierInstallments)) equipment += item.cost / Math.max(1, item.supplierInstallments);
+    // The part a loan paid costs us through the loan's repayments, not as an equipment cost;
+    // the money still goes to the supplier then, which the cashflow counts.
+    if (inRun(month, addMonths(item.month, item.supplierPayDelayMonths), item.supplierInstallments)) {
+      const payment = item.cost / Math.max(1, item.supplierInstallments);
+      if (item.loanId) loanFundedEquipment += payment; else equipment += payment;
+    }
     if (item.saleIncome > 0 && inRun(month, item.month, item.clientInstallments)) equipmentSale += item.saleIncome / Math.max(1, item.clientInstallments);
   }
   for (const loan of deal.loans) if (inRun(month, loan.firstPaymentMonth, loan.months)) financing += loanPayment(loan);
   const index = monthsBetween(deal.startMonth, month);
   const running = index >= 0 && index < deal.contractMonths;
-  return { equipment, financing, equipmentSale, operating: running ? termsAt(deal, month)?.operatingCostEstimate || 0 : 0 };
+  return { equipment, financing, equipmentSale, loanFundedEquipment, operating: running ? termsAt(deal, month)?.operatingCostEstimate || 0 : 0 };
+}
+
+/** Loan money that came in during a month. */
+export function loanInIn(deal: Pick<CustomerDeal, "loans">, month: string) {
+  return deal.loans.filter((loan) => loan.receivedMonth === month).reduce((sum, loan) => sum + loan.amount, 0);
 }

@@ -59,6 +59,8 @@ test("each month's money follows each purchase and loan on its own dates", () =>
   const deal = dealFromQuote(quote, figures(), "2026-05", "boaz");
   // Loan part (12,000) paid through the loan; the rest (8,000) to the supplier in 8 payments from a month after purchase.
   assert.equal(dealMonthMoney(deal, "2026-05").equipment, 0);
+  // The loan's part reaches the supplier a month after purchase, from the loan's money.
+  assert.equal(dealMonthMoney(deal, "2026-06").loanFundedEquipment, 12000);
   assert.equal(dealMonthMoney(deal, "2026-06").equipment, 1000);
   assert.equal(dealMonthMoney(deal, "2027-01").equipment, 1000);
   assert.equal(dealMonthMoney(deal, "2027-02").equipment, 0);
