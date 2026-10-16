@@ -1695,3 +1695,13 @@ html:has(.sp-wrap),html:has(.sp-wrap) body{overflow-x:clip;background:#fff}
 .year-cash-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.year-cash-total{border-top:1px solid var(--line);margin-top:4px;padding-top:6px;font-weight:700}.year-cash-sub{margin:4px 0 0;font-size:13px}
 @media (max-width:900px){.year-cash-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:560px){.year-cash-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.year-cash-columns{grid-template-columns:1fr}}
+/* The cumulative cash: a simulation of the bank account, month by month. */
+.bank{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:linear-gradient(180deg,#f7fbf9,#fff);display:grid;gap:10px}
+.bank-head{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted)}.bank-head h4{margin:0;font-size:14px;color:var(--ink)}.bank-head b{font-size:16px;color:var(--ink);margin-inline-start:4px}
+.bank-bars{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px;align-items:end}
+.bank-bars button{display:grid;gap:4px;justify-items:center;border:0;background:none;padding:4px 0;cursor:pointer;border-radius:8px;min-width:0}
+.bank-bars button.active{background:var(--green2)}.bank-bars button.current small{color:var(--green);font-weight:800}
+.bank-value{font-size:11px;font-weight:700;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.bank-track{display:flex;align-items:flex-end;height:70px;width:70%;max-width:34px}.bank-track i{display:block;width:100%;border-radius:5px 5px 2px 2px;background:#7fb39f}.bank-track i.below{background:#e39a9a}
+.bank-bars button.past .bank-track i{opacity:.65}.bank-bars small{font-size:11px;color:var(--muted)}
+@media (max-width:760px){.bank-bars{grid-template-columns:repeat(6,minmax(0,1fr))}}
