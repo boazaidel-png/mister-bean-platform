@@ -1684,3 +1684,14 @@ html:has(.sp-wrap),html:has(.sp-wrap) body{overflow-x:clip;background:#fff}
 .cashflow-table td,.cashflow-table th{white-space:nowrap}.cashflow-table tr.past td{color:#5d6b66}.cashflow-table tr.current td{background:#f1f7f4}.cashflow-table tr.clickable,tr.clickable{cursor:pointer}.cashflow-table tr.clickable:hover td,tr.clickable:hover td{background:#f6faf8}
 .cashflow-detail td{background:#fbfcfb}.cashflow-breakdown{display:grid;gap:6px}.cashflow-breakdown button{display:grid;grid-template-columns:minmax(0,1.4fr) 1fr 1fr 1fr;gap:10px;align-items:center;text-align:right;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff;cursor:pointer;font-size:13px}
 .deal-list button.pending{border-style:dashed;background:#fbfcfb}.deal-pending{display:block;font-style:normal;font-size:12px;font-weight:600;color:var(--orange);margin-top:2px}
+/* Cashflow by year: totals, a tile per month, the chosen month in detail. */
+.year-cash{display:grid;gap:14px}
+.year-cash-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.year-cash-totals{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:var(--muted)}.year-cash-totals b{color:var(--ink);font-size:15px;margin-inline-start:4px}
+.year-cash-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.year-cash-grid button{display:grid;gap:3px;text-align:right;padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:#fff;cursor:pointer;min-width:0}
+.year-cash-grid button small{font-size:12px;color:var(--muted);font-weight:700}.year-cash-grid button strong{font-size:16px}.year-cash-grid button span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.year-cash-grid button.past{background:#f7f9f8}.year-cash-grid button.current{border-color:#9cc3b4}.year-cash-grid button.active{border-color:var(--green);box-shadow:0 0 0 2px var(--green2)}
+.year-cash-detail{border-top:1px solid var(--line);padding-top:12px;display:grid;gap:10px}.year-cash-detail>h4{margin:0;font-size:15px}.year-cash-detail>h4 small{font-weight:400;color:var(--muted);font-size:12px;margin-inline-start:6px}
+.year-cash-columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.year-cash-total{border-top:1px solid var(--line);margin-top:4px;padding-top:6px;font-weight:700}.year-cash-sub{margin:4px 0 0;font-size:13px}
+@media (max-width:900px){.year-cash-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:560px){.year-cash-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.year-cash-columns{grid-template-columns:1fr}}
