@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agreementFromVersion, blendCostIn, dealFromQuote, dealMonthMoney, loanPayment, termsAt, versionKg, versionMonthlyIncome, withVersion, type QuoteFigures } from "./deal-terms.ts";
+import { agreementFromVersion, blendCostIn, dealFromQuote, dealMonthMoney, loanInIn, loanPayment, termsAt, versionKg, versionMonthlyIncome, withVersion, type QuoteFigures } from "./deal-terms.ts";
 import type { Quote } from "./platform-types.ts";
 
 const quote = {
@@ -55,8 +55,18 @@ test("a loan repays principal and interest in equal monthly payments", () => {
   assert.ok(payment > 500 && payment < 540);
 });
 
-test("each month's money follows each purchase and loan on its own dates", () => {
+test("a loan copied from the quote counts only once confirmed as taken; until then the supplier is paid as usual", () => {
   const deal = dealFromQuote(quote, figures(), "2026-05", "boaz");
+  assert.equal(deal.loans[0].confirmed, undefined);
+  assert.equal(dealMonthMoney(deal, "2026-06").equipment, 12000 + 1000);
+  assert.equal(dealMonthMoney(deal, "2026-06").loanFundedEquipment, 0);
+  assert.equal(dealMonthMoney(deal, "2026-05").financing, 0);
+  assert.equal(loanInIn(deal, "2026-05"), 0);
+});
+
+test("each month's money follows each purchase and loan on its own dates", () => {
+  const quoted = dealFromQuote(quote, figures(), "2026-05", "boaz");
+  const deal = { ...quoted, loans: quoted.loans.map((loan) => ({ ...loan, confirmed: true })) };
   // Loan part (12,000) paid through the loan; the rest (8,000) to the supplier in 8 payments from a month after purchase.
   assert.equal(dealMonthMoney(deal, "2026-05").equipment, 0);
   // The loan's part reaches the supplier a month after purchase, from the loan's money.

@@ -166,16 +166,17 @@ const inRun = (month: string, first: string, count: number) => {
  */
 export function dealMonthMoney(deal: CustomerDeal, month: string) {
   let equipment = 0, financing = 0, equipmentSale = 0, loanFundedEquipment = 0;
+  const taken = new Set(deal.loans.filter((loan) => loan.confirmed).map((loan) => loan.id));
   for (const item of deal.purchases) {
     // The part a loan paid costs us through the loan's repayments, not as an equipment cost;
     // the money still goes to the supplier then, which the cashflow counts.
     if (inRun(month, addMonths(item.month, item.supplierPayDelayMonths), item.supplierInstallments)) {
       const payment = item.cost / Math.max(1, item.supplierInstallments);
-      if (item.loanId) loanFundedEquipment += payment; else equipment += payment;
+      if (item.loanId && taken.has(item.loanId)) loanFundedEquipment += payment; else equipment += payment;
     }
     if (item.saleIncome > 0 && inRun(month, item.month, item.clientInstallments)) equipmentSale += item.saleIncome / Math.max(1, item.clientInstallments);
   }
-  for (const loan of deal.loans) if (inRun(month, loan.firstPaymentMonth, loan.months)) financing += loanPayment(loan);
+  for (const loan of deal.loans) if (loan.confirmed && inRun(month, loan.firstPaymentMonth, loan.months)) financing += loanPayment(loan);
   const index = monthsBetween(deal.startMonth, month);
   const running = index >= 0 && index < deal.contractMonths;
   return { equipment, financing, equipmentSale, loanFundedEquipment, operating: running ? termsAt(deal, month)?.operatingCostEstimate || 0 : 0 };
@@ -183,5 +184,5 @@ export function dealMonthMoney(deal: CustomerDeal, month: string) {
 
 /** Loan money that came in during a month. */
 export function loanInIn(deal: Pick<CustomerDeal, "loans">, month: string) {
-  return deal.loans.filter((loan) => loan.receivedMonth === month).reduce((sum, loan) => sum + loan.amount, 0);
+  return deal.loans.filter((loan) => loan.confirmed && loan.receivedMonth === month).reduce((sum, loan) => sum + loan.amount, 0);
 }

@@ -32,6 +32,8 @@ export type DealInput = {
   /** This customer's orders. */
   orders: Order[];
   extraCosts: (month: string) => MonthlyExtraCost[];
+  /** One-off income entered for a month. */
+  extraIncome?: (month: string) => MonthlyExtraCost[];
   /** What a kilogram of a blend costs us, when the order does not say. */
   blendCost: (blend: string) => number;
   /** The current month (yyyy-mm); later months have no actual values yet. */
@@ -64,6 +66,7 @@ export const REVENUE_LINES = [
   ["rental", "שכירות ציוד"],
   ["service", "שירות"],
   ["equipmentSale", "מכירת ציוד"],
+  ["other", "הכנסות נוספות"],
 ] as const;
 
 export const COST_LINES = [
@@ -85,6 +88,7 @@ export type DealMonth = {
   revenue: Record<RevenueKey, Pair>;
   costs: Record<CostKey, Pair>;
   extraCosts: MonthlyExtraCost[];
+  extraIncome: MonthlyExtraCost[];
   kg: Pair;
   totalRevenue: Pair;
   totalCost: Pair;
@@ -192,6 +196,8 @@ export function dealMonth(input: DealInput, month: string): DealMonth {
     }
   }
   fixed(costs.extra, extraTotal);
+  const extraIncome = input.extraIncome?.(month) || [];
+  fixed(revenue.other, extraIncome.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
 
   const sum = (lines: Record<string, Pair>) => Object.values(lines).reduce((total, pair) => ({
     actual: total.actual + pair.actual,
@@ -200,7 +206,7 @@ export function dealMonth(input: DealInput, month: string): DealMonth {
   const totalRevenue = sum(revenue);
   const totalCost = sum(costs);
   return {
-    month, index, inContract, revenue, costs, extraCosts, kg, totalRevenue, totalCost,
+    month, index, inContract, revenue, costs, extraCosts, extraIncome, kg, totalRevenue, totalCost,
     profit: { actual: totalRevenue.actual - totalCost.actual, expected: totalRevenue.expected - totalCost.expected },
   };
 }

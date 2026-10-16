@@ -173,6 +173,8 @@ export type MonthlyProfitability = {
   status: "draft" | "closed";
   /** One-off costs of this month, beyond what the approved quote plans. */
   extraCosts?: MonthlyExtraCost[];
+  /** One-off income of this month, beyond the deal. */
+  extraIncome?: MonthlyExtraCost[];
   createdAt: string;
   updatedAt: string;
 };
@@ -392,6 +394,12 @@ export type DealLoan = {
   receivedMonth: string;
   /** The month of the first repayment (yyyy-mm). */
   firstPaymentMonth: string;
+  /**
+   * Entered as actually taken. Only such a loan counts in profit and cashflow;
+   * one copied from the quote waits until it is confirmed, and until then the
+   * equipment it would pay for is paid to the supplier as usual.
+   */
+  confirmed?: boolean;
   createdAt: string;
 };
 

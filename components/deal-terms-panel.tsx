@@ -115,9 +115,9 @@ export function DealTermsPanel({ customer, quote, agreement, actor, readOnly, on
         </button>)}</div> : <div className="inline-empty">אין רכישות ציוד.</div>}
       </section>
       <section className="panel">
-        <div className="panel-head"><div><h3>מימון</h3><p>כפי שנחתם בפועל</p></div><button className="row-action" onClick={() => { if (guard()) setDialog({ loan: { id: "", description: "מימון", amount: 0, annualInterest: 0, months: 12, receivedMonth: thisMonth(), firstPaymentMonth: thisMonth(), createdAt: "" } }); }}>＋ מימון</button></div>
-        {deal.loans.length ? <div className="deal-list">{deal.loans.map((item) => <button key={item.id} onClick={() => { if (guard()) setDialog({ loan: item }); }}>
-          <strong>{item.description} · {shekels(item.amount)}</strong><span>{item.months} תשלומים של {shekels(loanPayment(item))} · ריבית {item.annualInterest}% לשנה</span>
+        <div className="panel-head"><div><h3>מימון</h3><p>נכנס לחישובים רק מימון שסומן שנלקח בפועל</p></div><button className="row-action" onClick={() => { if (guard()) setDialog({ loan: { id: "", description: "מימון", amount: 0, annualInterest: 0, months: 12, receivedMonth: thisMonth(), firstPaymentMonth: thisMonth(), confirmed: true, createdAt: "" } }); }}>＋ מימון</button></div>
+        {deal.loans.length ? <div className="deal-list">{deal.loans.map((item) => <button key={item.id} className={item.confirmed ? "" : "pending"} onClick={() => { if (guard()) setDialog({ loan: item }); }}>
+          <strong>{item.description} · {shekels(item.amount)}{!item.confirmed && <i className="deal-pending">מתוך ההצעה · לא נכלל בחישוב עד שתאשרו שנלקח</i>}</strong><span>{item.months} תשלומים של {shekels(loanPayment(item))} · ריבית {item.annualInterest}% לשנה</span>
           <small>התקבל ב{monthLabel(item.receivedMonth)} · תשלום ראשון ב{monthLabel(item.firstPaymentMonth)} · אחרון ב{monthLabel(addMonths(item.firstPaymentMonth, item.months - 1))}</small>
         </button>)}</div> : <div className="inline-empty">אין מימון.</div>}
       </section>
@@ -285,9 +285,10 @@ function LoanDialog({ loan, onClose, onSave }: { loan: DealLoan; onClose: () => 
         <NumberField label="ריבית שנתית" suffix="%" step="0.1" value={draft.annualInterest} onChange={(value) => set("annualInterest", value)} />
         <NumberField label="מספר תשלומים" value={draft.months} onChange={(value) => set("months", Math.max(1, Math.round(value)))} />
         <label><span>תשלום חודשי</span><div className="readonly">{shekels(loanPayment(draft))}</div></label>
-        <label><span>הכסף התקבל ב</span><input type="month" required value={draft.receivedMonth} onChange={(event) => set("receivedMonth", event.target.value)} /></label>
-        <label><span>תשלום ראשון ב</span><input type="month" required value={draft.firstPaymentMonth} onChange={(event) => set("firstPaymentMonth", event.target.value)} /></label>
+        <label><span>חודש לקיחת המימון (הכסף התקבל)</span><input type="month" required value={draft.receivedMonth} onChange={(event) => set("receivedMonth", event.target.value)} /></label>
+        <label><span>חודש התשלום הראשון</span><input type="month" required value={draft.firstPaymentMonth} onChange={(event) => set("firstPaymentMonth", event.target.value)} /></label>
       </div>
+      <label className="deal-check"><input type="checkbox" checked={Boolean(draft.confirmed)} onChange={(event) => set("confirmed", event.target.checked)} /><span>המימון נלקח בפועל, בפרטים האלה: נכנס לרווחיות ולתזרים</span></label>
       <footer><button type="button" onClick={onClose}>ביטול</button><button className="primary" disabled={saving || draft.amount <= 0}>{saving ? "שומר…" : "שמירה"}</button></footer>
     </form>
   </Dialog>;
