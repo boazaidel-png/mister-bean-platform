@@ -24,7 +24,11 @@ test("an approved quote becomes the first version, the equipment purchase and th
   assert.equal(version.clientPayDelayMonths, 1);
   assert.equal(version.coffeeSupplierPayDelayMonths, 2);
   assert.equal(version.operatingCostEstimate, 250);
-  assert.deepEqual(deal.purchases.map((item) => [item.cost, item.supplierPayDelayMonths, item.supplierInstallments, item.loanId]), [[20000, 1, 8, "loan-2026-05"]]);
+  // The loan pays the supplier at once for its part; the rest goes in supplier installments (combined).
+  assert.deepEqual(deal.purchases.map((item) => [item.cost, item.supplierPayDelayMonths, item.supplierInstallments, item.loanId]), [[12000, 1, 1, "loan-2026-05"], [8000, 1, 8, undefined]]);
+  // A loan for all of it: one payment to the supplier, nothing in installments.
+  const full = dealFromQuote(quote, figures({ financing: { type: "loan", amount: 20000, months: 24 } }), "2026-05", "boaz");
+  assert.deepEqual(full.purchases.map((item) => [item.cost, item.supplierInstallments]), [[20000, 1]]);
   assert.deepEqual(deal.loans.map((item) => [item.amount, item.months, item.annualInterest, item.firstPaymentMonth]), [[12000, 24, 6, "2026-05"]]);
   // Without a loan there is none; supplier financing spreads the supplier payments.
   const supplier = dealFromQuote(quote, figures({ financing: { type: "supplier", amount: 0, months: 0 } }), "2026-05", "boaz");
