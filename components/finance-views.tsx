@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Customer, CustomerDeal } from "@/lib/platform-types";
 import { addMonths, dealCashflow, dealMonth, monthsBetween, type CashflowMonth, type DealInput } from "@/lib/deal-economics";
 import { subscribeToCustomerDeal } from "@/lib/firebase-platform";
@@ -31,37 +31,54 @@ export function MoneyToggle({ value, onChange }: { value: "cash" | "profit"; onC
   </div>;
 }
 
-/** One customer's cashflow over the whole deal, with the months its last payments fall in. */
+/** One customer's cashflow, a year at a time. */
 export function CustomerCashflow({ input }: { input: DealInput }) {
-  const toMonth = addMonths(input.startMonth, input.contractMonths - 1 + 3);
-  const rows = useMemo(() => dealCashflow(input, input.startMonth, toMonth), [input, toMonth]);
-  const outColumns = OUT_COLUMNS.filter(([key]) => rows.some((row) => row[key] as number));
-  const hasLoan = rows.some((row) => row.loanIn);
-  const lowest = rows.reduce((min, row) => Math.min(min, row.cumulative), 0);
+  const [year, setYear] = useState(Number(input.today.slice(0, 4)));
+  const rows = useMemo(() => dealCashflow(input, `${year}-01`, `${year}-12`), [input, year]);
   return <section className="panel cashflow">
-    <div className="panel-head"><div><h3>תזרים הלקוח</h3><p>מתי הכסף נכנס ויוצא, לפי תנאי התשלום של הלקוח ושל הספקים · ללא מע״מ</p></div>
-      {lowest < 0 && <div className="cashflow-note">החשיפה הגבוהה: {shekels(lowest)}</div>}</div>
-    <CashTable rows={rows} today={input.today} outColumns={outColumns} hasLoan={hasLoan} />
+    <div className="panel-head"><div><h3>תזרים הלקוח</h3><p>מתי הכסף נכנס ויוצא, לפי תנאי התשלום של הלקוח ושל הספקים · ללא מע״מ</p></div></div>
+    <YearCashflow year={year} onYear={setYear} rows={rows} today={input.today} />
   </section>;
 }
 
-function CashTable({ rows, today, outColumns, hasLoan, detail }: { rows: CashflowMonth[]; today: string; outColumns: Array<[keyof CashflowMonth, string]>; hasLoan: boolean; detail?: (row: CashflowMonth) => React.ReactNode }) {
-  const [open, setOpen] = useState("");
-  return <div className="table-wrap"><table className="cashflow-table">
-    <thead><tr><th>חודש</th><th>נכנס מלקוחות</th>{hasLoan && <th>מימון שהתקבל</th>}{outColumns.map(([key, label]) => <th key={key}>{label}</th>)}<th>נטו</th><th>מצטבר</th></tr></thead>
-    <tbody>{rows.map((row) => <Fragment key={row.month}>
-      <tr className={`${row.month === today ? "current" : ""} ${row.past ? "past" : ""} ${detail ? "clickable" : ""}`} onClick={detail ? () => setOpen(open === row.month ? "" : row.month) : undefined}>
-        <td><strong>{shortMonth(row.month)}</strong>{row.month === today && <small> · החודש</small>}</td>
-        <td>{row.fromCustomer ? shekels(row.fromCustomer) : "—"}</td>
-        {hasLoan && <td>{row.loanIn ? shekels(row.loanIn) : "—"}</td>}
-        {outColumns.map(([key]) => <td key={key}>{row[key] ? shekels(-(row[key] as number)) : "—"}</td>)}
-        <td className={row.net < 0 ? "negative-text" : "positive-text"}><strong>{shekels(row.net)}</strong></td>
-        <td className={row.cumulative < 0 ? "negative-text" : ""}>{shekels(row.cumulative)}</td>
-      </tr>
-      {detail && open === row.month && <tr className="cashflow-detail"><td colSpan={4 + (hasLoan ? 1 : 0) + outColumns.length}>{detail(row)}</td></tr>}
-    </Fragment>)}</tbody>
-  </table>
-    <p className="deal-note">חודשים שעברו: מה שסופק בפועל. מהחודש הנוכחי: צפוי.{detail ? " לחיצה על חודש מפרטת לפי לקוח." : ""}</p>
+const IN_LINES: Array<[keyof CashflowMonth, string]> = [["fromCustomer", "מלקוחות"], ["loanIn", "מימון שהתקבל"]];
+
+/**
+ * A year of cashflow: the year's totals, a tile per month (its net, in and
+ * out), and the chosen month in detail, by kind and, when given, by customer.
+ */
+function YearCashflow({ year, onYear, rows, today, breakdown }: { year: number; onYear: (year: number) => void; rows: CashflowMonth[]; today: string; breakdown?: (row: CashflowMonth) => React.ReactNode }) {
+  const inYear = today.startsWith(`${year}-`);
+  const [chosen, setChosen] = useState("");
+  const selected = rows.find((row) => row.month === chosen) || rows.find((row) => row.month === (inYear ? today : "")) || rows.find((row) => row.totalIn || row.totalOut) || rows[0];
+  const sum = (key: keyof CashflowMonth) => rows.reduce((total, row) => total + (row[key] as number), 0);
+  const lowest = rows.reduce((min, row) => Math.min(min, row.cumulative), 0);
+  const lines = (list: Array<[keyof CashflowMonth, string]>, sign: 1 | -1) => list.filter(([key]) => selected[key] as number).map(([key, label]) => <div key={key}><span>{label}</span><b>{shekels(sign * (selected[key] as number))}</b></div>);
+  return <div className="year-cash">
+    <div className="year-cash-head">
+      <div className="ob-month" role="group" aria-label="בחירת שנה"><button aria-label="שנה קודמת" onClick={() => { onYear(year - 1); setChosen(""); }}>›</button><strong>{year}</strong><button aria-label="שנה הבאה" onClick={() => { onYear(year + 1); setChosen(""); }}>‹</button></div>
+      <div className="year-cash-totals">
+        <span>נכנס <b>{shekels(sum("totalIn"))}</b></span><span>יוצא <b>{shekels(sum("totalOut"))}</b></span>
+        <span>נטו לשנה <b className={sum("net") < 0 ? "negative-text" : "positive-text"}>{shekels(sum("net"))}</b></span>
+        {lowest < 0 && <span>הנקודה הנמוכה <b className="negative-text">{shekels(lowest)}</b></span>}
+      </div>
+    </div>
+    <div className="year-cash-grid">
+      {rows.map((row) => <button key={row.month} className={`${row.month === selected.month ? "active" : ""} ${row.month === today ? "current" : ""} ${row.past ? "past" : ""}`} onClick={() => setChosen(row.month)}>
+        <small>{shortMonth(row.month)}{row.month === today ? " · החודש" : ""}</small>
+        <strong className={row.net < 0 ? "negative-text" : row.net > 0 ? "positive-text" : ""}>{row.totalIn || row.totalOut ? shekels(row.net) : "—"}</strong>
+        <span>{row.totalIn || row.totalOut ? `נכנס ${shekels(row.totalIn)} · יוצא ${shekels(row.totalOut)}` : "אין תנועות"}</span>
+      </button>)}
+    </div>
+    <div className="year-cash-detail">
+      <h4>{monthTitle(selected.month)} <small>{selected.past ? "בפועל" : "צפוי"} · מצטבר מתחילת השנה {shekels(selected.cumulative)}</small></h4>
+      {selected.totalIn || selected.totalOut ? <div className="year-cash-columns">
+        <div className="deal-extra-costs"><h4>נכנס</h4>{lines(IN_LINES, 1)}<div className="year-cash-total"><span>סה״כ</span><b>{shekels(selected.totalIn)}</b></div></div>
+        <div className="deal-extra-costs"><h4>יוצא</h4>{lines(OUT_COLUMNS, -1)}<div className="year-cash-total"><span>סה״כ</span><b>{shekels(-selected.totalOut)}</b></div></div>
+      </div> : <p className="deal-note">אין תנועות בחודש הזה.</p>}
+      {breakdown?.(selected)}
+    </div>
+    <p className="deal-note">חודשים שעברו: מה שסופק בפועל. מהחודש הנוכחי: צפוי. לחיצה על חודש מציגה את הפירוט שלו.</p>
   </div>;
 }
 
@@ -87,7 +104,8 @@ export function BusinessFinance({ customers, inputFor, today, onOpenCustomer }: 
   const ready = customers.every((customer) => deals.has(customer.id));
   const inputs = useMemo(() => ready ? customers.map((customer) => ({ customer, input: inputFor(customer, deals.get(customer.id) || null) })) : [], [ready, customers, deals, inputFor]);
 
-  const fromMonth = addMonths(today, -3), toMonth = addMonths(today, 12);
+  const [year, setYear] = useState(Number(today.slice(0, 4)));
+  const fromMonth = `${year}-01`, toMonth = `${year}-12`;
   const perCustomer = useMemo(() => inputs.map(({ customer, input }) => ({ customer, rows: dealCashflow(input, fromMonth, toMonth) })), [inputs, fromMonth, toMonth]);
   const total = useMemo(() => {
     const span = monthsBetween(fromMonth, toMonth) + 1;
@@ -105,8 +123,6 @@ export function BusinessFinance({ customers, inputFor, today, onOpenCustomer }: 
     rows.reduce((running, row) => (row.cumulative = running + row.net), 0);
     return rows;
   }, [perCustomer, fromMonth, toMonth, today]);
-  const outColumns = OUT_COLUMNS.filter(([key]) => total.some((row) => row[key] as number));
-  const hasLoan = total.some((row) => row.loanIn);
 
   const profits = useMemo(() => inputs.map(({ customer, input }) => {
     const data = dealMonth(input, month);
@@ -115,23 +131,17 @@ export function BusinessFinance({ customers, inputFor, today, onOpenCustomer }: 
   }).filter((item) => item.revenue || item.cost).sort((left, right) => right.profit - left.profit), [inputs, month, today]);
   const profitTotal = profits.reduce((sum, item) => ({ revenue: sum.revenue + item.revenue, cost: sum.cost + item.cost, profit: sum.profit + item.profit }), { revenue: 0, cost: 0, profit: 0 });
 
-  const nextThree = total.filter((row) => row.month >= today).slice(0, 3);
-  const lowest = total.filter((row) => row.month >= today).reduce((min, row) => Math.min(min, row.cumulative), Infinity);
 
   return <div className="business-finance">
     <div className="section-title"><div><h2>כספים</h2><p>כל הלקוחות יחד · ללא מע״מ</p></div><MoneyToggle value={view} onChange={setView} /></div>
     {!ready ? <div className="workspace-loading"><i /><span>טוען את נתוני הלקוחות…</span></div> : view === "cash" ? <>
-      <div className="ob-kpis">
-        {nextThree.map((row) => <article key={row.month} className={row.net < 0 ? "alert" : ""}><small>{monthTitle(row.month)}</small><strong>{shekels(row.net)}</strong><span>נכנס {shekels(row.totalIn)} · יוצא {shekels(row.totalOut)}</span></article>)}
-        {Number.isFinite(lowest) && <article className={lowest < 0 ? "alert" : ""}><small>הנקודה הנמוכה ב־12 החודשים הבאים</small><strong>{shekels(lowest)}</strong><span>מצטבר מ{monthTitle(fromMonth)}</span></article>}
-      </div>
-      <section className="panel cashflow"><div className="panel-head"><div><h3>תזרים לפי חודש</h3><p>{monthTitle(fromMonth)} עד {monthTitle(toMonth)} · המצטבר מתחיל מ־0 בחודש הראשון שמוצג</p></div></div>
-        <CashTable rows={total} today={today} outColumns={outColumns} hasLoan={hasLoan} detail={(row) => {
+      <section className="panel cashflow"><div className="panel-head"><div><h3>תזרים</h3><p>כל הלקוחות יחד, לפי תנאי התשלום של כל לקוח וספק</p></div></div>
+        <YearCashflow year={year} onYear={setYear} rows={total} today={today} breakdown={(row) => {
           const index = monthsBetween(fromMonth, row.month);
           const lines = perCustomer.map((item) => ({ customer: item.customer, row: item.rows[index] })).filter((item) => item.row.totalIn || item.row.totalOut).sort((left, right) => right.row.net - left.row.net);
-          return lines.length ? <div className="cashflow-breakdown">{lines.map(({ customer, row: part }) => <button key={customer.id} onClick={() => onOpenCustomer(customer.id)}>
+          return lines.length ? <><h4 className="year-cash-sub">לפי לקוח</h4><div className="cashflow-breakdown">{lines.map(({ customer, row: part }) => <button key={customer.id} onClick={() => onOpenCustomer(customer.id)}>
             <strong>{customer.name}</strong><span>נכנס {shekels(part.totalIn)}</span><span>יוצא {shekels(part.totalOut)}</span><b className={part.net < 0 ? "negative-text" : "positive-text"}>{shekels(part.net)}</b>
-          </button>)}</div> : <span className="deal-note">אין תנועות בחודש הזה.</span>;
+          </button>)}</div></> : null;
         }} />
       </section>
     </> : <section className="panel">
