@@ -81,3 +81,23 @@ test("an order of several blends costs each blend's cost by its kilograms", () =
   }), "2026-10");
   assert.equal(month.costs.beans.expected, 6 * 50 + 4 * 100);
 });
+
+test("with the deal set up, each month uses its own terms and a real operating cost replaces the estimate", () => {
+  const before = { ...agreement(), model: "beans_only" as const, beanPricePerKg: 100, monthlyRentalIncome: 0 };
+  const after = { ...before, beanPricePerKg: 120 };
+  const deal = input({
+    agreementAt: (month) => month >= "2026-10" ? after : before,
+    contractKgAt: () => 10,
+    blendCostAt: () => 60,
+    money: () => ({ equipment: 300, financing: 0, equipmentSale: 0, operating: 250 }),
+    extraCosts: (month) => month === "2026-10" ? [{ id: "x", label: "תיקון", amount: 400, createdAt: "" }] : [],
+  });
+  const september = dealMonth(deal, "2026-09"), october = dealMonth(deal, "2026-10");
+  assert.equal(september.revenue.contract.expected, 1000);
+  assert.equal(october.revenue.contract.expected, 1200);
+  assert.equal(september.costs.beans.expected, 600);
+  assert.equal(september.costs.operating.expected, 250);
+  assert.equal(october.costs.operating.expected, 0);
+  assert.equal(october.costs.extra.expected, 400);
+  assert.equal(october.costs.equipment.expected, 300);
+});
