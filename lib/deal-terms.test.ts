@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dealFromQuote, loanPayment, termsAt, versionKg, versionMonthlyIncome, withVersion, type QuoteFigures } from "./deal-terms.ts";
+import { agreementFromVersion, blendCostIn, dealFromQuote, dealMonthMoney, loanPayment, termsAt, versionKg, versionMonthlyIncome, withVersion, type QuoteFigures } from "./deal-terms.ts";
 import type { Quote } from "./platform-types.ts";
 
 const quote = {
@@ -53,4 +53,29 @@ test("a loan repays principal and interest in equal monthly payments", () => {
   assert.equal(loanPayment({ amount: 12000, months: 12, annualInterest: 0 }), 1000);
   const payment = loanPayment({ amount: 12000, months: 24, annualInterest: 6 });
   assert.ok(payment > 500 && payment < 540);
+});
+
+test("each month's money follows each purchase and loan on its own dates", () => {
+  const deal = dealFromQuote(quote, figures(), "2026-05", "boaz");
+  // Loan part (12,000) paid through the loan; the rest (8,000) to the supplier in 8 payments from a month after purchase.
+  assert.equal(dealMonthMoney(deal, "2026-05").equipment, 0);
+  assert.equal(dealMonthMoney(deal, "2026-06").equipment, 1000);
+  assert.equal(dealMonthMoney(deal, "2027-01").equipment, 1000);
+  assert.equal(dealMonthMoney(deal, "2027-02").equipment, 0);
+  assert.ok(dealMonthMoney(deal, "2026-05").financing > 500);
+  assert.equal(dealMonthMoney(deal, "2028-05").financing, 0);
+  assert.equal(dealMonthMoney(deal, "2026-05").operating, 250);
+  assert.equal(dealMonthMoney(deal, "2029-05").operating, 0);
+  // A machine sold in month 9, paid by the customer in 3 payments and to the supplier at once two months later.
+  const more = { ...deal, purchases: [...deal.purchases, { id: "m2", month: "2026-09", description: "מכונה נוספת", cost: 6000, saleIncome: 9000, clientInstallments: 3, supplierPayDelayMonths: 2, supplierInstallments: 1, createdAt: "" }] };
+  assert.deepEqual([dealMonthMoney(more, "2026-09").equipmentSale, dealMonthMoney(more, "2026-11").equipmentSale, dealMonthMoney(more, "2026-12").equipmentSale], [3000, 3000, 0]);
+  assert.equal(dealMonthMoney(more, "2026-11").equipment, 1000 + 6000);
+});
+
+test("a version reads as the agreement: prices and costs weighted by kilograms", () => {
+  const deal = dealFromQuote(quote, figures(), "2026-05", "boaz");
+  const agreement = agreementFromVersion(deal.versions[0]);
+  assert.equal(agreement.monthlyBeanKg, 85);
+  assert.equal(Math.round(agreement.beanPricePerKg * 85), 50 * 110 + 35 * 100);
+  assert.equal(blendCostIn(deal, "2026-07", "hb+"), 65);
 });

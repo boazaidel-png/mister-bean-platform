@@ -36,6 +36,16 @@ export type DealInput = {
   blendCost: (blend: string) => number;
   /** The current month (yyyy-mm); later months have no actual values yet. */
   today: string;
+  /**
+   * The deal by month, when the customer's deal is set up: the terms in force
+   * in each month, what a blend cost then, and the month's equipment, loan,
+   * equipment-sale and operating money. A real operating cost entered for a
+   * month replaces the estimate. Without these, the agreement and the quote's plan are used.
+   */
+  agreementAt?: (month: string) => CommercialAgreement | undefined;
+  contractKgAt?: (month: string) => number;
+  blendCostAt?: (month: string, blend: string) => number;
+  money?: (month: string) => { equipment: number; financing: number; equipmentSale: number; operating: number };
 };
 
 export const REVENUE_LINES = [
@@ -92,7 +102,9 @@ const orderKg = (order: Order) => Math.max(0, Math.round(order.approvedKg || ord
 const isDelivered = (order: Order) => DELIVERED.includes(order.status) || Boolean(order.paid);
 
 export function dealMonth(input: DealInput, month: string): DealMonth {
-  const { agreement, plan } = input;
+  const { plan } = input;
+  const agreement = input.agreementAt ? input.agreementAt(month) : input.agreement;
+  const contractKg = input.contractKgAt ? input.contractKgAt(month) : input.contractKg;
   const index = monthsBetween(input.startMonth, month) + 1;
   const inContract = index >= 1 && index <= input.contractMonths;
   const started = month <= input.today;
@@ -108,7 +120,7 @@ export function dealMonth(input: DealInput, month: string): DealMonth {
 
   const live = input.orders.filter((order) => order.month === month && order.status !== "בוטל");
   const contractOrder = live.find((order) => (order.kind ?? "contract") === "contract");
-  const costOf = (blend: string) => input.blendCost(blend) || agreement?.beanCostPerKg || 0;
+  const costOf = (blend: string) => input.blendCostAt?.(month, blend) || input.blendCost(blend) || agreement?.beanCostPerKg || 0;
   // An order of several blends costs the average of its blends, weighted by kilograms.
   const beanCost = (order: Order) => {
     if (order.costPerKg !== undefined) return order.costPerKg;
@@ -123,7 +135,7 @@ export function dealMonth(input: DealInput, month: string): DealMonth {
 
   // The month's contract coffee: the package fee plus kilograms beyond it, or kilograms at the agreed price.
   if (agreement && (contractOrder || inContract)) {
-    const ordered = contractOrder ? orderKg(contractOrder) : input.contractKg;
+    const ordered = contractOrder ? orderKg(contractOrder) : contractKg;
     const delivered = Boolean(contractOrder && isDelivered(contractOrder));
     if (agreement.model === "monthly_package") {
       add(revenue.contract, agreement.packageCount * agreement.packageMonthlyFee, delivered);
@@ -152,18 +164,27 @@ export function dealMonth(input: DealInput, month: string): DealMonth {
     fixed(revenue.rental, agreement.monthlyRentalIncome || 0);
     fixed(revenue.service, agreement.monthlyServiceIncome || 0);
   }
-  if (agreement?.oneTimeEquipmentIncomeMonth === month) fixed(revenue.equipmentSale, agreement.oneTimeEquipmentIncome || 0);
-
-  // What the approved quote plans for this contract month: equipment
-  // payments (net of what a loan paid for), loan repayments and operating costs.
-  const row = plan && index >= 1 ? plan.rows[index - 1] : undefined;
-  if (row) {
-    fixed(costs.equipment, Math.max(0, row.equipmentPayment - row.financingIn));
-    fixed(costs.financing, row.loanPayment);
-    fixed(costs.operating, row.operatingCost);
-  }
   const extraCosts = input.extraCosts(month);
-  fixed(costs.extra, extraCosts.reduce((sum, item) => sum + (Number(item.amount) || 0), 0));
+  const extraTotal = extraCosts.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
+  if (input.money) {
+    // The deal's own dates and terms: each purchase, each loan; a real operating cost replaces the estimate.
+    const money = input.money(month);
+    fixed(revenue.equipmentSale, money.equipmentSale);
+    fixed(costs.equipment, money.equipment);
+    fixed(costs.financing, money.financing);
+    if (!extraCosts.length) fixed(costs.operating, money.operating);
+  } else {
+    if (agreement?.oneTimeEquipmentIncomeMonth === month) fixed(revenue.equipmentSale, agreement.oneTimeEquipmentIncome || 0);
+    // What the approved quote plans for this contract month: equipment
+    // payments (net of what a loan paid for), loan repayments and operating costs.
+    const row = plan && index >= 1 ? plan.rows[index - 1] : undefined;
+    if (row) {
+      fixed(costs.equipment, Math.max(0, row.equipmentPayment - row.financingIn));
+      fixed(costs.financing, row.loanPayment);
+      fixed(costs.operating, row.operatingCost);
+    }
+  }
+  fixed(costs.extra, extraTotal);
 
   const sum = (lines: Record<string, Pair>) => Object.values(lines).reduce((total, pair) => ({
     actual: total.actual + pair.actual,

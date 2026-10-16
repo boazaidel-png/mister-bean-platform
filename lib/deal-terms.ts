@@ -1,4 +1,4 @@
-import type { CommercialAgreementModel, CustomerDeal, DealLoan, DealTermsVersion, EquipmentPurchase, Quote } from "./platform-types";
+import type { CommercialAgreement, CommercialAgreementModel, CustomerDeal, DealLoan, DealTermsVersion, EquipmentPurchase, Quote } from "./platform-types";
 
 /**
  * A customer's deal over time. The quote it starts from becomes the first
@@ -132,3 +132,47 @@ export const monthLabel = (month: string) => {
   const [year, value] = month.split("-").map(Number);
   return new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(new Date(year, value - 1, 1));
 };
+
+/** A version as the agreement shape the orders board and profitability already work with. */
+export function agreementFromVersion(version: DealTermsVersion): CommercialAgreement {
+  const kg = version.blends.reduce((sum, blend) => sum + blend.kg, 0);
+  const weighted = (key: "pricePerKg" | "costPerKg") => kg ? version.blends.reduce((sum, blend) => sum + blend.kg * blend[key], 0) / kg : 0;
+  return {
+    model: version.model, status: "active", sourceQuoteId: version.sourceQuoteId,
+    monthlyBeanKg: kg, beanCostPerKg: weighted("costPerKg"), beanPricePerKg: weighted("pricePerKg"),
+    packageCount: version.packageCount, packageMonthlyFee: version.packageMonthlyFee,
+    packageIncludedKgPerUnit: version.packageIncludedKgPerUnit, extraKgPrice: version.extraKgPrice,
+    monthlyRentalIncome: version.monthlyRentalIncome, monthlyServiceIncome: version.monthlyServiceIncome,
+    oneTimeEquipmentIncome: 0, updatedAt: version.createdAt,
+  };
+}
+
+/** What a blend costs us in a month, by the terms then; 0 when the terms do not list it. */
+export function blendCostIn(deal: Pick<CustomerDeal, "versions">, month: string, blend: string) {
+  const name = blend.trim().toLowerCase();
+  return termsAt(deal, month)?.blends.find((item) => item.blend.trim().toLowerCase() === name)?.costPerKg || 0;
+}
+
+/** Whether a month falls in a run of `count` monthly payments starting in `first`. */
+const inRun = (month: string, first: string, count: number) => {
+  const index = monthsBetween(first, month);
+  return index >= 0 && index < Math.max(1, count);
+};
+
+/**
+ * The deal's fixed money in a month, apart from the coffee: equipment paid to
+ * suppliers (what a loan did not pay), loan repayments, what the customer pays
+ * for equipment sold to them, and the operating estimate while the deal runs.
+ */
+export function dealMonthMoney(deal: CustomerDeal, month: string) {
+  let equipment = 0, financing = 0, equipmentSale = 0;
+  for (const item of deal.purchases) {
+    // The part a loan paid is repaid through the loan, not to the supplier.
+    if (!item.loanId && inRun(month, addMonths(item.month, item.supplierPayDelayMonths), item.supplierInstallments)) equipment += item.cost / Math.max(1, item.supplierInstallments);
+    if (item.saleIncome > 0 && inRun(month, item.month, item.clientInstallments)) equipmentSale += item.saleIncome / Math.max(1, item.clientInstallments);
+  }
+  for (const loan of deal.loans) if (inRun(month, loan.firstPaymentMonth, loan.months)) financing += loanPayment(loan);
+  const index = monthsBetween(deal.startMonth, month);
+  const running = index >= 0 && index < deal.contractMonths;
+  return { equipment, financing, equipmentSale, operating: running ? termsAt(deal, month)?.operatingCostEstimate || 0 : 0 };
+}
