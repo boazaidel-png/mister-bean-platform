@@ -58,6 +58,7 @@ import {
 } from "./security";
 import { commercialAgreementFromQuote } from "./commercial-agreement";
 import type {
+  CustomerDeal,
   AccessInvite,
   Activity,
   Customer,
@@ -1427,4 +1428,15 @@ export async function importSalesWorkspace(workspace: SalesWorkspace) {
     storedLeads: leadsSnapshot.size,
     storedQuotes: quotesSnapshot.size,
   };
+}
+
+/** The money of one customer's deal (terms by month, equipment, loans); administrators only. */
+export function subscribeToCustomerDeal(accountId: string, onDeal: (deal: CustomerDeal | null) => void, onError: (error: Error) => void) {
+  const { db } = getFirebaseServices();
+  return onSnapshot(doc(db, "accounts", accountId, "private", "deal"), (snapshot) => onDeal(snapshot.exists() ? (snapshot.data() as CustomerDeal) : null), onError);
+}
+
+export async function saveCustomerDeal(accountId: string, deal: CustomerDeal) {
+  const { db } = getFirebaseServices();
+  await setDoc(doc(db, "accounts", accountId, "private", "deal"), deal);
 }
