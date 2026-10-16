@@ -323,6 +323,84 @@ export type DeliveryPreference = "asap" | "tomorrow" | "date";
 
 export type OrderBlendLine = { blend: string; kg: number };
 
+/**
+ * The deal with a customer as it stands from a given month: what they get,
+ * at what price, and how they pay. A change to the deal adds a version from
+ * the month it applies; earlier months keep the version they had.
+ */
+export type DealTermsVersion = {
+  id: string;
+  /** First month (yyyy-mm) these terms apply. */
+  fromMonth: string;
+  /** What changed, for the timeline ("נוספה מכונה"). */
+  note: string;
+  sourceQuoteId?: string;
+  model: CommercialAgreementModel;
+  /** Coffee each month: kilograms per blend, our price and our cost per kilogram. */
+  blends: Array<{ blend: string; kg: number; pricePerKg: number; costPerKg: number }>;
+  packageCount: number;
+  packageMonthlyFee: number;
+  packageIncludedKgPerUnit: number;
+  extraKgPrice: number;
+  monthlyRentalIncome: number;
+  monthlyServiceIncome: number;
+  /** The quote's estimate of monthly operating cost; a real amount entered for a month replaces it. */
+  operatingCostEstimate: number;
+  /** The customer pays this many months after the month (0 = the same month; 1 = net + 30). */
+  clientPayDelayMonths: number;
+  /** We pay the coffee supplier this many months after the month. */
+  coffeeSupplierPayDelayMonths: number;
+  createdAt: string;
+  createdBy: string;
+};
+
+/** Equipment bought for the customer, paid to the supplier on its own terms. */
+export type EquipmentPurchase = {
+  id: string;
+  /** The month it was bought (yyyy-mm). */
+  month: string;
+  description: string;
+  /** What it costs us in total. */
+  cost: number;
+  /** What the customer pays for it when it is sold to them; 0 when rented or lent. */
+  saleIncome: number;
+  /** The customer pays the sale in this many monthly payments (1 = at once). */
+  clientInstallments: number;
+  /** Months after the purchase until the first payment to the supplier. */
+  supplierPayDelayMonths: number;
+  /** Monthly payments to the supplier (1 = at once). */
+  supplierInstallments: number;
+  /** A loan that paid for part of it. */
+  loanId?: string;
+  createdAt: string;
+};
+
+/** A loan taken for a customer's equipment, as actually signed. */
+export type DealLoan = {
+  id: string;
+  description: string;
+  amount: number;
+  annualInterest: number;
+  /** Number of monthly repayments. */
+  months: number;
+  /** The month the money came in (yyyy-mm). */
+  receivedMonth: string;
+  /** The month of the first repayment (yyyy-mm). */
+  firstPaymentMonth: string;
+  createdAt: string;
+};
+
+/** Everything about the money of one customer's deal. Readable by administrators only. */
+export type CustomerDeal = {
+  /** The month the deal started (yyyy-mm) and its length in months. */
+  startMonth: string;
+  contractMonths: number;
+  versions: DealTermsVersion[];
+  purchases: EquipmentPurchase[];
+  loans: DealLoan[];
+  updatedAt: string;
+};
+
 export type EmployeeOrderLine = { coffee: string; grind: string; bags: number };
 
 export type EmployeeRecipient = { name: string; department: string; items: string };
