@@ -59,7 +59,8 @@ export type View =
   | "contract"
   | "contact"
   | "tastings"
-  | "shop";
+  | "shop"
+  | "finance";
 
 export type Customer = {
   id: string;

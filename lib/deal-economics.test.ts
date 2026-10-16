@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dealMonth, dealPeriod, type DealInput } from "./deal-economics.ts";
+import { dealCashflow, dealMonth, dealPeriod, type DealInput } from "./deal-economics.ts";
 import type { CommercialAgreement, Order } from "./platform-types.ts";
 
 const agreement = (extra: Partial<CommercialAgreement> = {}) => ({
@@ -100,4 +100,29 @@ test("with the deal set up, each month uses its own terms and a real operating c
   assert.equal(october.costs.operating.expected, 0);
   assert.equal(october.costs.extra.expected, 400);
   assert.equal(october.costs.equipment.expected, 300);
+});
+
+test("cashflow: the customer pays on their terms, the coffee supplier on its terms, loans and equipment on their dates", () => {
+  const cash = dealCashflow(input({
+    agreementAt: () => ({ ...agreement(), model: "beans_only" as const, beanPricePerKg: 100, monthlyRentalIncome: 0, monthlyServiceIncome: 0 }),
+    contractKgAt: () => 10, blendCostAt: () => 60,
+    // Past months count what was delivered: September to November were.
+    orders: ["2026-09", "2026-10", "2026-11"].map((month) => order(`o-${month}`, { month, status: "סופק" })),
+    // The 5,000 machine is paid to the supplier from the loan: not a cost (the repayments are), but money out.
+    money: (month) => ({ equipment: 0, loanFundedEquipment: month === "2026-09" ? 5000 : 0, financing: month >= "2026-10" ? 400 : 0, equipmentSale: 0, operating: 100 }),
+    clientPayDelayAt: () => 1, coffeePayDelayAt: () => 2, loanInAt: (month) => month === "2026-09" ? 5000 : 0,
+    today: "2026-12",
+  }), "2026-09", "2026-12");
+  const [september, october, november, december] = cash;
+  // Revenue of 1,000 a month arrives a month later; coffee of 600 is paid two months later.
+  assert.deepEqual(cash.map((row) => row.fromCustomer), [0, 1000, 1000, 1000]);
+  assert.deepEqual(cash.map((row) => row.beans), [0, 0, 600, 600]);
+  assert.equal(september.loanIn, 5000);
+  assert.equal(september.equipment, 5000);
+  assert.equal(dealMonth(input({ money: () => ({ equipment: 0, loanFundedEquipment: 5000, financing: 0, equipmentSale: 0, operating: 0 }) }), "2026-09").costs.equipment.expected, 0);
+  assert.equal(october.financing, 400);
+  assert.equal(september.net, 5000 - 5000 - 100);
+  assert.equal(december.cumulative, cash.reduce((sum, row) => sum + row.net, 0));
+  assert.equal(november.past, true);
+  assert.equal(december.past, false);
 });

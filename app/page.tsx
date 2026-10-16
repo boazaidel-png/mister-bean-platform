@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, FormEvent, useContext, useEffect, useRef, useState } from "react";
+import { createContext, FormEvent, useCallback, useContext, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import {
@@ -9,6 +9,7 @@ import {
   CalendarDays,
   ChartNoAxesCombined,
   Coffee,
+  Wallet,
   Download,
   Eye,
   FileText,
@@ -106,7 +107,7 @@ import { deliveryPrep, deliveryRecipients, itemParts, openDeliverySheet } from "
 import { CONTACT_OFFICE_MESSAGE, contractOrdersOnly, DELIVERY_PREFERENCES, extraAllowanceKg, highConsumption, deliveredThisMonthKg, deliveryPreferenceLabel, isExtraOrder, MAX_EXTRA_ORDER_KG, newExtraOrder, nextContractDelivery, openExtraOrders, validateExtraOrder } from "@/lib/extra-orders";
 import { buildNotifications, type AppNotification } from "@/lib/notifications";
 import { NotificationBell } from "@/components/notification-bell";
-import { agreementFromVersion, blendCostIn, dealMonthMoney, termsAt, versionKg } from "@/lib/deal-terms";
+import { agreementFromVersion, blendCostIn, dealMonthMoney, loanInIn, termsAt, versionKg } from "@/lib/deal-terms";
 import { addMonths, COST_LINES, dealMonth, dealPeriod, monthsBetween, REVENUE_LINES, type DealInput, type Pair, type QuotePlan } from "@/lib/deal-economics";
 import { withLegacySales } from "@/lib/legacy-sales";
 import { blendLinesChange, blendLinesOf, buildBoardRows, defaultPricePerKg, monthHistory, monthSummary, nextAction, ORDER_STAGES, ROW_KIND_LABELS, shiftMonth, sortRows, stageLabel, type BoardRow, type OrderStage } from "@/lib/orders-board";
@@ -140,6 +141,18 @@ const DealTermsPanel = dynamic(
   () => import("@/components/deal-terms-panel").then((module) => module.DealTermsPanel),
   { ssr: false, loading: SalesWorkspaceLoading },
 );
+const BusinessFinance = dynamic(
+  () => import("@/components/finance-views").then((module) => module.BusinessFinance),
+  { ssr: false, loading: SalesWorkspaceLoading },
+);
+const CustomerCashflow = dynamic(
+  () => import("@/components/finance-views").then((module) => module.CustomerCashflow),
+  { ssr: false, loading: SalesWorkspaceLoading },
+);
+const MoneyToggle = dynamic(
+  () => import("@/components/finance-views").then((module) => module.MoneyToggle),
+  { ssr: false },
+);
 const ShopSaleNew = dynamic(
   () => import("@/components/shop-workspace").then((module) => module.ShopSaleNew),
   { ssr: false },
@@ -161,6 +174,7 @@ const adminNav = [
   {id:"dashboard" as View,label:"מרכז שליטה",icon:LayoutDashboard},{id:"leads" as View,label:"לידים",icon:UsersRound},
   {id:"quotes" as View,label:"הצעות מחיר",icon:FileSignature},{id:"customers" as View,label:"לקוחות",icon:Building2},
   {id:"tickets" as View,label:"שירות ותקלות",icon:Headphones},{id:"orders" as View,label:"הזמנות קפה",icon:Coffee},
+  {id:"finance" as View,label:"כספים",icon:Wallet},
   {id:"machines" as View,label:"צי מכונות",icon:MonitorCog},{id:"tasks" as View,label:"משימות צוות",icon:ListTodo},
   {id:"tastings" as View,label:"טעימות קפה",icon:ClipboardCheck},
   {id:"reports" as View,label:"תובנות ודוחות",icon:ChartNoAxesCombined},{id:"access" as View,label:"ניהול והרשאות",icon:UserCog},
@@ -499,6 +513,13 @@ export default function Home() {
   const openTaskForCustomer=(accountId:string)=>{if(!allowWrite())return;if(!customers.length){setToast("יש להקים לקוח לפני יצירת משימה");return;}setSelectedCustomer(accountId);setModal("task");};
   const openMachineEditor=(machineId="",accountId=clientId)=>{if(!allowWrite())return;if(!isStaff){setToast("עריכת ציוד זמינה לצוות בלבד");return;}setSelectedCustomer(accountId);setSelectedMachine(machineId);setModal("machine");};
   const openCustomer=(id:string)=>{setSelectedCustomer(id);setCustomerTab(undefined);setView("customer");};
+  // A customer's deal input for the business money screen, built as on the customer card.
+  const financeInputFor=useCallback((customer:Customer,deal:CustomerDeal|null)=>{
+    const records=store.profitability.filter(record=>record.accountId===customer.id);
+    const orders=withLegacySales(store.orders.filter(order=>order.accountId===customer.id),records);
+    const quote=activeQuoteFor(customer,customerQuotes(customer,salesWorkspace.quotes));
+    return dealInputFor(customer,orders,records,customerAgreement(customer,salesWorkspace.quotes),quote,deal);
+  },[store.profitability,store.orders,salesWorkspace.quotes]);
   const enterPreview=(next:PreviewContext)=>{setPreview(next);setSelectedCustomer(next.accountId||"");setView("dashboard");setPreviewOpen(false);setModal(null);};
   const leavePreview=()=>{setPreview(null);setView("dashboard");setModal(null);};
   const loginGoogle=async()=>{setAuthBusy(true);setAuthError("");try{await signInWithGoogle();}catch(error){setAuthError(firebaseMessage(error));}finally{setAuthBusy(false);}};
@@ -663,6 +684,7 @@ export default function Home() {
           {view==="orders"&&(isStaff?<OrdersBoard shop={role==="admin"?{actor:profile.email,readOnly,onToast:setToast}:undefined} orders={role==="admin"?withLegacySales(scopedOrders,store.profitability):scopedOrders} activities={store.activities} agreementFor={id=>{const customer=customers.find(item=>item.id===id);return customer?customerAgreement(customer,salesWorkspace.quotes):undefined;}} onOrderChange={updateOrder} onCreateOrder={createOrder}/>:<CustomerOrders orders={scopedOrders} onChange={updateOrder} accountId={clientId} onCreateExtra={createExtraOrder}/>)}
           {view==="tasks"&&<Tasks tasks={scopedTasks} onCreate={()=>{if(allowWrite())setModal("task");}} onStatus={updateTask}/>}
           {view==="tastings"&&role==="admin"&&<TastingWorkspace customers={customers} readOnly={readOnly} actor={profile.email} onToast={setToast}/>}
+          {view==="finance"&&role==="admin"&&<BusinessFinance customers={customers} inputFor={financeInputFor} today={currentMonth()} onOpenCustomer={openCustomer}/>}
           {view==="reports"&&role==="admin"&&<Reports store={store} customers={customers} users={users}/>}
           {view==="access"&&profile.role==="admin"&&<AccessManagement currentUser={profile} customers={customers} users={users} readOnly={readOnly} onBackup={downloadBackup} onSave={async(user,role,accountIds,status)=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await updateUserAccess(user.uid,role,accountIds,status);setSyncError("");setToast("ההרשאות עודכנו בהצלחה");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onRevoke={async user=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");try{await revokeUserAccess(user);setSyncError("");setToast("הגישה הוסרה והמשתמש נותק מנתוני הלקוחות");}catch(error){setSyncError(firebaseMessage(error));throw error;}}} onSetPassword={async(email,password)=>{if(!allowWrite())throw new Error("מצב התצוגה הוא לקריאה בלבד");const result=await adminSetUserPassword(email,password);setToast(result.created?"המשתמש נוצר. יש לאשר לו הרשאות ברשימה":"הסיסמה נשמרה. אפשר להתחבר עם מייל וסיסמה");}} onPreview={next=>enterPreview(next)}/>}
           {view==="contract"&&(customers.find(c=>c.id===clientId)?<Contract customer={customers.find(c=>c.id===clientId)!} machines={scopedMachines}/>:<EmptyCustomerState/>)}
@@ -917,6 +939,7 @@ function EmptyCustomerState(){return <section className="panel empty-customer-st
 
 function CustomerCard({initialTab,customer,store,sales,canManageCustomer,openTicket,openTask,onNewQuote,onOpenQuote,onOpenTicket,onCloseTicket,onEdit,onMachineStatus,onMachineCommercial,onEditMachine,onAddMachine,onTicketStatus,onOrderChange,onCreateOrder,onSaveExtraCosts,onTaskStatus,onSaveCustomer,customers,readOnly,actor,onToast,onEndPilot}:{initialTab?:string;onCreateOrder:(order:Order)=>void;onSaveExtraCosts:(month:string,costs:MonthlyExtraCost[])=>void;customers:Customer[];readOnly:boolean;actor:string;onToast:(message:string)=>void;onEndPilot:(customer:Customer)=>void;customer:Customer;store:Store;sales:SalesWorkspace;canManageCustomer:boolean;openTicket:(m?:string)=>void;openTask:()=>void;onNewQuote:(customer:Customer)=>void;onOpenQuote:(quote:Quote)=>void;onOpenTicket:(id:string)=>void;onCloseTicket:(id:string)=>void;onEdit:()=>void;onMachineStatus:(id:string,status:string)=>void;onMachineCommercial:(id:string,commercial:string)=>void;onEditMachine:(id:string)=>void;onAddMachine:()=>void;onTicketStatus:(id:string,status:string)=>void;onOrderChange:(id:string,data:Partial<Order>)=>void;onTaskStatus:(id:string,status:string)=>void;onSaveCustomer:(customer:Customer)=>Promise<void>}) {
   const [tab,setTab]=useState(initialTab||"סקירה");
+  const [moneyView,setMoneyView]=useState<"profit"|"cash">("profit");
   const [note,setNote]=useState(""),[noteSaving,setNoteSaving]=useState(false);
   const ms=store.machines.filter(m=>m.accountId===customer.id), ts=store.tickets.filter(t=>t.accountId===customer.id), os=store.orders.filter(o=>o.accountId===customer.id);
   const profitabilityRecords=store.profitability.filter(record=>record.accountId===customer.id);
@@ -948,7 +971,7 @@ function CustomerCard({initialTab,customer,store,sales,canManageCustomer,openTic
     {tab==="סקירה"&&<><div className="kpi-grid"><Kpi label="האספקה הבאה" value={formatDate(nextDelivery)} meta={`${contractMonthlyKg(customer,commercialAgreement)} ק״ג לפי ההסכם`}/><Kpi label="קריאות שירות פתוחות" value={ts.filter(t=>!closed(t.status)).length} meta={`${ms.filter(m=>m.status==="פעילה").length} מכונות פעילות מתוך ${ms.length}`} tone="blue"/>{monthProfit&&<Kpi label="רווח החודש" value={signedShekels(monthProfit.profit.actual)} meta={`צפוי ${signedShekels(monthProfit.profit.expected)} · פירוט בכספים`}/>}<Kpi label="סיום הסכם" value={contractEnd} meta="מעקב חידוש"/></div><div className="dashboard-grid"><section className="panel"><div className="panel-head"><h3>פרטי לקוח</h3><button className="row-action" onClick={onEdit}>עריכה</button></div><dl><div><dt>איש קשר</dt><dd>{value(customer.contactName)}</dd></div><div><dt>טלפון</dt><dd>{value(customer.phone)}</dd></div><div><dt>דוא״ל</dt><dd>{value(customer.email)}</dd></div><div><dt>כתובת</dt><dd>{[customer.address,customer.city].filter(Boolean).join(", ")||"טרם הוגדרה"}</dd></div><div><dt>תערובות בחוזה</dt><dd>{customer.contractBlends?.join(", ")||"טרם הוגדרו"}</dd></div><div><dt>יום אספקה</dt><dd>{customer.deliveryDayOfMonth||1} בחודש</dd></div></dl></section>{onboardingChecks.some(item=>!item.done)&&<section className="panel onboarding-panel"><div className="panel-head"><div><h3>קליטת לקוח</h3><p>{customer.onboardingStatus||"בהקמה"}</p></div><Badge>{onboardingChecks.filter(item=>item.done).length}/{onboardingChecks.length}</Badge></div>{onboardingChecks.map(item=><div className={item.done?"onboarding-check done":"onboarding-check"} key={item.label}><i>{item.done?"✓":"○"}</i><span>{item.label}</span></div>)}</section>}</div></>}
     {tab==="שירות וציוד"&&<><Machines machines={ms} isStaff openTicket={openTicket} onStatus={onMachineStatus} onCommercial={onMachineCommercial} onEdit={onEditMachine} onAdd={onAddMachine}/><div className="section-spacer"/><Tickets tickets={ts} machines={store.machines} isStaff staffUsers={[]} onAssign={()=>{}} onUpdate={onTicketStatus} onOpen={onOpenTicket} onClose={onCloseTicket} openTicket={openTicket}/></>}
     {tab==="הזמנות קפה"&&<OrdersBoard accountId={customer.id} shop={canManageCustomer?{actor,readOnly,onToast}:undefined} orders={osWithSales} activities={store.activities} agreementFor={()=>commercialAgreement} onOrderChange={onOrderChange} onCreateOrder={readOnly?undefined:onCreateOrder}/>}
-    {tab==="כספים"&&canManageCustomer&&<DealEconomics input={dealInput} readOnly={readOnly} onSaveExtraCosts={onSaveExtraCosts}/>}
+    {tab==="כספים"&&canManageCustomer&&<><div className="money-toggle-row"><MoneyToggle value={moneyView} onChange={setMoneyView}/></div>{moneyView==="profit"?<DealEconomics input={dealInput} readOnly={readOnly} onSaveExtraCosts={onSaveExtraCosts}/>:<CustomerCashflow input={dealInput}/>}</>}
     {tab==="הסכם"&&<>{canManageCustomer?<DealTermsPanel customer={customer} quote={approvedQuote} agreement={commercialAgreement} actor={actor} readOnly={readOnly} onToast={onToast} fallback={<CommercialAgreementCard key={`${commercialAgreement?.sourceQuoteId||""}-${commercialAgreement?.updatedAt||""}`} customer={customer} agreement={commercialAgreement} sourceQuote={approvedQuote} onSave={onSaveCustomer}/>}/>:<CommercialAgreementCard key={`${commercialAgreement?.sourceQuoteId||""}-${commercialAgreement?.updatedAt||""}`} customer={customer} agreement={commercialAgreement} sourceQuote={approvedQuote} onSave={onSaveCustomer}/>}<div className="section-spacer"/><div className="dashboard-grid"><div><Contract customer={customer} machines={ms}/></div><section className="panel customer-history-panel"><header><div><h3>הצעות מחיר</h3><p>ההצעה הפעילה היא זו שממנה נלקחים ההסכם, הרווחיות והחישובים בכרטיס.</p></div><button className="primary" onClick={()=>onNewQuote(customer)}>＋ הצעה חדשה</button></header>{quotes.length?<div className="customer-history-list">{quotes.map(quote=>{const isActive=approvedQuote?.id===quote.id;return <div className={`customer-quote-row${isActive?" active":""}`} key={quote.id}><button onClick={()=>onOpenQuote(quote)}><div><strong>{quote.versionName}</strong><small>{formatDate(quote.savedAt||quote.updatedAt)}</small></div><Badge>{quote.status}</Badge><span>{quote.knownKg||0} ק״ג</span><b>פתיחה ←</b></button>{isActive?<span className="active-quote-label">✓ ההצעה הפעילה{customer.activeQuoteId?"":" (אחרונה שאושרה)"}</span>:canManageCustomer&&<button className="row-action" disabled={Boolean(activating)} onClick={()=>void chooseActiveQuote(quote)}>{activating===quote.id?"מעדכן…":"עבודה מול הצעה זו"}</button>}</div>;})}</div>:<div className="inline-empty">אין עדיין הצעות משויכות.</div>}</section></div><div className="section-spacer"/><div className="card-grid">{customer.branches.map((branch,index)=><div className="info-card" key={`${branch}-${index}`}><span>סניף {index+1}</span><h3>{branch}</h3><p>{customer.address}, {customer.city}</p><small>{customer.contactName} · {customer.phone}</small></div>)}</div></>}
     {tab==="טעימות"&&canManageCustomer&&<TastingWorkspace customers={customers} customer={customer} readOnly={readOnly} actor={actor} onToast={onToast}/>}
     {tab==="משימות והערות"&&<><Tasks tasks={store.tasks.filter(task=>task.accountId===customer.id)} onCreate={openTask} onStatus={onTaskStatus}/><div className="section-spacer"/><div className="dashboard-grid"><section className="panel notes"><h3>הערות פנימיות</h3>{customer.notes?.length?<div className="note-list">{[...customer.notes].reverse().map(item=><article key={item.id}><div><p>{item.text}</p><small>{item.createdBy} · {formatDateTime(item.createdAt)}</small></div>{canManageCustomer&&<button aria-label="מחיקת הערה" onClick={()=>void deleteNote(item.id)}><Trash2 size={14}/></button>}</article>)}</div>:<div className="inline-empty">עדיין לא נוספו הערות.</div>}{canManageCustomer&&<><textarea value={note} onChange={event=>setNote(event.target.value)} placeholder="הוספת הערה פנימית…"/><button className="primary" disabled={!note.trim()||noteSaving} onClick={()=>void saveNote()}>{noteSaving?"שומר…":"שמירת הערה"}</button></>}</section><section className="panel activity-panel"><h3>פעילות אחרונה</h3>{store.activities.filter(item=>item.accountId===customer.id).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20).map(item=><div className="activity-row" key={item.id}><i/><div><strong>{item.summary}</strong><small>{item.actorName} · {formatDateTime(item.createdAt)}</small></div></div>)}</section></div></>}
@@ -987,6 +1010,9 @@ function dealInputFor(customer:Customer,orders:Order[],records:MonthlyProfitabil
       contractKgAt:month=>versionKg(termsAt(deal,month)!),
       blendCostAt:(month,blend)=>blendCostIn(deal,month,blend),
       money:month=>dealMonthMoney(deal,month),
+      clientPayDelayAt:month=>termsAt(deal,month)?.clientPayDelayMonths||0,
+      coffeePayDelayAt:month=>termsAt(deal,month)?.coffeeSupplierPayDelayMonths||0,
+      loanInAt:month=>loanInIn(deal,month),
     };
   }
   const firstOrder=[...orders].map(order=>order.month).sort()[0];

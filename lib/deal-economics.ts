@@ -45,7 +45,12 @@ export type DealInput = {
   agreementAt?: (month: string) => CommercialAgreement | undefined;
   contractKgAt?: (month: string) => number;
   blendCostAt?: (month: string, blend: string) => number;
-  money?: (month: string) => { equipment: number; financing: number; equipmentSale: number; operating: number };
+  /** loanFundedEquipment: paid to the supplier from a loan's money; in the cashflow only, as its cost is the loan's repayments. */
+  money?: (month: string) => { equipment: number; financing: number; equipmentSale: number; operating: number; loanFundedEquipment?: number };
+  /** Payment terms in force in a month, in months after it (0 = the same month), and loan money received in a month. */
+  clientPayDelayAt?: (month: string) => number;
+  coffeePayDelayAt?: (month: string) => number;
+  loanInAt?: (month: string) => number;
 };
 
 export const REVENUE_LINES = [
@@ -218,4 +223,73 @@ export function dealPeriod(input: DealInput) {
     target: input.plan?.totalContractProfit ?? null,
     endMonth: addMonths(input.startMonth, Math.max(1, input.contractMonths) - 1),
   };
+}
+
+export type CashflowMonth = {
+  month: string;
+  /** What the customer pays this month, by the payment terms of the month it is for. */
+  fromCustomer: number;
+  /** Loan money received this month. */
+  loanIn: number;
+  beans: number;
+  equipment: number;
+  financing: number;
+  operating: number;
+  extra: number;
+  totalIn: number;
+  totalOut: number;
+  net: number;
+  /** Running sum of net from the first month shown. */
+  cumulative: number;
+  /** Before the current month: what actually happened; from it on: expected. */
+  past: boolean;
+};
+
+/**
+ * When the money of a deal comes in and goes out, month by month. A month's
+ * revenue is paid by the customer as many months later as the terms of that
+ * month say; the coffee is paid to the supplier on the supplier's terms;
+ * equipment, loans and operating costs fall in the month they are paid.
+ * Past months count what was delivered, later months what is expected.
+ */
+export function dealCashflow(input: DealInput, fromMonth: string, toMonth: string): CashflowMonth[] {
+  const span = monthsBetween(fromMonth, toMonth) + 1;
+  if (span <= 0) return [];
+  // Revenue and coffee of earlier months can still be paid inside the range.
+  const lookBack = 12;
+  const basis = (month: string) => {
+    const data = dealMonth(input, month);
+    const actual = month < input.today;
+    const pick = (pair: Pair) => actual ? pair.actual : pair.expected;
+    return { data, pick };
+  };
+  const rows = Array.from({ length: span }, (_, index): CashflowMonth => ({
+    month: addMonths(fromMonth, index), fromCustomer: 0, loanIn: 0, beans: 0, equipment: 0, financing: 0, operating: 0, extra: 0,
+    totalIn: 0, totalOut: 0, net: 0, cumulative: 0, past: addMonths(fromMonth, index) < input.today,
+  }));
+  const at = (month: string) => rows[monthsBetween(fromMonth, month)];
+  for (let index = -lookBack; index < span; index += 1) {
+    const month = addMonths(fromMonth, index);
+    const { data, pick } = basis(month);
+    const customerPays = at(addMonths(month, Math.max(0, Math.round(input.clientPayDelayAt?.(month) || 0))));
+    if (customerPays) customerPays.fromCustomer += pick(data.totalRevenue);
+    const supplierPaid = at(addMonths(month, Math.max(0, Math.round(input.coffeePayDelayAt?.(month) || 0))));
+    if (supplierPaid) supplierPaid.beans += pick(data.costs.beans);
+    const row = at(month);
+    if (!row) continue;
+    row.equipment += pick(data.costs.equipment) + (input.money?.(month).loanFundedEquipment || 0);
+    row.financing += pick(data.costs.financing);
+    row.operating += pick(data.costs.operating);
+    row.extra += pick(data.costs.extra);
+    row.loanIn += input.loanInAt?.(month) || 0;
+  }
+  let cumulative = 0;
+  for (const row of rows) {
+    row.totalIn = row.fromCustomer + row.loanIn;
+    row.totalOut = row.beans + row.equipment + row.financing + row.operating + row.extra;
+    row.net = row.totalIn - row.totalOut;
+    cumulative += row.net;
+    row.cumulative = cumulative;
+  }
+  return rows;
 }
