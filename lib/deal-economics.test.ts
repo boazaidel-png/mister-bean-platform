@@ -126,3 +126,10 @@ test("cashflow: the customer pays on their terms, the coffee supplier on its ter
   assert.equal(november.past, true);
   assert.equal(december.past, false);
 });
+
+test("one-off income entered for a month counts as revenue of that month", () => {
+  const month = dealMonth(input({ extraIncome: (value) => value === "2026-10" ? [{ id: "i", label: "תיקון בתשלום", amount: 350, createdAt: "" }] : [] }), "2026-10");
+  assert.equal(month.revenue.other.expected, 350);
+  assert.equal(month.revenue.other.actual, 350);
+  assert.equal(dealMonth(input(), "2026-10").revenue.other.expected, 0);
+});
