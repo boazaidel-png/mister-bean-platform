@@ -73,3 +73,11 @@ test("future months have no actual values; the period adds them as forecast", ()
   assert.equal(period.endMonth, "2026-11");
   assert.equal(period.forecast, period.toDate + ahead.profit.expected);
 });
+
+test("an order of several blends costs each blend's cost by its kilograms", () => {
+  const month = dealMonth(input({
+    orders: [order("o", { month: "2026-10", approvedKg: 10, blendLines: [{ blend: "DX", kg: 6 }, { blend: "HB+", kg: 4 }] })],
+    blendCost: (blend) => blend === "DX" ? 50 : 100,
+  }), "2026-10");
+  assert.equal(month.costs.beans.expected, 6 * 50 + 4 * 100);
+});

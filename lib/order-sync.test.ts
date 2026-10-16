@@ -63,3 +63,11 @@ test("a top-up order in the month does not stand in for the contract order", () 
   assert.equal(next.find((o) => o.id === "extra-a-1"), extra);
   assert.equal(next.find((o) => o.kind !== "extra")?.defaultKg, 10);
 });
+
+test("next month's order keeps last month's split into blends while it adds up to the contract", () => {
+  const lines = [{ blend: "DX", kg: 6 }, { blend: "HB+", kg: 4 }];
+  const [made] = syncContractOrders([order("a", "2026-09", { blendLines: lines })], [customer("a")], "2026-10");
+  assert.deepEqual(made.blendLines, lines);
+  const [other] = syncContractOrders([order("a", "2026-09", { blendLines: [{ blend: "DX", kg: 3 }] })], [customer("a")], "2026-10");
+  assert.equal(other.blendLines, undefined);
+});

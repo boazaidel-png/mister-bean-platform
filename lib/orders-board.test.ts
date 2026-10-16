@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildBoardRows, defaultPricePerKg, monthHistory, monthSummary, nextAction, orderStage, orderValue, sortRows } from "./orders-board.ts";
+import { blendLinesChange, blendLinesOf, buildBoardRows, defaultPricePerKg, monthHistory, monthSummary, nextAction, orderStage, orderValue, sortRows } from "./orders-board.ts";
 import type { CommercialAgreement, Order } from "./platform-types.ts";
 
 const order = (id: string, extra: Partial<Order> = {}): Order => ({
@@ -70,4 +70,13 @@ test("the history covers twelve months ending with the chosen one", () => {
   assert.equal(history[0].month, "2025-11");
   assert.equal(history[0].kg, 7);
   assert.equal(history[11].kg, 10);
+});
+
+test("an order can be split into several blends; their sum is the approved quantity", () => {
+  assert.deepEqual(blendLinesOf(order("o", { approvedKg: 85, blend: "DX+" })), [{ blend: "DX+", kg: 85 }]);
+  const split = blendLinesChange([{ blend: " DX+ ", kg: 50 }, { blend: "HB+", kg: 35 }, { blend: "", kg: 5 }]);
+  assert.deepEqual(split, { blend: "DX+ · HB+", blendLines: [{ blend: "DX+", kg: 50 }, { blend: "HB+", kg: 35 }], approvedKg: 85 });
+  assert.deepEqual(blendLinesOf(order("o", split)), split.blendLines);
+  // Back to one blend: saved as a plain blend.
+  assert.deepEqual(blendLinesChange([{ blend: "Amber", kg: 85 }]), { blend: "Amber", blendLines: [], approvedKg: 85 });
 });

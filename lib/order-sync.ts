@@ -56,10 +56,13 @@ export function syncContractOrders(
     if (!existing) {
       const previous = latestOrder(next, customer.id);
       const blend = previous?.blend && previous.blend !== UNSET_BLEND ? previous.blend : customer.contractBlends?.[0] || UNSET_BLEND;
+      // Last month's split into blends carries over while it still adds up to the contract quantity.
+      const lines = previous?.blendLines?.length && previous.blendLines.reduce((sum, line) => sum + line.kg, 0) === kg ? previous.blendLines : undefined;
       next = [{
         id: `order-${customer.id}-${month}`, accountId: customer.id, month,
         defaultKg: kg, requestedKg: kg, approvedKg: kg,
         status: NEW_ORDER_STATUS, blend, note: "", createdAt: now, updatedAt: now,
+        ...(lines ? { blendLines: lines } : {}),
       }, ...next];
       continue;
     }
@@ -70,7 +73,8 @@ export function syncContractOrders(
           ...order,
           defaultKg: kg,
           requestedKg: order.requestedKg === previousDefault ? kg : order.requestedKg,
-          approvedKg: !order.approvedKg || order.approvedKg === previousDefault ? kg : order.approvedKg,
+          // An order split into blends keeps the quantities it was split into.
+          approvedKg: order.blendLines?.length ? order.approvedKg : !order.approvedKg || order.approvedKg === previousDefault ? kg : order.approvedKg,
           updatedAt: now,
         }
       : order);

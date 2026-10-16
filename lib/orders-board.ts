@@ -1,4 +1,4 @@
-import type { CommercialAgreement, Order, OrderKind } from "./platform-types";
+import type { CommercialAgreement, Order, OrderBlendLine, OrderKind } from "./platform-types";
 
 /**
  * The coffee orders board: every coffee sale of a month in one list, placed
@@ -55,6 +55,24 @@ export function orderStage(order: Pick<Order, "status" | "paid">): OrderStage {
   if (order.status === "אושר") return "approved";
   if (order.status === "ממתין לאישור") return "approval";
   return "customer";
+}
+
+/** The blends of an order and kilograms of each; an order of one blend is one line. */
+export function blendLinesOf(order: Pick<Order, "blend" | "blendLines" | "approvedKg" | "requestedKg">): OrderBlendLine[] {
+  if (order.blendLines?.length) return order.blendLines;
+  return [{ blend: order.blend, kg: Math.max(0, Math.round(order.approvedKg || order.requestedKg || 0)) }];
+}
+
+/**
+ * The change to save for edited blend lines: the lines, the total as the
+ * approved quantity and the names as the order's blend. Lines without a blend
+ * or kilograms are left out; a single line is saved as a plain blend.
+ */
+export function blendLinesChange(lines: OrderBlendLine[]): Partial<Order> {
+  const clean = lines.map((line) => ({ blend: line.blend.trim(), kg: Math.max(0, Math.round(line.kg)) })).filter((line) => line.blend && line.kg > 0);
+  const approvedKg = clean.reduce((sum, line) => sum + line.kg, 0);
+  if (clean.length <= 1) return { blend: clean[0]?.blend || "", blendLines: [], approvedKg };
+  return { blend: clean.map((line) => line.blend).join(" · ").slice(0, 160), blendLines: clean, approvedKg };
 }
 
 const orderKg = (order: Order) => Math.max(0, Math.round(order.approvedKg || order.requestedKg || 0));

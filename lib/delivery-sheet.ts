@@ -40,11 +40,14 @@ export function deliveryPrep(orders: Order[]): PrepRow[] {
       }
       continue;
     }
-    const kg = orderKg(order);
-    if (!kg) continue;
-    const current = row(order.blend);
-    current.companyKg += kg;
-    current.totalKg += kg;
+    // An order of several blends counts each blend on its own row.
+    const lines = order.blendLines?.length ? order.blendLines : [{ blend: order.blend, kg: orderKg(order) }];
+    for (const line of lines) {
+      if (!line.kg) continue;
+      const current = row(line.blend);
+      current.companyKg += line.kg;
+      current.totalKg += line.kg;
+    }
   }
   return [...rows.values()].sort((left, right) => right.totalKg - left.totalKg || left.coffee.localeCompare(right.coffee, "he"));
 }

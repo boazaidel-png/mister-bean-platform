@@ -303,6 +303,12 @@ export type Order = {
    * it is never written to the database, and it cannot be edited as an order.
    */
   legacySale?: { recordId: string; lineId: string };
+  /**
+   * When the order is made of several blends: kilograms per blend. Their sum
+   * is the approved quantity and `blend` lists the names. Absent or empty:
+   * the whole quantity is of `blend`.
+   */
+  blendLines?: OrderBlendLine[];
   /** For employee sales: the sale the order is built from. */
   shopCampaignId?: string;
   /** For employee sales: bags to prepare per coffee and grind, from paid orders only. */
@@ -314,6 +320,8 @@ export type Order = {
 };
 
 export type DeliveryPreference = "asap" | "tomorrow" | "date";
+
+export type OrderBlendLine = { blend: string; kg: number };
 
 export type EmployeeOrderLine = { coffee: string; grind: string; bags: number };
 
