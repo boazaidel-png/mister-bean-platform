@@ -1273,7 +1273,7 @@ function OrderDrawer({row,activities,plannedDate,onClose,onOrderChange,onPrint,o
       {contract&&<label><span>לפי החוזה</span><div className="readonly">{Math.round(order.defaultKg)} ק״ג</div></label>}
       {(contract||isExtraOrder(order))&&<label><span>הלקוח ביקש</span><div className="readonly">{Math.round(order.requestedKg)} ק״ג</div></label>}
     </div>
-    <OrderBlendLines key={`${order.id}-${order.updatedAt||""}`} order={order} contractKg={contract?Math.round(order.defaultKg):undefined} onChange={onOrderChange}/>{order.note&&<p className="ob-note"><b>הערה:</b> {order.note}</p>}</section>
+    <OrderBlendLines key={order.id} order={order} contractKg={contract?Math.round(order.defaultKg):undefined} onChange={onOrderChange}/>{order.note&&<p className="ob-note"><b>הערה:</b> {order.note}</p>}</section>
     </>}
     {!contract&&!employeeSale&&<section><h4>מחיר</h4><div className="ob-fields">{money("pricePerKg","מחיר ללקוח לק״ג")}{money("costPerKg","עלות לנו לק״ג")}<label><span>סה״כ</span><div className="readonly">{row.value?shekels(row.value):"—"}</div></label></div></section>}
     <section><h4>אספקה</h4><div className="ob-fields">
@@ -1335,6 +1335,8 @@ function DeliveryPrepPanel({orders,onPrint}:{orders:Order[];onPrint:()=>void}) {
  * The blends of an order and kilograms of each, for an order made of several
  * blends (85 kg as 50 of one and 35 of another). Saved when a field is left,
  * once every line has a blend and a quantity; the total is the approved quantity.
+ * The lines on screen stay as typed while the drawer is open: refreshing them
+ * from each save dropped a line added right after editing another one.
  */
 function OrderBlendLines({order,contractKg,onChange}:{order:Order;contractKg?:number;onChange:(id:string,data:Partial<Order>)=>void}) {
   const unset=(blend:string)=>blend==="טרם הוגדרה תערובת"?"":blend;
