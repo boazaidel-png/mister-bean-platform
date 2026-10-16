@@ -62,21 +62,31 @@ export function dealFromQuote(quote: Quote, figures: QuoteFigures, startMonth: s
         receivedMonth: startMonth, firstPaymentMonth: startMonth, createdAt: now,
       }
     : null;
-  // Supplier installments when the supplier finances the equipment, or the part a loan does not cover.
-  const supplierSpread = figures.financing.type === "supplier" || (figures.financing.type === "loan" && quote.combineFinancingAndSupplier === true);
-  const purchase: EquipmentPurchase | null = figures.equipmentTotal > 0
-    ? {
-        id: `equipment-${startMonth}`, month: startMonth, description: "ציוד לפי ההצעה", cost: positive(figures.equipmentTotal),
-        saleIncome: positive(figures.saleIncome), clientInstallments: 1,
-        supplierPayDelayMonths: whole(quote.importerPayTerm), supplierInstallments: supplierSpread ? whole(quote.supplierMonths, 1) : 1,
-        ...(loan ? { loanId: loan.id } : {}), createdAt: now,
-      }
-    : null;
+  // How the supplier is paid, as the quote plans it: supplier financing spreads
+  // the whole cost; a loan pays the supplier at once for the part it covers,
+  // and the rest is paid at once or, when combined with supplier credit, in installments.
+  const total = positive(figures.equipmentTotal);
+  const loaned = loan ? Math.min(total, loan.amount) : 0;
+  const delay = whole(quote.importerPayTerm);
+  const spread = whole(quote.supplierMonths, 1);
+  const item = (id: string, description: string, cost: number, installments: number, sale: number, withLoan: boolean): EquipmentPurchase => ({
+    id, month: startMonth, description, cost, saleIncome: sale, clientInstallments: 1,
+    supplierPayDelayMonths: delay, supplierInstallments: installments, ...(withLoan && loan ? { loanId: loan.id } : {}), createdAt: now,
+  });
+  const purchases: EquipmentPurchase[] = [];
+  if (total > 0) {
+    const sale = positive(figures.saleIncome);
+    if (figures.financing.type === "supplier") purchases.push(item(`equipment-${startMonth}`, "ציוד לפי ההצעה", total, spread, sale, false));
+    else if (loaned > 0) {
+      purchases.push(item(`equipment-${startMonth}`, loaned < total ? "ציוד לפי ההצעה, החלק במימון" : "ציוד לפי ההצעה", loaned, 1, loaned < total ? 0 : sale, true));
+      if (loaned < total) purchases.push(item(`equipment-${startMonth}-rest`, "ציוד לפי ההצעה, היתרה לספק", total - loaned, quote.combineFinancingAndSupplier ? spread : 1, sale, false));
+    } else purchases.push(item(`equipment-${startMonth}`, "ציוד לפי ההצעה", total, 1, sale, false));
+  }
   return {
     startMonth,
     contractMonths: whole(quote.clientCostMonths, 1) || 36,
     versions: [version],
-    purchases: purchase ? [purchase] : [],
+    purchases,
     loans: loan ? [loan] : [],
     updatedAt: now,
   };
