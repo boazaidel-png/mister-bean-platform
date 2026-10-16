@@ -96,6 +96,8 @@ export type Customer = {
    * come from it. Without a choice, the latest approved quote is used.
    */
   activeQuoteId?: string;
+  /** A test account: managed like any customer but left out of the business's money (cashflow and profit). */
+  testAccount?: boolean;
   /** A trial customer: managed like any customer (orders, service, profitability) but clearly marked. */
   pilot?: boolean;
   pilotStartedAt?: string;
