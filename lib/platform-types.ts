@@ -101,6 +101,8 @@ export type Customer = {
   /** A trial customer: managed like any customer (orders, service, profitability) but clearly marked. */
   pilot?: boolean;
   pilotStartedAt?: string;
+  /** When the pilot ended; months before it keep the pilot's costs. */
+  pilotEndedAt?: string;
 };
 
 export type CommercialAgreementModel =

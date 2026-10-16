@@ -47,6 +47,8 @@ export type DealInput = {
   blendCostAt?: (month: string, blend: string) => number;
   /** loanFundedEquipment: paid to the supplier from a loan's money; in the cashflow only, as its cost is the loan's repayments. */
   money?: (month: string) => { equipment: number; financing: number; equipmentSale: number; operating: number; loanFundedEquipment?: number };
+  /** A customer in a pilot: equipment by the deal is not counted (usually used equipment, nothing owed to the importer). */
+  pilot?: boolean;
   /** Payment terms in force in a month, in months after it (0 = the same month), and loan money received in a month. */
   clientPayDelayAt?: (month: string) => number;
   coffeePayDelayAt?: (month: string) => number;

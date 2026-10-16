@@ -108,7 +108,7 @@ export function DealTermsPanel({ customer, quote, agreement, actor, readOnly, on
 
     <div className="dashboard-grid">
       <section className="panel">
-        <div className="panel-head"><div><h3>ציוד</h3><p>כל רכישה עם תנאי התשלום שלה לספק</p></div></div>
+        <div className="panel-head"><div><h3>ציוד</h3><p>{customer.pilot ? "לקוח בפיילוט: הציוד לא נספר ברווחיות ובתזרים. עלויות בפועל נרשמות בלשונית כספים." : "כל רכישה עם תנאי התשלום שלה לספק"}</p></div></div>
         {deal.purchases.length ? <div className="deal-list">{deal.purchases.map((item) => <button key={item.id} onClick={() => { if (guard()) setDialog({ purchase: item }); }}>
           <strong>{item.description}</strong><span>{monthLabel(item.month)} · עלות {shekels(item.cost)}</span>
           <small>לספק: {item.supplierPayDelayMonths ? `תשלום ראשון אחרי ${item.supplierPayDelayMonths} חודשים` : "תשלום ראשון באותו חודש"} · {installmentsLabel(item.supplierInstallments)}{item.saleIncome ? ` · הלקוח משלם ${shekels(item.saleIncome)} ב${installmentsLabel(item.clientInstallments)}` : ""}</small>
