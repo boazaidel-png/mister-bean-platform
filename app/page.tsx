@@ -106,7 +106,7 @@ import { buildNotifications, type AppNotification } from "@/lib/notifications";
 import { NotificationBell } from "@/components/notification-bell";
 import { addMonths, COST_LINES, dealMonth, dealPeriod, monthsBetween, REVENUE_LINES, type DealInput, type Pair, type QuotePlan } from "@/lib/deal-economics";
 import { withLegacySales } from "@/lib/legacy-sales";
-import { buildBoardRows, defaultPricePerKg, monthHistory, monthSummary, nextAction, ORDER_STAGES, ROW_KIND_LABELS, shiftMonth, sortRows, stageLabel, type BoardRow, type OrderStage } from "@/lib/orders-board";
+import { blendLinesChange, blendLinesOf, buildBoardRows, defaultPricePerKg, monthHistory, monthSummary, nextAction, ORDER_STAGES, ROW_KIND_LABELS, shiftMonth, sortRows, stageLabel, type BoardRow, type OrderStage } from "@/lib/orders-board";
 import { EMERGENCY_PHONE, EMERGENCY_PHONE_LINK, IMPACT_OPTIONS, isSafetyHazard, missingIntake, needsSafetyReview, RECURRENCE_OPTIONS, SAFETY_NONE, SAFETY_OPTIONS, SAFETY_UNSURE, SCREEN_OPTIONS, SCREEN_YES, STARTED_OPTIONS, TICKET_FAULT_TYPES, urgencyForIntake } from "@/lib/ticket-intake";
 import { disablePush, enablePush, pushState, refreshPush, type PushState } from "@/lib/push";
 import { calculateQuote } from "@/lib/quote-engine";
@@ -1185,6 +1185,8 @@ function OrdersBoard({orders,activities,agreementFor,onOrderChange,onCreateOrder
   };
   /** The delivery of one customer in the shown month: the company's coffee and the employee bags together. */
   const deliveryOrders=(id:string)=>orders.filter(order=>order.accountId===id&&order.month===month);
+  // What still has to be prepared and sent: this month's orders that were not delivered or cancelled, whatever month is shown.
+  const toPrepare=accountId?orders.filter(order=>order.accountId===accountId&&order.month===currentMonth()&&order.status!=="סופק"&&order.status!=="בוטל"):[];
   const printDelivery=(id:string)=>{const customer=customers.find(item=>item.id===id);openDeliverySheet({customerName:customerName(id),monthTitle:monthTitle(month),deliveryDate:customer?formatDate(nextDeliveryDate(customer,{month} as Order)):"",orders:deliveryOrders(id)});};
   const exportCsv=()=>{const csv="חודש,לקוח,סוג,תערובת,ק״ג,שלב,ערך,אספקה\n"+monthRows.map(row=>[row.month,customerName(row.accountId),ROW_KIND_LABELS[row.kind],row.blend,row.kg,stageLabel(row.stage),Math.round(row.value),row.deliveredAt||""].map(value=>`"${String(value).replace(/"/g,'""')}"`).join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+csv],{type:"text/csv"}));a.download=`coffee-orders-${month}.csv`;a.click();};
   return <div className="orders-board">
@@ -1199,7 +1201,7 @@ function OrdersBoard({orders,activities,agreementFor,onOrderChange,onCreateOrder
       <article><small>שווי ההזמנות</small><strong>{summary.value?shekels(summary.value):"—"}</strong><span>לפי ההסכם, ללא מע״מ</span></article>
       <article className={summary.unpaidCount?"alert":""}><small>סופק ולא שולם</small><strong>{summary.unpaidCount?shekels(summary.unpaidValue):"הכול שולם"}</strong><span>{summary.unpaidCount?`${summary.unpaidCount} הזמנות`:"אין חוב פתוח"}</span></article>
     </div>
-    {scoped&&accountId&&<DeliveryPrepPanel orders={deliveryOrders(accountId)} onPrint={()=>printDelivery(accountId)}/>}
+    {scoped&&accountId&&<DeliveryPrepPanel orders={toPrepare} onPrint={()=>{const customer=customers.find(item=>item.id===accountId);openDeliverySheet({customerName:customerName(accountId),monthTitle:monthTitle(currentMonth()),deliveryDate:customer?formatDate(nextDeliveryDate(customer,{month:currentMonth()} as Order)):"",orders:toPrepare});}}/>}
     <div className="ob-pipeline" role="tablist" aria-label="שלבי ההזמנה">
       {ORDER_STAGES.map(item=><button role="tab" key={item.key} aria-selected={stage===item.key} className={`${stage===item.key?"active":""} ${item.key==="approval"&&summary.byStage.approval?"attention":""}`} onClick={()=>setStage(stage===item.key?"":item.key)}><b>{summary.byStage[item.key]}</b><span>{item.label}</span></button>)}
     </div>
@@ -1245,9 +1247,8 @@ function OrderDrawer({row,activities,plannedDate,onClose,onOrderChange,onPrint,o
     <section><h4>כמות ותערובת</h4><div className="ob-fields">
       {contract&&<label><span>לפי החוזה</span><div className="readonly">{Math.round(order.defaultKg)} ק״ג</div></label>}
       {(contract||isExtraOrder(order))&&<label><span>הלקוח ביקש</span><div className="readonly">{Math.round(order.requestedKg)} ק״ג</div></label>}
-      <label><span>כמות {contract||isExtraOrder(order)?"מאושרת":""}</span><OrderKgInput order={order} onChange={onOrderChange}/></label>
-      <label><span>תערובת</span><OrderBlendInput order={order} onChange={onOrderChange}/></label>
-    </div>{order.note&&<p className="ob-note"><b>הערה:</b> {order.note}</p>}</section>
+    </div>
+    <OrderBlendLines key={`${order.id}-${order.updatedAt||""}`} order={order} contractKg={contract?Math.round(order.defaultKg):undefined} onChange={onOrderChange}/>{order.note&&<p className="ob-note"><b>הערה:</b> {order.note}</p>}</section>
     </>}
     {!contract&&!employeeSale&&<section><h4>מחיר</h4><div className="ob-fields">{money("pricePerKg","מחיר ללקוח לק״ג")}{money("costPerKg","עלות לנו לק״ג")}<label><span>סה״כ</span><div className="readonly">{row.value?shekels(row.value):"—"}</div></label></div></section>}
     <section><h4>אספקה</h4><div className="ob-fields">
@@ -1293,37 +1294,46 @@ function EmployeeSaleDetails({order,value,onPrint,onManage}:{order:Order;value:n
 function DeliveryPrepPanel({orders,onPrint}:{orders:Order[];onPrint:()=>void}) {
   const rows=deliveryPrep(orders);
   const people=deliveryRecipients(orders).length;
-  if(!rows.length)return null;
+  if(!rows.length)return <section className="panel ob-prep"><div className="panel-head"><div><h3>הכנה למשלוח · {monthTitle(currentMonth())}</h3><p>אין החודש הזמנות שממתינות להכנה.</p></div></div></section>;
   const total=rows.reduce((sum,row)=>sum+row.totalKg,0);
   const bags=rows.reduce((sum,row)=>sum+row.employeeBags,0);
   return <section className="panel ob-prep">
-    <div className="panel-head"><div><h3>הכנה למשלוח</h3><p>{total} ק״ג בסך הכול{bags?` · מתוכם ${bags} שקיות של ${people} עובדים`:""}</p></div><button onClick={onPrint}>רשימת משלוח להדפסה ולשליחה</button></div>
+    <div className="panel-head"><div><h3>הכנה למשלוח · {monthTitle(currentMonth())}</h3><p>{total} ק״ג בסך הכול{bags?` · מתוכם ${bags} שקיות של ${people} עובדים`:""}</p></div><button onClick={onPrint}>רשימת משלוח להדפסה ולשליחה</button></div>
     <div className="table-wrap"><table><thead><tr><th>קפה</th><th>לחברה</th><th>לעובדים</th><th>סה״כ</th></tr></thead><tbody>
       {rows.map(row=><tr key={row.coffee}><td><strong><bdi>{row.coffee}</bdi></strong></td><td>{row.companyKg?`${row.companyKg} ק״ג`:"—"}</td><td>{row.grinds.length?row.grinds.map(item=><span className="ob-grind" key={item.grind}>{item.grind} × {item.bags}</span>):"—"}</td><td><strong>{row.totalKg} ק״ג</strong></td></tr>)}
     </tbody></table></div>
   </section>;
 }
 
+
 /**
- * Approved quantity of an order. Typing stays in the field and is saved when
- * the field is left or Enter is pressed: saving on every key wrote each digit
- * to the database, showed a message per key, and an emptied field jumped back
- * to the requested quantity, so a new number could not be typed.
+ * The blends of an order and kilograms of each, for an order made of several
+ * blends (85 kg as 50 of one and 35 of another). Saved when a field is left,
+ * once every line has a blend and a quantity; the total is the approved quantity.
  */
-function OrderKgInput({order,small=false,onChange}:{order:Order;small?:boolean;onChange:(id:string,data:Partial<Order>)=>void}) {
-  const saved=Math.round(order.approvedKg||order.requestedKg);
-  const [text,setText]=useState(String(saved));
-  const [shown,setShown]=useState(saved);
-  if(shown!==saved){setShown(saved);setText(String(saved));}
-  const commit=()=>{const kg=Math.round(Number(text));if(text.trim()===""||!Number.isFinite(kg)||kg<0){setText(String(saved));return;}if(kg!==saved)onChange(order.id,{approvedKg:kg});};
-  return <input className={`kg-input${small?" small":""}`} type="number" inputMode="numeric" min="0" step="1" aria-label="כמות מאושרת בק״ג" value={text} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==="Enter")event.currentTarget.blur();if(event.key==="Escape"){setText(String(saved));}}}/>;
+function OrderBlendLines({order,contractKg,onChange}:{order:Order;contractKg?:number;onChange:(id:string,data:Partial<Order>)=>void}) {
+  const unset=(blend:string)=>blend==="טרם הוגדרה תערובת"?"":blend;
+  const [lines,setLines]=useState(()=>blendLinesOf(order).map(line=>({blend:unset(line.blend),kg:String(line.kg)})));
+  const total=lines.reduce((sum,line)=>sum+(Math.round(Number(line.kg))||0),0);
+  const save=(next=lines)=>{
+    if(next.some(line=>!line.blend.trim()||!(Number(line.kg)>0)))return;
+    const change=blendLinesChange(next.map(line=>({blend:line.blend,kg:Number(line.kg)})));
+    const before=blendLinesChange(blendLinesOf(order));
+    if(JSON.stringify(change)!==JSON.stringify(before))onChange(order.id,change);
+  };
+  const patch=(index:number,key:"blend"|"kg",value:string)=>setLines(current=>current.map((line,i)=>i===index?{...line,[key]:value}:line));
+  const remove=(index:number)=>{const next=lines.filter((_,i)=>i!==index);setLines(next);save(next);};
+  const enter=(event:React.KeyboardEvent<HTMLInputElement>)=>{if(event.key==="Enter")event.currentTarget.blur();};
+  return <div className="ob-blend-lines">
+    {lines.map((line,index)=><div className="ob-blend-line" key={index}>
+      <input className="order-blend-input" list={`order-blends-${order.accountId}`} value={line.blend} placeholder="תערובת" aria-label={`תערובת ${index+1}`} onChange={event=>patch(index,"blend",event.target.value)} onBlur={()=>save()} onKeyDown={enter}/>
+      <label><input className="kg-input small" type="number" inputMode="numeric" min="0" step="1" value={line.kg} aria-label={`ק״ג של תערובת ${index+1}`} onChange={event=>patch(index,"kg",event.target.value)} onBlur={()=>save()} onKeyDown={enter}/>ק״ג</label>
+      {lines.length>1&&<button className="row-action" aria-label="הסרת התערובת" onClick={()=>remove(index)}>✕</button>}
+    </div>)}
+    <div className="ob-blend-total"><button className="text-btn" onClick={()=>setLines(current=>[...current,{blend:"",kg:""}])}>＋ תערובת נוספת</button><span>סה״כ <b>{total} ק״ג</b>{contractKg!==undefined&&total!==contractKg&&<small className={total<contractKg?"below":""}> · בחוזה {contractKg}</small>}</span></div>
+  </div>;
 }
 
-/** Blend of a monthly order. Saved when the field is left, so typing does not write on every key. */
-function OrderBlendInput({order,onChange}:{order:Order;onChange:(id:string,data:Partial<Order>)=>void}) {
-  const commit=(value:string)=>{const blend=value.trim();if(blend&&blend!==order.blend)onChange(order.id,{blend});};
-  return <input key={order.blend} className="order-blend-input" list={`order-blends-${order.accountId}`} defaultValue={order.blend==="טרם הוגדרה תערובת"?"":order.blend} placeholder="בחירת תערובת" aria-label="תערובת" onBlur={event=>commit(event.target.value)} onKeyDown={event=>{if(event.key==="Enter")event.currentTarget.blur();}}/>;
-}
 
 function OrderFulfillmentControls({order,onChange}:{order:Order;onChange:(id:string,data:Partial<Order>)=>void}) {
   return <div className="order-fulfillment" aria-label="מעקב תשלום ומסמכים">

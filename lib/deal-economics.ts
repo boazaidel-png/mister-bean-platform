@@ -108,7 +108,15 @@ export function dealMonth(input: DealInput, month: string): DealMonth {
 
   const live = input.orders.filter((order) => order.month === month && order.status !== "בוטל");
   const contractOrder = live.find((order) => (order.kind ?? "contract") === "contract");
-  const beanCost = (order: Order) => order.costPerKg ?? (input.blendCost(order.blend) || agreement?.beanCostPerKg || 0);
+  const costOf = (blend: string) => input.blendCost(blend) || agreement?.beanCostPerKg || 0;
+  // An order of several blends costs the average of its blends, weighted by kilograms.
+  const beanCost = (order: Order) => {
+    if (order.costPerKg !== undefined) return order.costPerKg;
+    const lines = (order.blendLines || []).filter((line) => line.kg > 0);
+    if (!lines.length) return costOf(order.blend);
+    const kg = lines.reduce((sum, line) => sum + line.kg, 0);
+    return lines.reduce((sum, line) => sum + line.kg * costOf(line.blend), 0) / kg;
+  };
   const extraPrice = agreement
     ? (agreement.model === "monthly_package" ? agreement.extraKgPrice : agreement.beanPricePerKg || agreement.extraKgPrice) || 0
     : 0;

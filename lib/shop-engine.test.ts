@@ -291,3 +291,8 @@ test("a saved sale keeps only name and price, so the order page takes each coffe
   // The sale's own price stays.
   assert.equal(items[0].price, saved[0].price);
 });
+
+test("the delivery list counts each blend of an order of several blends", () => {
+  const base = { accountId: "a", month: "2026-10", defaultKg: 85, requestedKg: 85, approvedKg: 85, note: "", status: "אושר", blend: "DX+ · HB+" };
+  assert.deepEqual(deliveryPrep([{ ...base, id: "c", blendLines: [{ blend: "DX+", kg: 50 }, { blend: "HB+", kg: 35 }] }]).map((row) => [row.coffee, row.companyKg]), [["DX+", 50], ["HB+", 35]]);
+});
